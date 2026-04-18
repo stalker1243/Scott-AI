@@ -1,0 +1,23 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+numpy>=1.26.0
+soundfile>=0.12.0
+pydantic>=2.0.0
+
+sounddevice>=0.4.6
+
+# ASR (распознавание речи)
+openai-whisper>=20231117
+
+# LLM (обработка вопросов) - опционально
+openai>=1.0.0  # Для OpenAI API (если есть ключ)
+requests>=2.31.0  # Для Ollama и других HTTP API
+python-dotenv>=1.0.0  # Для загрузки .env файлов (опционально)
+
+# TTS (синтез речи) - голосовые ответы
+edge-tts>=6.1.0  # Microsoft Edge TTS - работает с Python 3.13, бесплатно, качественный голос
+
+# Утилиты (иконки/изображения для лаунчера)
+Pillow>=10.0.0
+
+
