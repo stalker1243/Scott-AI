@@ -62,3 +62,21 @@ except ImportError as e:
     custom_commands_manager = None
     ifttt_manager = None
     analytics_manager = None
+
+
+# ==================== Голос Scott ====================
+# В отличие от менеджеров выше, голос здесь не создаётся: его поднимает
+# ScottAI.__init__ вместе с остальными компонентами ассистента, и порядок там
+# важен. Модулю достаточно получить готовую ссылку — так роутеры добираются до
+# синтеза, не импортируя main.py (что замкнуло бы импорты в кольцо).
+#
+# Обращаться к нему нужно ЧЕРЕЗ МОДУЛЬ (runtime.scott_voice), а не через
+# `from runtime import scott_voice`: до вызова сеттера здесь лежит None, и
+# импортировавший скопировал бы себе именно None, навсегда.
+scott_voice = None
+
+
+def set_scott_voice(voice) -> None:
+    """Отдать модулю ссылку на созданный движок синтеза речи."""
+    global scott_voice
+    scott_voice = voice
