@@ -92,46 +92,23 @@ except ImportError:
     from voice_name_trigger import get_voice_trigger, check_voice_trigger
     import web_integrations as web_integrations
 
-# Расширенные команды (v3.1)
+# Расширенные команды (v3.1) и компоненты v3.2 создаются в runtime.py и берутся
+# оттуда — тем же модулем пользуются роутеры. Держать создание здесь нельзя:
+# фабрики вроде get_ifttt_manager() возвращают каждый раз новый экземпляр, и у
+# роутера оказался бы менеджер с собственным состоянием в памяти.
 try:
-    try:
-        from .command_executor_extended import get_extended_executor
-    except ImportError:
-        from command_executor_extended import get_extended_executor
-    HAS_EXTENDED_EXECUTOR = True
-    extended_executor = get_extended_executor()
+    from . import runtime as scott_runtime
 except ImportError:
-    HAS_EXTENDED_EXECUTOR = False
-    extended_executor = None
-    print("⚠️ Расширенный исполнитель не доступен")
+    import runtime as scott_runtime
 
-# Новые компоненты (v3.2)
-try:
-    try:
-        from .context_manager import get_context_manager
-        from .custom_commands import get_custom_command_manager
-        from .ifttt_rules import get_ifttt_manager
-        from .analytics_manager import get_analytics_manager
-    except ImportError:
-        from context_manager import get_context_manager
-        from custom_commands import get_custom_command_manager
-        from ifttt_rules import get_ifttt_manager
-        from analytics_manager import get_analytics_manager
-    
-    context_manager = get_context_manager()
-    custom_commands_manager = get_custom_command_manager()
-    ifttt_manager = get_ifttt_manager()
-    analytics_manager = get_analytics_manager(extended_executor)
-    
-    HAS_V32_FEATURES = True
-    print("✅ Компоненты v3.2 загружены")
-except ImportError as e:
-    HAS_V32_FEATURES = False
-    print(f"⚠️ Компоненты v3.2 не доступны: {e}")
-    context_manager = None
-    custom_commands_manager = None
-    ifttt_manager = None
-    analytics_manager = None
+HAS_EXTENDED_EXECUTOR = scott_runtime.HAS_EXTENDED_EXECUTOR
+extended_executor = scott_runtime.extended_executor
+
+HAS_V32_FEATURES = scott_runtime.HAS_V32_FEATURES
+context_manager = scott_runtime.context_manager
+custom_commands_manager = scott_runtime.custom_commands_manager
+ifttt_manager = scott_runtime.ifttt_manager
+analytics_manager = scott_runtime.analytics_manager
 
 # Расширенные компоненты (v3.3)
 try:
