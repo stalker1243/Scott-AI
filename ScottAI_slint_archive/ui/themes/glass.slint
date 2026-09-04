@@ -1,0 +1,17 @@
+// Glass — прозрачный/полупрозрачный стиль. Реальный блюр рабочего стола применяется
+// нативно на Rust-стороне (window_vibrancy::apply_acrylic), эти цвета — тонирующий слой
+// поверх блюра, чтобы текст оставался читаемым. Базовые цвета здесь непрозрачны —
+// фактическую альфу (регулируемую пользователем через Theme.glass-opacity) накладывает
+// theme.slint через .with-alpha(...) в месте использования.
+export global Glass {
+    out property <color> bg-window: #0b1220;
+    out property <color> bg-sidebar: #0a1020;
+    out property <color> bg-topbar: #0a1020;
+    out property <color> bg-surface: #ffffff;
+    out property <color> bg-elevated: #ffffff;
+    out property <color> text-primary: #ffffff;
+    out property <color> text-secondary: #cbd5e1;
+    out property <color> text-muted: #94a3b8;
+    out property <color> border: #ffffff24;
+    out property <color> shadow: #00000030;
+}

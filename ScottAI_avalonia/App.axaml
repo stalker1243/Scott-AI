@@ -1,0 +1,36 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:ScottAI.Avalonia"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             x:Class="ScottAI.Avalonia.App"
+             RequestedThemeVariant="Dark">
+
+    <Application.DataTemplates>
+        <local:ViewLocator />
+    </Application.DataTemplates>
+
+    <Application.Styles>
+        <FluentTheme />
+        <mi:MaterialIconStyles />
+    </Application.Styles>
+
+    <Application.Resources>
+        <!-- Та же палитра, что и в Tauri-версии (Classic dark), чтобы обе версии
+             лаунчера выглядели узнаваемо одинаково несмотря на разный стек. -->
+        <SolidColorBrush x:Key="BgWindow">#10161F</SolidColorBrush>
+        <SolidColorBrush x:Key="BgSidebar">#0D1420</SolidColorBrush>
+        <SolidColorBrush x:Key="BgTopbar">#131B28</SolidColorBrush>
+        <SolidColorBrush x:Key="BgSurface">#1A2332</SolidColorBrush>
+        <SolidColorBrush x:Key="BgElevated">#212C3D</SolidColorBrush>
+        <SolidColorBrush x:Key="TextPrimary">#F3F4F6</SolidColorBrush>
+        <SolidColorBrush x:Key="TextSecondary">#9CA3AF</SolidColorBrush>
+        <SolidColorBrush x:Key="TextMuted">#6B7280</SolidColorBrush>
+        <SolidColorBrush x:Key="BorderColor">#2A3547</SolidColorBrush>
+        <SolidColorBrush x:Key="Accent">#3B82F6</SolidColorBrush>
+        <SolidColorBrush x:Key="AccentSoft">#263B82F6</SolidColorBrush>
+        <SolidColorBrush x:Key="AccentSofter">#143B82F6</SolidColorBrush>
+        <SolidColorBrush x:Key="Success">#22C55E</SolidColorBrush>
+        <SolidColorBrush x:Key="Danger">#EF4444</SolidColorBrush>
+        <FontFamily x:Key="AppFontFamily">Segoe UI, sans-serif</FontFamily>
+    </Application.Resources>
+</Application>

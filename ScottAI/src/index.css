@@ -1,0 +1,200 @@
+@import "tailwindcss";
+
+/* ============ Палитры трёх стилей + светлый/тёмный подрежим Classic ============
+   Единый набор CSS-переменных — все компоненты читают цвета отсюда через
+   Tailwind arbitrary values (bg-[var(--bg-surface)] и т.п.), а не хардкодят их.
+   Переключение стиля/темы = смена data-атрибутов на <html>, всё остальное
+   перекрашивается реактивно самим CSS. */
+
+:root {
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --font-family: "Segoe UI", system-ui, sans-serif;
+  --accent: #3b82f6;
+  --glass-opacity: 0.35;
+  --glass-blur: 0px;
+}
+
+/* Classic — тёмный (по умолчанию) */
+html,
+html[data-style="classic"][data-mode="dark"] {
+  --bg-window: #10161f;
+  --bg-sidebar: #0d1420;
+  --bg-topbar: #131b28;
+  --bg-surface: #1a2332;
+  --bg-elevated: #212c3d;
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --border: #2a3547;
+  --shadow: rgba(0, 0, 0, 0.35);
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --font-family: "Segoe UI", system-ui, sans-serif;
+  --bg-popup: var(--bg-elevated);
+  color-scheme: dark;
+}
+
+/* Classic — светлый */
+html[data-style="classic"][data-mode="light"] {
+  --bg-window: #f1f2f5;
+  --bg-sidebar: #ffffff;
+  --bg-topbar: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f3f4f6;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --text-muted: #9ca3af;
+  --border: #e2e5eb;
+  --shadow: rgba(0, 0, 0, 0.13);
+  --bg-popup: var(--bg-elevated);
+  color-scheme: light;
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+/* Glass — прозрачный, реальный блюр рабочего стола через backdrop-filter
+   (окно Tauri прозрачное, см. tauri.conf.json). Непрозрачность масштабируется
+   переменной --glass-opacity (0..1), задаваемой из Settings. */
+html[data-style="glass"] {
+  /* Реалистичная мутность: при низкой прозрачности (высокий --glass-opacity)
+     растёт не только непрозрачность цветового слоя, но и радиус блюра —
+     как у настоящего матового стекла, а не просто затемнение. */
+  --glass-blur: calc(5px + var(--glass-opacity) * 34px);
+  --bg-window: rgb(11 18 32 / calc(0.04 + var(--glass-opacity) * 0.62));
+  --bg-sidebar: rgb(10 16 32 / calc(0.14 + var(--glass-opacity) * 0.8));
+  --bg-topbar: rgb(10 16 32 / calc(0.14 + var(--glass-opacity) * 0.8));
+  --bg-surface: rgb(255 255 255 / calc(0.03 + var(--glass-opacity) * 0.26));
+  --bg-elevated: rgb(255 255 255 / calc(0.06 + var(--glass-opacity) * 0.36));
+  --text-primary: #ffffff;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --border: rgb(255 255 255 / 0.16);
+  --shadow: rgba(0, 0, 0, 0.25);
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --radius-sm: 14px;
+  --radius-md: 20px;
+  --radius-lg: 28px;
+  --font-family: "Segoe UI", system-ui, sans-serif;
+  /* Нативные попапы (выпадающий список <select>) рисуются ОС/движком в отдельном
+     слое поверх окна, а не внутри его backdrop-filter-блюра — полупрозрачный
+     --bg-elevated там ни с чем не смешивается и превращается в почти чистый
+     белый лист. Для попапа нужен непрозрачный цвет. */
+  --bg-popup: #10182c;
+  color-scheme: dark;
+}
+
+/* Terminal Pro — тёмный фон + неоновые акценты, моноспейс-шрифт */
+html[data-style="terminal"] {
+  --bg-window: #05070a;
+  --bg-sidebar: #090c11;
+  --bg-topbar: #090c11;
+  --bg-surface: #0d1117;
+  --bg-elevated: #131a23;
+  --text-primary: #e6faff;
+  --text-secondary: #7fe7ff;
+  --text-muted: #4a6572;
+  --border: rgb(0 255 242 / 0.2);
+  --shadow: rgba(0, 255, 242, 0.1);
+  --success: #00ff9c;
+  --danger: #ff4d6d;
+  --warning: #ffb800;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --font-family: "Consolas", "Cascadia Code", monospace;
+  --bg-popup: var(--bg-elevated);
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+/* Выпадающий список <select> рисуется системным попапом, а не внутри
+   backdrop-filter-блюра окна — поэтому ему нужен свой непрозрачный цвет
+   (--bg-popup), а не полупрозрачный --bg-elevated (см. объявление в Glass). */
+select option {
+  background-color: var(--bg-popup);
+  color: var(--text-primary);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Применяется к панелям, которые должны "матироваться" в стиле Glass */
+.glass-panel {
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  transition: backdrop-filter 200ms ease;
+}
+
+/* ============ Terminal Pro — доп. полировка: scanline-оверлей + неоновое свечение ============ */
+
+html[data-style="terminal"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgb(0 255 242 / 0.035) 0px,
+    rgb(0 255 242 / 0.035) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: screen;
+}
+
+/* Заголовки светятся цветом собственного текста (акцент/success/danger и т.п.) —
+   работает на любом currentColor, не требует правок в компонентах. */
+html[data-style="terminal"] h1,
+html[data-style="terminal"] h2,
+html[data-style="terminal"] h3 {
+  text-shadow: 0 0 10px currentColor;
+}

@@ -1,0 +1,166 @@
+import { Theme } from "../theme.slint";
+import { StyledInput } from "../components/textbox.slint";
+import { AccentButton } from "../components/button.slint";
+import { Icon, IconKind } from "../components/icons.slint";
+
+export component ProfilePage inherits Rectangle {
+    in-out property <string> profile-name;
+    in-out property <string> profile-bio;
+    in property <bool> saved-recently: false;
+
+    callback save-profile();
+
+    background: transparent;
+
+    Flickable {
+        viewport-height: content.preferred-height + 60px;
+
+        content := VerticalLayout {
+            padding: 40px;
+            spacing: 28px;
+
+            Text {
+                text: "Профиль";
+                color: Theme.text-primary;
+                font-size: 30px;
+                font-weight: 700;
+                font-family: Theme.font-family;
+            }
+
+            HorizontalLayout {
+                spacing: 24px;
+
+                Rectangle {
+                    width: 96px;
+                    height: 96px;
+                    border-radius: 48px;
+                    background: Theme.accent;
+                    drop-shadow-blur: Theme.is-terminal ? 16px : 8px;
+                    drop-shadow-color: Theme.accent.with-alpha(0.5);
+
+                    Icon {
+                        kind: IconKind.profile;
+                        icon-color: white;
+                        icon-size: 44px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 4px;
+
+                    Text {
+                        text: root.profile-name == "" ? "Без имени" : root.profile-name;
+                        color: Theme.text-primary;
+                        font-size: 20px;
+                        font-weight: 700;
+                        font-family: Theme.font-family;
+                    }
+
+                    Text {
+                        text: "Локальный профиль Scott AI";
+                        color: Theme.text-muted;
+                        font-size: 13px;
+                        font-family: Theme.font-family;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: "Имя";
+                    color: Theme.text-secondary;
+                    font-size: 14px;
+                    font-weight: 600;
+                    font-family: Theme.font-family;
+                }
+
+                StyledInput {
+                    placeholder: "Как к вам обращаться?";
+                    text <=> root.profile-name;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: "О себе";
+                    color: Theme.text-secondary;
+                    font-size: 14px;
+                    font-weight: 600;
+                    font-family: Theme.font-family;
+                }
+
+                Text {
+                    text: "Эта информация поможет Scott давать более персональные ответы.";
+                    color: Theme.text-muted;
+                    font-size: 12px;
+                    font-family: Theme.font-family;
+                }
+
+                StyledInput {
+                    placeholder: "Расскажите немного о себе, ваших интересах и предпочтениях...";
+                    multiline: true;
+                    text <=> root.profile-bio;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                spacing: 14px;
+
+                AccentButton {
+                    text: "Сохранить";
+                    has-icon: true;
+                    icon-kind: IconKind.save;
+                    width: 200px;
+                    clicked => { root.save-profile(); }
+                }
+
+                if root.saved-recently: HorizontalLayout {
+                    spacing: 6px;
+                    alignment: center;
+
+                    Icon {
+                        kind: IconKind.check;
+                        icon-color: Theme.success;
+                        icon-size: 16px;
+                    }
+
+                    Text {
+                        text: "Сохранено";
+                        color: Theme.success;
+                        font-size: 14px;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        font-family: Theme.font-family;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: "Вход через сторонние сервисы";
+                    color: Theme.text-secondary;
+                    font-size: 14px;
+                    font-weight: 600;
+                    font-family: Theme.font-family;
+                }
+
+                Text {
+                    text: "Появится в будущих обновлениях. Сейчас профиль хранится локально на этом устройстве.";
+                    color: Theme.text-muted;
+                    font-size: 12px;
+                    font-family: Theme.font-family;
+                }
+            }
+        }
+    }
+}

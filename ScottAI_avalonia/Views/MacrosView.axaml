@@ -1,0 +1,81 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:myconv="using:ScottAI.Avalonia.Converters"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             x:DataType="vm:MacrosViewModel"
+             x:Class="ScottAI.Avalonia.Views.MacrosView">
+    <Grid RowDefinitions="Auto,Auto,Auto,*">
+        <TextBlock Grid.Row="0" Text="Запишите последовательность действий шаг за шагом и воспроизводите её одной командой."
+                   Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" />
+
+        <Border Grid.Row="1" Margin="0,10,0,0" Background="{DynamicResource Danger}" Opacity="0.15"
+                CornerRadius="8" Padding="12,8" IsVisible="{Binding Error, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+            <TextBlock Text="{Binding Error}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
+        </Border>
+
+        <Border Grid.Row="2" Margin="0,14,0,0" Background="{DynamicResource BgSurface}"
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                CornerRadius="12" Padding="18">
+            <Grid>
+                <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding !IsRecording}">
+                    <TextBox Text="{Binding NewMacroName}" PlaceholderText="название нового макроса" Width="320" />
+                    <Button Content="Начать запись" Command="{Binding StartRecordingCommand}" Classes="soft" />
+                </StackPanel>
+
+                <StackPanel Spacing="10" IsVisible="{Binding IsRecording}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                            <Ellipse Width="10" Height="10" Fill="{DynamicResource Danger}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding CurrentMacroName, StringFormat='Запись: {0}'}" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding ActionsRecorded, StringFormat='действий: {0}'}"
+                                       Foreground="{DynamicResource TextMuted}" FontSize="12" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="Остановить" Classes="danger-text" Command="{Binding StopRecordingCommand}" />
+                    </Grid>
+                    <Grid ColumnDefinitions="160,*,Auto">
+                        <ComboBox Grid.Column="0" ItemsSource="{Binding ActionTypes}" SelectedItem="{Binding ActionType}" Margin="0,0,8,0" HorizontalAlignment="Stretch" />
+                        <TextBox Grid.Column="1" Text="{Binding ActionTarget}" PlaceholderText="цель действия" />
+                        <Button Grid.Column="2" Content="Добавить" Command="{Binding AddActionCommand}" Classes="accent" Margin="8,0,0,0" />
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="3" Margin="0,14,0,0">
+            <Panel>
+                <ItemsControl Name="MacrosList" ItemsSource="{Binding Macros}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:Macro">
+                            <Border Classes="card" Margin="0,4" Background="{DynamicResource BgSurface}"
+                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="10">
+                                <Grid ColumnDefinitions="*,Auto,Auto" Margin="16,10">
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
+                                        <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource TextMuted}" FontSize="12" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Играть" Classes="soft"
+                                            Command="{Binding $parent[ItemsControl].((vm:MacrosViewModel)DataContext).ExecuteCommand}"
+                                            CommandParameter="{Binding}" Margin="0,0,8,0" />
+                                    <Button Grid.Column="2" Content="Удалить" Classes="danger-text"
+                                            Command="{Binding $parent[ItemsControl].((vm:MacrosViewModel)DataContext).DeleteCommand}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel IsVisible="{Binding Macros.Count, Converter={x:Static myconv:IsZeroConverter.Instance}}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" Margin="0,50">
+                    <mi:MaterialIcon Kind="PlayBoxOutline" Width="38" Height="38" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Пока нет ни одного макроса" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Начните запись выше, чтобы создать первый." FontSize="12" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Panel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

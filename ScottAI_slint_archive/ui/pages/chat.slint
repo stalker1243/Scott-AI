@@ -1,0 +1,226 @@
+import { Theme } from "../theme.slint";
+import { ChatMessage } from "../structs.slint";
+import { StyledInput } from "../components/textbox.slint";
+import { GhostButton } from "../components/accent_button.slint";
+import { ScrollIndicator } from "../components/scrollbar.slint";
+import { IconKind } from "../components/icons.slint";
+
+component Bubble inherits Rectangle {
+    in property <ChatMessage> message;
+
+    width: 100%;
+    height: row.preferred-height;
+
+    row := HorizontalLayout {
+        alignment: message.from-user ? end : start;
+
+        Rectangle {
+            width: min(content.preferred-width + 32px, 560px);
+            height: content.preferred-height + 24px;
+
+            border-radius: Theme.radius-md;
+            background: message.from-user ? Theme.accent : Theme.bg-surface;
+            border-width: message.from-user ? 0px : 1px;
+            border-color: Theme.border;
+
+            content := VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+
+                if message.has-image: Image {
+                    source: message.image;
+                    height: 160px;
+                    width: 220px;
+                    image-fit: ImageFit.cover;
+                }
+
+                Text {
+                    text: message.text;
+                    color: message.from-user ? white : Theme.text-primary;
+                    font-size: 15px;
+                    font-family: Theme.font-family;
+                    wrap: TextWrap.word-wrap;
+                }
+
+                Text {
+                    text: message.time;
+                    color: message.from-user ? #ffffffb0 : Theme.text-muted;
+                    font-size: 11px;
+                    font-family: Theme.font-family;
+                    horizontal-alignment: right;
+                }
+            }
+        }
+    }
+}
+
+export component ChatPage inherits Rectangle {
+    in property <[ChatMessage]> messages;
+    in-out property <string> draft;
+    in property <bool> sending: false;
+    in property <bool> has-pending-image: false;
+    in property <image> pending-image;
+    in property <string> pending-image-name: "";
+
+    callback send-message();
+    callback new-chat();
+    callback attach-image();
+    callback clear-pending-image();
+    callback start-voice-input();
+
+    background: transparent;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+
+        HorizontalLayout {
+            alignment: space-between;
+
+            Text {
+                text: "Чат со Scott";
+                color: Theme.text-primary;
+                font-size: 22px;
+                font-weight: 700;
+                font-family: Theme.font-family;
+            }
+
+            GhostButton {
+                text: "Новый чат";
+                has-icon: true;
+                icon-kind: IconKind.sparkle;
+                clicked => { root.new-chat(); }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: Theme.radius-md;
+            background: Theme.bg-surface.with-alpha(Theme.is-glass ? 0.4 : 1.0);
+            border-width: 1px;
+            border-color: Theme.border;
+            clip: true;
+
+            list := Flickable {
+                x: 0px;
+                y: 0px;
+                width: parent.width - 10px;
+                height: parent.height;
+                viewport-height: msgs.preferred-height + 32px;
+
+                msgs := VerticalLayout {
+                    padding: 16px;
+                    spacing: 10px;
+
+                    for m[i] in root.messages: Bubble {
+                        message: m;
+                    }
+
+                    if root.sending: HorizontalLayout {
+                        alignment: start;
+                        Rectangle {
+                            width: 70px;
+                            height: 36px;
+                            border-radius: Theme.radius-sm;
+                            background: Theme.bg-surface;
+                            border-width: 1px;
+                            border-color: Theme.border;
+
+                            Text {
+                                text: "···";
+                                color: Theme.text-secondary;
+                                font-size: 20px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                width: 100%;
+                                height: 100%;
+                            }
+                        }
+                    }
+                }
+            }
+
+            ScrollIndicator {
+                x: parent.width - 8px;
+                y: 4px;
+                height: parent.height - 8px;
+                viewport-height: list.viewport-height;
+                visible-height: list.height;
+                offset: list.viewport-y;
+            }
+        }
+
+        if root.has-pending-image: Rectangle {
+            height: 64px;
+            border-radius: Theme.radius-sm;
+            background: Theme.bg-elevated;
+            border-width: 1px;
+            border-color: Theme.accent;
+
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 10px;
+                alignment: space-between;
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Image {
+                        source: root.pending-image;
+                        width: 44px;
+                        height: 44px;
+                        image-fit: ImageFit.cover;
+                    }
+                    Text {
+                        text: root.pending-image-name;
+                        color: Theme.text-primary;
+                        font-size: 13px;
+                        font-family: Theme.font-family;
+                        vertical-alignment: center;
+                    }
+                }
+
+                GhostButton {
+                    text: "Убрать";
+                    has-icon: true;
+                    icon-kind: IconKind.remove;
+                    clicked => { root.clear-pending-image(); }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            GhostButton {
+                text: "";
+                has-icon: true;
+                icon-kind: IconKind.attach;
+                width: 44px;
+                clicked => { root.attach-image(); }
+            }
+
+            GhostButton {
+                text: "";
+                has-icon: true;
+                icon-kind: IconKind.mic;
+                width: 44px;
+                clicked => { root.start-voice-input(); }
+            }
+
+            input := StyledInput {
+                horizontal-stretch: 1;
+                placeholder: "Напишите сообщение...";
+                text <=> root.draft;
+                accepted(text) => { root.send-message(); }
+            }
+
+            GhostButton {
+                text: "Отправить";
+                has-icon: true;
+                icon-kind: IconKind.send;
+                enabled: root.draft != "" || root.has-pending-image;
+                clicked => { root.send-message(); }
+            }
+        }
+    }
+}

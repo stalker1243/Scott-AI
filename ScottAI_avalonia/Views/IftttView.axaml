@@ -1,0 +1,70 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:myconv="using:ScottAI.Avalonia.Converters"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             x:DataType="vm:IftttViewModel"
+             x:Class="ScottAI.Avalonia.Views.IftttView">
+    <Grid RowDefinitions="Auto,Auto,Auto,*">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Text="Если выполнено условие — Scott автоматически выполнит действие."
+                       Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            <Button Grid.Column="1" Content="Добавить правило" Command="{Binding ToggleFormCommand}" Classes="soft" />
+        </Grid>
+
+        <Border Grid.Row="1" Margin="0,10,0,0" Background="{DynamicResource Danger}" Opacity="0.15"
+                CornerRadius="8" Padding="12,8" IsVisible="{Binding Error, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+            <TextBlock Text="{Binding Error}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
+        </Border>
+
+        <Border Grid.Row="2" Margin="0,14,0,0" Background="{DynamicResource BgSurface}"
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="12" Padding="18"
+                IsVisible="{Binding ShowForm}">
+            <StackPanel Spacing="10">
+                <TextBox Text="{Binding NewName}" PlaceholderText="Название правила" />
+                <Grid ColumnDefinitions="*,*" >
+                    <ComboBox Grid.Column="0" ItemsSource="{Binding TriggerTypes}" SelectedItem="{Binding NewTriggerType}" Margin="0,0,6,0" HorizontalAlignment="Stretch" />
+                    <TextBox Grid.Column="1" Text="{Binding NewTriggerValue}" PlaceholderText="Значение условия" Margin="6,0,0,0" />
+                </Grid>
+                <Grid ColumnDefinitions="*,*">
+                    <ComboBox Grid.Column="0" ItemsSource="{Binding ActionTypes}" SelectedItem="{Binding NewActionType}" Margin="0,0,6,0" HorizontalAlignment="Stretch" />
+                    <TextBox Grid.Column="1" Text="{Binding NewActionValue}" PlaceholderText="Значение действия" Margin="6,0,0,0" />
+                </Grid>
+                <TextBox Text="{Binding NewDescription}" PlaceholderText="Описание (необязательно)" />
+                <Button Content="Сохранить" Command="{Binding AddCommand}" HorizontalAlignment="Right" Classes="accent" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="3" Margin="0,14,0,0">
+            <Panel>
+                <ItemsControl Name="RulesList" ItemsSource="{Binding Rules}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:IftttRule">
+                            <Border Classes="card" Margin="0,4" Background="{DynamicResource BgSurface}"
+                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="10">
+                                <Grid ColumnDefinitions="*,Auto" Margin="16,10">
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
+                                        <TextBlock Text="{Binding Summary}" Foreground="{DynamicResource TextMuted}" FontSize="12" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Удалить" Classes="danger-text"
+                                            Command="{Binding $parent[ItemsControl].((vm:IftttViewModel)DataContext).DeleteCommand}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel IsVisible="{Binding Rules.Count, Converter={x:Static myconv:IsZeroConverter.Instance}}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" Margin="0,50">
+                    <mi:MaterialIcon Kind="FlashOutline" Width="38" Height="38" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Пока нет ни одного правила" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Нажмите «Добавить правило», чтобы создать первое." FontSize="12" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Panel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

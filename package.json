@@ -1,0 +1,10 @@
+{
+  "name": "scott-ai-repo",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Scott AI — голосовой ассистент. Backend: FastAPI (backend/). Frontend: Tauri 2 + React (ScottAI/).",
+  "scripts": {
+    "start": "npm --prefix ScottAI run tauri dev",
+    "dev": "npm --prefix ScottAI run tauri dev"
+  }
+}

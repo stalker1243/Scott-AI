@@ -1,0 +1,44 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             x:DataType="vm:HomeViewModel"
+             x:Class="ScottAI.Avalonia.Views.HomeView">
+    <StackPanel Margin="40" Spacing="24">
+        <StackPanel Spacing="8">
+            <TextBlock Text="Добро пожаловать" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
+            <TextBlock Text="Scott готов к работе." FontSize="15" Foreground="{DynamicResource TextSecondary}" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Spacing="16">
+            <Border Name="CpuCard" Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="1" CornerRadius="14" Width="180" Height="110" Padding="18">
+                <StackPanel VerticalAlignment="Center" Spacing="6">
+                    <TextBlock Text="CPU" FontSize="13" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="{Binding CpuPercent, StringFormat={}{0:0.0}%}" FontSize="26" FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimary}" />
+                </StackPanel>
+            </Border>
+            <Border Name="RamCard" Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="1" CornerRadius="14" Width="180" Height="110" Padding="18">
+                <StackPanel VerticalAlignment="Center" Spacing="6">
+                    <TextBlock Text="RAM" FontSize="13" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="{Binding RamPercent, StringFormat={}{0:0.0}%}" FontSize="26" FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimary}" />
+                </StackPanel>
+            </Border>
+            <Border Name="ProcessCard" Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="1" CornerRadius="14" Width="180" Height="110" Padding="18">
+                <StackPanel VerticalAlignment="Center" Spacing="6">
+                    <TextBlock Text="Процессы" FontSize="13" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="{Binding ProcessCount}" FontSize="26" FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimary}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <Button Name="LaunchButton" Content="Открыть чат" Command="{Binding LaunchChatCommand}"
+                HorizontalAlignment="Left"
+                Background="{DynamicResource Accent}" Foreground="White" Padding="20,12"
+                CornerRadius="10" FontWeight="SemiBold" />
+    </StackPanel>
+</UserControl>

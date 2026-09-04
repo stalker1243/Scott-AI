@@ -39,3 +39,20 @@ backend/models/
 *.wav
 *.mp3
 
+# Rust build artifacts
+target/
+
+
+# .NET (лаунчер Avalonia) — промежуточные и собранные артефакты
+[Bb]in/
+[Oo]bj/
+
+# Node / Tauri (прежний лаунчер ScottAI)
+node_modules/
+dist/
+
+# Артефакты работы ассистента: кэш синтезированной речи и замеры этапов.
+# Восстанавливаются сами при следующем запуске, в истории не нужны.
+audio_cache/
+logs/
+backend/logs/

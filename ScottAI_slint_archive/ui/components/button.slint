@@ -1,0 +1,60 @@
+import { Theme } from "../theme.slint";
+import { Icon, IconKind } from "icons.slint";
+
+export component AccentButton inherits Rectangle {
+    in property <string> text;
+    in property <color> accent-color: Theme.accent;
+    in property <bool> enabled: true;
+    in property <bool> has-icon: false;
+    in property <IconKind> icon-kind: IconKind.bolt;
+
+    callback clicked();
+
+    width: 250px;
+    height: 56px;
+
+    border-radius: Theme.radius-md;
+
+    background: !enabled ? Theme.bg-elevated
+        : touch.pressed ? accent-color.darker(15%)
+        : touch.has-hover ? accent-color.brighter(12%)
+        : accent-color;
+
+    border-width: 1px;
+    border-color: enabled ? accent-color.brighter(20%) : Theme.border;
+
+    drop-shadow-blur: enabled ? 14px : 0px;
+    drop-shadow-color: enabled ? accent-color.with-alpha(0.35) : transparent;
+    drop-shadow-offset-y: touch.pressed ? 1px : 4px;
+
+    animate background, drop-shadow-blur, drop-shadow-offset-y { duration: 150ms; easing: ease-out; }
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        enabled: root.enabled;
+        clicked => {
+            if (root.enabled) { root.clicked(); }
+        }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 10px;
+
+        if has-icon: Icon {
+            kind: root.icon-kind;
+            icon-color: white;
+            icon-size: 18px;
+        }
+
+        Text {
+            text: root.text;
+            color: white;
+            font-size: 18px;
+            font-weight: 600;
+            font-family: Theme.font-family;
+            vertical-alignment: center;
+        }
+    }
+}

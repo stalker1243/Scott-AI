@@ -1,0 +1,135 @@
+import { Theme } from "../theme.slint";
+import { AccentButton } from "../components/button.slint";
+import { GhostButton } from "../components/accent_button.slint";
+import { GlassCard } from "../components/card.slint";
+import { IconKind } from "../components/icons.slint";
+
+export component HomePage inherits Rectangle {
+    in property <bool> backend-online: false;
+    in property <string> cpu-usage: "—";
+    in property <string> ram-usage: "—";
+    in property <string> process-count: "—";
+    in property <string> profile-name: "";
+
+    callback launch-assistant();
+    callback quick-command(string);
+
+    background: transparent;
+
+    Flickable {
+        viewport-height: content.preferred-height + 80px;
+
+        content := VerticalLayout {
+            padding: 40px;
+            spacing: 34px;
+            alignment: start;
+
+            VerticalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: root.profile-name == "" ? "С возвращением." : "С возвращением, " + root.profile-name + ".";
+                    color: Theme.text-primary;
+                    font-size: 38px;
+                    font-weight: 700;
+                    font-family: Theme.font-family;
+                    animate color { duration: 200ms; }
+                }
+
+                Text {
+                    text: root.backend-online ? "Scott готов к работе." : "Backend недоступен — запустите сервер.";
+                    color: root.backend-online ? Theme.text-secondary : Theme.danger;
+                    font-size: 16px;
+                    font-family: Theme.font-family;
+                }
+            }
+
+            AccentButton {
+                text: "Запустить Scott";
+                has-icon: true;
+                icon-kind: IconKind.bolt;
+                clicked => { root.launch-assistant(); }
+            }
+
+            HorizontalLayout {
+                spacing: 20px;
+
+                GlassCard {
+                    title: "CPU";
+                    value: root.cpu-usage;
+                    has-icon: true;
+                    icon-kind: IconKind.cpu;
+                    accent-color: #3b82f6;
+                }
+
+                GlassCard {
+                    title: "RAM";
+                    value: root.ram-usage;
+                    has-icon: true;
+                    icon-kind: IconKind.ram;
+                    accent-color: #22c55e;
+                }
+
+                GlassCard {
+                    title: "Процессы";
+                    value: root.process-count;
+                    has-icon: true;
+                    icon-kind: IconKind.processes;
+                    accent-color: #f59e0b;
+                }
+
+                GlassCard {
+                    title: "Scott";
+                    value: root.backend-online ? "ONLINE" : "OFFLINE";
+                    has-icon: true;
+                    icon-kind: IconKind.status;
+                    accent-color: root.backend-online ? Theme.success : Theme.danger;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 14px;
+
+                Text {
+                    text: "Быстрые команды";
+                    color: Theme.text-secondary;
+                    font-size: 15px;
+                    font-weight: 600;
+                    font-family: Theme.font-family;
+                }
+
+                HorizontalLayout {
+                    spacing: 14px;
+
+                    GhostButton {
+                        text: "Что нового?";
+                        has-icon: true;
+                        icon-kind: IconKind.idea;
+                        clicked => { root.quick-command("Что нового?"); }
+                    }
+
+                    GhostButton {
+                        text: "Статус системы";
+                        has-icon: true;
+                        icon-kind: IconKind.trend;
+                        clicked => { root.quick-command("Статус системы"); }
+                    }
+
+                    GhostButton {
+                        text: "Открой блокнот";
+                        has-icon: true;
+                        icon-kind: IconKind.note;
+                        clicked => { root.quick-command("Открой блокнот"); }
+                    }
+
+                    GhostButton {
+                        text: "Расскажи анекдот";
+                        has-icon: true;
+                        icon-kind: IconKind.sparkle;
+                        clicked => { root.quick-command("Расскажи анекдот"); }
+                    }
+                }
+            }
+        }
+    }
+}

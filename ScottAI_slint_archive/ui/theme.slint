@@ -1,0 +1,85 @@
+import { ClassicLight, ClassicDark } from "themes/classic.slint";
+import { Glass } from "themes/glass.slint";
+import { TerminalPro } from "themes/terminalpro.slint";
+
+export enum AppStyle { classic, glass, terminal-pro }
+export enum AppPage { home, chat, settings, profile }
+
+// Единая точка правды по внешнему виду приложения. Все компоненты и страницы
+// читают цвета/радиусы/шрифт отсюда, а не хардкодят их — переключение стиля
+// или акцента мгновенно перекрашивает весь интерфейс.
+export global Theme {
+    in-out property <AppStyle> style: AppStyle.classic;
+    in-out property <bool> dark-mode: true;
+    in-out property <color> accent: #3b82f6;
+
+    // Уровень прозрачности стиля Glass: 0.0 — максимально прозрачно (сквозь лаунчер
+    // хорошо виден рабочий стол), 1.0 — почти непрозрачно (только лёгкий блюр). Влияет
+    // и на тонирующий слой здесь (bg-*), и на альфу нативного acrylic-блюра на Rust-стороне
+    // (см. apply_native_blur в src/app.rs).
+    in-out property <float> glass-opacity: 0.35;
+
+    out property <bool> is-glass: root.style == AppStyle.glass;
+    out property <bool> is-terminal: root.style == AppStyle.terminal-pro;
+    out property <bool> is-classic: root.style == AppStyle.classic;
+    out property <bool> is-dark: root.is-glass || root.is-terminal || (root.is-classic && root.dark-mode);
+
+    // Glass-слои тонируются пропорционально glass-opacity: у более "весомых" панелей
+    // (сайдбар/топбар) базовая непрозрачность выше, чем у фона окна, чтобы текст на них
+    // оставался читаемым даже при низком уровне прозрачности.
+    out property <color> bg-window: root.is-glass ? Glass.bg-window.with-alpha(0.04 + root.glass-opacity * 0.5)
+        : root.is-terminal ? TerminalPro.bg-window
+        : (root.dark-mode ? ClassicDark.bg-window : ClassicLight.bg-window);
+
+    out property <color> bg-sidebar: root.is-glass ? Glass.bg-sidebar.with-alpha(0.12 + root.glass-opacity * 0.75)
+        : root.is-terminal ? TerminalPro.bg-sidebar
+        : (root.dark-mode ? ClassicDark.bg-sidebar : ClassicLight.bg-sidebar);
+
+    out property <color> bg-topbar: root.is-glass ? Glass.bg-topbar.with-alpha(0.12 + root.glass-opacity * 0.75)
+        : root.is-terminal ? TerminalPro.bg-topbar
+        : (root.dark-mode ? ClassicDark.bg-topbar : ClassicLight.bg-topbar);
+
+    out property <color> bg-surface: root.is-glass ? Glass.bg-surface.with-alpha(0.02 + root.glass-opacity * 0.28)
+        : root.is-terminal ? TerminalPro.bg-surface
+        : (root.dark-mode ? ClassicDark.bg-surface : ClassicLight.bg-surface);
+
+    out property <color> bg-elevated: root.is-glass ? Glass.bg-elevated.with-alpha(0.05 + root.glass-opacity * 0.4)
+        : root.is-terminal ? TerminalPro.bg-elevated
+        : (root.dark-mode ? ClassicDark.bg-elevated : ClassicLight.bg-elevated);
+
+    out property <color> text-primary: root.is-glass ? Glass.text-primary
+        : root.is-terminal ? TerminalPro.text-primary
+        : (root.dark-mode ? ClassicDark.text-primary : ClassicLight.text-primary);
+
+    out property <color> text-secondary: root.is-glass ? Glass.text-secondary
+        : root.is-terminal ? TerminalPro.text-secondary
+        : (root.dark-mode ? ClassicDark.text-secondary : ClassicLight.text-secondary);
+
+    out property <color> text-muted: root.is-glass ? Glass.text-muted
+        : root.is-terminal ? TerminalPro.text-muted
+        : (root.dark-mode ? ClassicDark.text-muted : ClassicLight.text-muted);
+
+    out property <color> border: root.is-glass ? Glass.border
+        : root.is-terminal ? TerminalPro.border
+        : (root.dark-mode ? ClassicDark.border : ClassicLight.border);
+
+    out property <color> shadow: root.is-glass ? Glass.shadow
+        : root.is-terminal ? TerminalPro.shadow
+        : (root.dark-mode ? ClassicDark.shadow : ClassicLight.shadow);
+
+    out property <color> success: root.is-terminal ? TerminalPro.neon-green : #22c55e;
+    out property <color> danger: root.is-terminal ? #ff4d6d : #ef4444;
+    out property <color> warning: root.is-terminal ? TerminalPro.neon-amber : #f59e0b;
+    out property <color> neon-cyan: TerminalPro.neon-cyan;
+    out property <color> neon-magenta: TerminalPro.neon-magenta;
+
+    // Радиусы: Classic — умеренно скруглён, Glass — мягкий/округлый, Terminal Pro — резкий/консольный
+    out property <length> radius-sm: root.is-terminal ? 4px : (root.is-glass ? 14px : 8px);
+    out property <length> radius-md: root.is-terminal ? 6px : (root.is-glass ? 20px : 14px);
+    out property <length> radius-lg: root.is-terminal ? 10px : (root.is-glass ? 28px : 20px);
+
+    out property <string> font-family: root.is-terminal ? "Consolas" : "Segoe UI";
+
+    // Отдельный флаг для Rust-стороны: нужен ли нативный acrylic-блюр окна
+    out property <bool> needs-native-blur: root.is-glass;
+}

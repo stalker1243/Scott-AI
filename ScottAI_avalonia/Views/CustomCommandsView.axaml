@@ -1,0 +1,66 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:myconv="using:ScottAI.Avalonia.Converters"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             x:DataType="vm:CustomCommandsViewModel"
+             x:Class="ScottAI.Avalonia.Views.CustomCommandsView">
+    <Grid RowDefinitions="Auto,Auto,Auto,*">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Text="Свои голосовые команды: скажи триггер-фразу — Scott выполнит указанное действие."
+                       Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            <Button Grid.Column="1" Content="Добавить команду" Command="{Binding ToggleFormCommand}" Classes="soft" />
+        </Grid>
+
+        <Border Grid.Row="1" Margin="0,10,0,0" Background="{DynamicResource Danger}" Opacity="0.15"
+                CornerRadius="8" Padding="12,8" IsVisible="{Binding Error, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+            <TextBlock Text="{Binding Error}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
+        </Border>
+
+        <Border Grid.Row="2" Margin="0,14,0,0" Background="{DynamicResource BgSurface}"
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="12" Padding="18"
+                IsVisible="{Binding ShowForm}">
+            <StackPanel Spacing="10">
+                <TextBox Text="{Binding NewName}" PlaceholderText="Название" />
+                <TextBox Text="{Binding NewTrigger}" PlaceholderText="Триггер-фраза" />
+                <TextBox Text="{Binding NewAction}" PlaceholderText="Действие (что выполнить)" />
+                <TextBox Text="{Binding NewDescription}" PlaceholderText="Описание (необязательно)" />
+                <Button Content="Сохранить" Command="{Binding AddCommand}" HorizontalAlignment="Right" Classes="accent" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="3" Margin="0,14,0,0">
+            <Panel>
+                <ItemsControl Name="CommandsList" ItemsSource="{Binding Commands}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:CustomCommand">
+                            <Border Classes="card" Margin="0,4" Background="{DynamicResource BgSurface}"
+                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="10">
+                                <Grid ColumnDefinitions="*,Auto" Margin="16,10">
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
+                                        <TextBlock Foreground="{DynamicResource TextMuted}" FontSize="12">
+                                            <Run Text="«" /><Run Text="{Binding Trigger}" /><Run Text="» → " /><Run Text="{Binding Action}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Удалить" Classes="danger-text"
+                                            Command="{Binding $parent[ItemsControl].((vm:CustomCommandsViewModel)DataContext).DeleteCommand}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel IsVisible="{Binding Commands.Count, Converter={x:Static myconv:IsZeroConverter.Instance}}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" Margin="0,50">
+                    <mi:MaterialIcon Kind="CodeBraces" Width="38" Height="38" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Пока нет ни одной команды" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Нажмите «Добавить команду», чтобы создать первую." FontSize="12" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Panel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

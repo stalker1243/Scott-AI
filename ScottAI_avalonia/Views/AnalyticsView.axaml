@@ -1,0 +1,128 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:conv="using:ScottAI.Avalonia.Converters"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             x:DataType="vm:AnalyticsViewModel"
+             x:Class="ScottAI.Avalonia.Views.AnalyticsView">
+    <ScrollViewer>
+        <StackPanel Margin="32" Spacing="20">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="Аналитика" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
+                <Button Grid.Column="1" Content="Обновить" Command="{Binding RefreshCommand}" Classes="soft" />
+            </Grid>
+
+            <StackPanel Orientation="Horizontal" Spacing="16">
+                <Border Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1" CornerRadius="14" Width="200" Height="100" Padding="16">
+                    <StackPanel VerticalAlignment="Center" Spacing="4">
+                        <TextBlock Text="Команд всего" FontSize="12" Foreground="{DynamicResource TextSecondary}" />
+                        <TextBlock Text="{Binding TotalCommands}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
+                    </StackPanel>
+                </Border>
+                <Border Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1" CornerRadius="14" Width="200" Height="100" Padding="16">
+                    <StackPanel VerticalAlignment="Center" Spacing="4">
+                        <TextBlock Text="Ср. время отклика" FontSize="12" Foreground="{DynamicResource TextSecondary}" />
+                        <TextBlock Text="{Binding AverageResponseTime, StringFormat={}{0:0.00}с}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
+                    </StackPanel>
+                </Border>
+                <Border Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1" CornerRadius="14" Width="200" Height="100" Padding="16">
+                    <StackPanel VerticalAlignment="Center" Spacing="4">
+                        <TextBlock Text="Тренд (3 дня)" FontSize="12" Foreground="{DynamicResource TextSecondary}" />
+                        <TextBlock Text="{Binding TrendText}" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="14" Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Команды по дням" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <ItemsControl ItemsSource="{Binding DailyBars}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="6" Height="140" VerticalAlignment="Bottom" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:DailyBar">
+                                <StackPanel Width="40" VerticalAlignment="Bottom" Spacing="6">
+                                    <Border Height="{Binding HeightFraction, Converter={x:Static conv:FractionToPixelsConverter.Instance}, ConverterParameter=120}"
+                                            Background="{DynamicResource Accent}" CornerRadius="3,3,0,0" VerticalAlignment="Bottom"
+                                            ToolTip.Tip="{Binding Value}" />
+                                    <TextBlock Text="{Binding Label}" FontSize="9" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Grid ColumnDefinitions="*,*">
+                <Border Grid.Column="0" Margin="0,0,10,0" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1" CornerRadius="14" Padding="20">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Типы команд" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                        <ItemsControl ItemsSource="{Binding CommandTypes}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:DistributionRow">
+                                    <StackPanel Margin="0,0,0,8" Spacing="4">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{DynamicResource TextPrimary}" FontSize="12" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Value}" Foreground="{DynamicResource TextMuted}" FontSize="12" />
+                                        </Grid>
+                                        <Border Height="5" CornerRadius="3" Background="{DynamicResource BgElevated}" HorizontalAlignment="Stretch">
+                                            <Border Height="5" CornerRadius="3" Background="{DynamicResource Accent}" HorizontalAlignment="Left"
+                                                    Width="{Binding PercentFraction, Converter={x:Static conv:FractionToPixelsConverter.Instance}, ConverterParameter=220}" />
+                                        </Border>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1" Margin="10,0,0,0" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1" CornerRadius="14" Padding="20">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Самые открываемые приложения" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                        <ItemsControl ItemsSource="{Binding TopApps}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:DistributionRow">
+                                    <StackPanel Margin="0,0,0,8" Spacing="4">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="{Binding Label}" Foreground="{DynamicResource TextPrimary}" FontSize="12" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Value}" Foreground="{DynamicResource TextMuted}" FontSize="12" />
+                                        </Grid>
+                                        <Border Height="5" CornerRadius="3" Background="{DynamicResource BgElevated}" HorizontalAlignment="Stretch">
+                                            <Border Height="5" CornerRadius="3" Background="{DynamicResource Accent}" HorizontalAlignment="Left"
+                                                    Width="{Binding PercentFraction, Converter={x:Static conv:FractionToPixelsConverter.Instance}, ConverterParameter=220}" />
+                                        </Border>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="14" Padding="20"
+                    IsVisible="{Binding Recommendations.Count}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Рекомендации" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <ItemsControl Name="RecommendationsList" ItemsSource="{Binding Recommendations}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:AnalyticsRecommendation">
+                                <StackPanel Margin="0,0,0,8">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource TextPrimary}" />
+                                    <TextBlock Text="{Binding Message}" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

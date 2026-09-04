@@ -1,0 +1,31 @@
+import { Theme } from "../theme.slint";
+
+export component StatusIndicator inherits HorizontalLayout {
+    in property <bool> online: true;
+    in property <string> label-online: "ONLINE";
+    in property <string> label-offline: "OFFLINE";
+    spacing: 8px;
+    alignment: center;
+
+    Rectangle {
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: online ? Theme.success : Theme.danger;
+        drop-shadow-blur: online ? 8px : 0px;
+        drop-shadow-color: online ? Theme.success : transparent;
+
+        animate background, drop-shadow-blur { duration: 300ms; }
+    }
+
+    Text {
+        text: online ? label-online : label-offline;
+        color: online ? Theme.success : Theme.danger;
+        font-size: 13px;
+        font-weight: 700;
+        font-family: Theme.font-family;
+        vertical-alignment: center;
+
+        animate color { duration: 300ms; }
+    }
+}

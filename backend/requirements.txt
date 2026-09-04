@@ -1,23 +1,61 @@
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-numpy>=1.26.0
-soundfile>=0.12.0
-pydantic>=2.0.0
+fastapi==0.104.1
+uvicorn==0.24.0
+websockets==12.0
+python-dotenv==1.0.0
+pydantic==2.4.2
+psutil==5.9.6
+openai==1.3.0
+edge-tts==6.1.13
+pydub==0.25.1
+requests==2.31.0
+aiohttp==3.9.0
+sqlalchemy==2.0.23
+python-multipart==0.0.6
+pyttsx3==2.99
 
-sounddevice>=0.4.6
+# ===== ГОЛОСОВОЕ УПРАВЛЕНИЕ (v3.0) =====
+# Распознавание речи
+SpeechRecognition==3.10.0
+google-cloud-speech==2.20.0
+sounddevice==0.4.6
 
-# ASR (распознавание речи)
-openai-whisper>=20231117
+# ===== РАСШИРЕННЫЕ ФУНКЦИИ (v3.1) =====
+# Расписание и автоматизация
+schedule==1.2.0
+scipy==1.11.4
+numpy==1.24.3
 
-# LLM (обработка вопросов) - опционально
-openai>=1.0.0  # Для OpenAI API (если есть ключ)
-requests>=2.31.0  # Для Ollama и других HTTP API
-python-dotenv>=1.0.0  # Для загрузки .env файлов (опционально)
+# Синтез речи
+edge-tts==6.1.13
+pyttsx3==2.99
 
-# TTS (синтез речи) - голосовые ответы
-edge-tts>=6.1.0  # Microsoft Edge TTS - работает с Python 3.13, бесплатно, качественный голос
+# Аудио обработка
+sounddevice==0.4.6
+numpy==1.24.3
+scipy==1.11.1
 
-# Утилиты (иконки/изображения для лаунчера)
-Pillow>=10.0.0
+# Веб-скрейпинг
+beautifulsoup4==4.12.2
+lxml==4.9.3
 
+# Мониторинг системы
+GPUtil==1.4.0
+
+# NLP (опционально, для будущего)
+# spacy==3.7.2
+
+# Распознавание речи.
+#
+# ВАЖНО про torch: обычный `pip install torch` ставит СБОРКУ ДЛЯ ПРОЦЕССОРА,
+# даже когда в машине есть NVIDIA-видеокарта. На CPU модель Whisper «small»
+# распознаёт короткую фразу ~6.6с, на RTX 3060 — доли секунды, поэтому сборку
+# с CUDA нужно ставить явно, отдельной командой и со своего индекса:
+#
+#   pip install --index-url https://download.pytorch.org/whl/cu126 torch==2.9.1+cu126
+#
+# Проверить, что видеокарта реально подхватилась:
+#   python -c "import torch; print(torch.cuda.is_available())"
+# Устройство можно принудительно задать в .env через WHISPER_DEVICE=cuda|cpu.
+openai-whisper
+torch>=2.9.1
 

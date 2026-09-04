@@ -1,0 +1,157 @@
+import { Theme, AppPage } from "../theme.slint";
+import { Icon, IconKind } from "icons.slint";
+
+component NavItem inherits Rectangle {
+    in property <IconKind> icon-kind;
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 64px;
+    border-radius: Theme.radius-sm;
+    background: active ? Theme.bg-elevated : (touch.has-hover ? Theme.bg-elevated.with-alpha(0.6) : transparent);
+
+    animate background { duration: 150ms; }
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+
+    // Индикатор активной вкладки слева
+    Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: 3px;
+        height: active ? 28px : 0px;
+        border-radius: 2px;
+        background: Theme.accent;
+        drop-shadow-blur: Theme.is-terminal ? 6px : 0px;
+        drop-shadow-color: Theme.accent;
+
+        animate height { duration: 200ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+    }
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 6px;
+
+        HorizontalLayout {
+            alignment: center;
+            Icon {
+                kind: root.icon-kind;
+                icon-color: active ? Theme.accent : Theme.text-secondary;
+                icon-size: 20px;
+                animate icon-color { duration: 150ms; }
+            }
+        }
+
+        Text {
+            text: root.label;
+            font-size: 10px;
+            font-weight: 600;
+            font-family: Theme.font-family;
+            horizontal-alignment: center;
+            color: active ? Theme.accent : Theme.text-muted;
+            animate color { duration: 150ms; }
+        }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in property <AppPage> current-page: AppPage.home;
+    in property <bool> backend-online: false;
+
+    callback page-selected(AppPage);
+
+    width: 96px;
+    background: Theme.bg-sidebar;
+
+    animate background { duration: 200ms; }
+
+    Rectangle {
+        x: parent.width - 1px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border;
+    }
+
+    VerticalLayout {
+        padding-top: 22px;
+        padding-bottom: 18px;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 10px;
+
+        // Логотип
+        Rectangle {
+            width: 52px;
+            height: 52px;
+            border-radius: Theme.radius-md;
+            background: Theme.accent;
+            drop-shadow-blur: Theme.is-terminal ? 12px : 6px;
+            drop-shadow-color: Theme.accent.with-alpha(0.5);
+
+            Text {
+                text: "S";
+                color: white;
+                font-size: 26px;
+                font-weight: 700;
+                font-family: Theme.font-family;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                width: 100%;
+                height: 100%;
+            }
+        }
+
+        Rectangle { height: 14px; }
+
+        NavItem {
+            icon-kind: IconKind.home;
+            label: "Главная";
+            active: root.current-page == AppPage.home;
+            clicked => { root.page-selected(AppPage.home); }
+        }
+
+        NavItem {
+            icon-kind: IconKind.chat;
+            label: "Чат";
+            active: root.current-page == AppPage.chat;
+            clicked => { root.page-selected(AppPage.chat); }
+        }
+
+        NavItem {
+            icon-kind: IconKind.settings;
+            label: "Настройки";
+            active: root.current-page == AppPage.settings;
+            clicked => { root.page-selected(AppPage.settings); }
+        }
+
+        NavItem {
+            icon-kind: IconKind.profile;
+            label: "Профиль";
+            active: root.current-page == AppPage.profile;
+            clicked => { root.page-selected(AppPage.profile); }
+        }
+
+        Rectangle { vertical-stretch: 1; }
+
+        // Индикатор online/offline внизу
+        HorizontalLayout {
+            alignment: center;
+
+            Rectangle {
+                height: 10px;
+                width: 10px;
+                border-radius: 5px;
+                background: root.backend-online ? Theme.success : Theme.danger;
+                drop-shadow-blur: root.backend-online ? 6px : 0px;
+                drop-shadow-color: Theme.success;
+
+                animate background { duration: 300ms; }
+            }
+        }
+    }
+}

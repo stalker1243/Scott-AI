@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:conv="using:ScottAI.Avalonia.Converters"
+             x:DataType="vm:AutomationViewModel"
+             x:Class="ScottAI.Avalonia.Views.AutomationView">
+    <Grid Margin="32" RowDefinitions="Auto,Auto,*">
+        <TextBlock Grid.Row="0" Text="Автоматизация" FontSize="24" FontWeight="Bold"
+                   Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,16" />
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,16">
+            <Button Content="Кастомные команды" Command="{Binding ShowCommandsCommand}" Classes="tab"
+                    Classes.tabactive="{Binding ActiveTab, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=commands}" />
+            <Button Content="IFTTT-правила" Command="{Binding ShowIftttCommand}" Classes="tab"
+                    Classes.tabactive="{Binding ActiveTab, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=ifttt}" />
+            <Button Content="Макросы" Command="{Binding ShowMacrosCommand}" Classes="tab"
+                    Classes.tabactive="{Binding ActiveTab, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=macros}" />
+            <Button Content="Шаблоны" Command="{Binding ShowTemplatesCommand}" Classes="tab"
+                    Classes.tabactive="{Binding ActiveTab, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=templates}" />
+        </StackPanel>
+
+        <TransitioningContentControl Grid.Row="2" Content="{Binding CurrentTab}">
+            <TransitioningContentControl.PageTransition>
+                <CrossFade Duration="0:0:0.16" />
+            </TransitioningContentControl.PageTransition>
+        </TransitioningContentControl>
+    </Grid>
+</UserControl>

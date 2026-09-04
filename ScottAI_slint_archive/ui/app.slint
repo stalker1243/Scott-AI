@@ -1,0 +1,154 @@
+import { Theme, AppStyle, AppPage } from "theme.slint";
+import { ChatMessage } from "structs.slint";
+import { Sidebar } from "components/sidebar.slint";
+import { TopBar } from "components/topbar.slint";
+import { HomePage } from "pages/home.slint";
+import { ChatPage } from "pages/chat.slint";
+import { SettingsPage } from "pages/settings.slint";
+import { ProfilePage } from "pages/profile.slint";
+
+export { AppStyle, AppPage, ChatMessage, Theme }
+
+export component AppWindow inherits Window {
+    title: "ScottAI";
+    width: 1500px;
+    height: 900px;
+    background: Theme.bg-window;
+
+    animate background { duration: 220ms; easing: ease-in-out; }
+
+    // ---------- Навигация ----------
+    in-out property <AppPage> current-page: AppPage.home;
+
+    // ---------- Состояние backend ----------
+    in property <bool> backend-online: false;
+    in property <string> cpu-usage: "—";
+    in property <string> ram-usage: "—";
+    in property <string> process-count: "—";
+    in property <string> backend-url: "";
+
+    // ---------- Чат ----------
+    in-out property <[ChatMessage]> chat-messages: [];
+    in-out property <string> chat-draft: "";
+    in property <bool> chat-sending: false;
+    in property <bool> has-pending-image: false;
+    in property <image> pending-image;
+    in property <string> pending-image-name: "";
+
+    // ---------- Профиль ----------
+    in-out property <string> profile-name: "";
+    in-out property <string> profile-bio: "";
+    in property <bool> profile-saved-recently: false;
+
+    // ---------- Колбэки наружу (в Rust) ----------
+    callback launch-assistant();
+    callback send-message();
+    callback new-chat();
+    callback attach-image();
+    callback clear-pending-image();
+    callback start-voice-input();
+    callback quick-command(string);
+    callback style-selected(AppStyle);
+    callback dark-mode-toggled(bool);
+    callback accent-selected(color);
+    callback glass-opacity-changed(float);
+    callback save-profile();
+
+    HorizontalLayout {
+        Sidebar {
+            current-page: root.current-page;
+            backend-online: root.backend-online;
+            page-selected(p) => { root.current-page = p; }
+        }
+
+        Rectangle {
+            background: transparent;
+
+            VerticalLayout {
+                spacing: 0;
+
+                TopBar {
+                    title: "ScottAI";
+                    subtitle: root.current-page == AppPage.home ? "Главная"
+                        : root.current-page == AppPage.chat ? "Чат"
+                        : root.current-page == AppPage.settings ? "Настройки"
+                        : "Профиль";
+                    backend-online: root.backend-online;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    clip: true;
+
+                    // Переключение страниц с плавным fade — каждая страница затухает/появляется
+                    HomePage {
+                        width: 100%;
+                        height: 100%;
+                        opacity: root.current-page == AppPage.home ? 1.0 : 0.0;
+                        visible: root.current-page == AppPage.home;
+                        backend-online: root.backend-online;
+                        cpu-usage: root.cpu-usage;
+                        ram-usage: root.ram-usage;
+                        process-count: root.process-count;
+                        profile-name: root.profile-name;
+                        launch-assistant => { root.launch-assistant(); }
+                        quick-command(text) => { root.quick-command(text); }
+
+                        animate opacity { duration: 180ms; }
+                    }
+
+                    ChatPage {
+                        width: 100%;
+                        height: 100%;
+                        opacity: root.current-page == AppPage.chat ? 1.0 : 0.0;
+                        visible: root.current-page == AppPage.chat;
+                        messages: root.chat-messages;
+                        draft <=> root.chat-draft;
+                        sending: root.chat-sending;
+                        has-pending-image: root.has-pending-image;
+                        pending-image: root.pending-image;
+                        pending-image-name: root.pending-image-name;
+                        send-message => { root.send-message(); }
+                        new-chat => { root.new-chat(); }
+                        attach-image => { root.attach-image(); }
+                        clear-pending-image => { root.clear-pending-image(); }
+                        start-voice-input => { root.start-voice-input(); }
+
+                        animate opacity { duration: 180ms; }
+                    }
+
+                    SettingsPage {
+                        width: 100%;
+                        height: 100%;
+                        opacity: root.current-page == AppPage.settings ? 1.0 : 0.0;
+                        visible: root.current-page == AppPage.settings;
+                        current-style: Theme.style;
+                        dark-mode: Theme.dark-mode;
+                        accent: Theme.accent;
+                        glass-opacity: Theme.glass-opacity;
+                        backend-url: root.backend-url;
+                        style-selected(s) => { root.style-selected(s); }
+                        dark-mode-toggled(v) => { root.dark-mode-toggled(v); }
+                        accent-selected(c) => { root.accent-selected(c); }
+                        glass-opacity-changed(v) => { root.glass-opacity-changed(v); }
+
+                        animate opacity { duration: 180ms; }
+                    }
+
+                    ProfilePage {
+                        width: 100%;
+                        height: 100%;
+                        opacity: root.current-page == AppPage.profile ? 1.0 : 0.0;
+                        visible: root.current-page == AppPage.profile;
+                        profile-name <=> root.profile-name;
+                        profile-bio <=> root.profile-bio;
+                        saved-recently: root.profile-saved-recently;
+                        save-profile => { root.save-profile(); }
+
+                        animate opacity { duration: 180ms; }
+                    }
+                }
+            }
+        }
+    }
+}

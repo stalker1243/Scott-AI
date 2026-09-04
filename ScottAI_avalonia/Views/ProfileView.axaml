@@ -1,0 +1,46 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             x:DataType="vm:ProfileViewModel"
+             x:Class="ScottAI.Avalonia.Views.ProfileView">
+    <StackPanel Margin="40" Spacing="24" MaxWidth="560">
+        <TextBlock Text="Профиль" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
+
+        <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
+            <Border Width="88" Height="88" CornerRadius="44" ClipToBounds="True" Background="{DynamicResource Accent}">
+                <Grid>
+                    <Image Source="{Binding AvatarImage}" Stretch="UniformToFill"
+                           IsVisible="{Binding AvatarImage, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+                    <TextBlock Text="👤" FontSize="34" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               IsVisible="{Binding AvatarImage, Converter={x:Static conv:ObjectConverters.IsNull}}" />
+                </Grid>
+            </Border>
+            <StackPanel VerticalAlignment="Center" Spacing="8">
+                <TextBlock Text="{Binding Name}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
+                <TextBlock Text="Локальный профиль Scott AI" FontSize="12" Foreground="{DynamicResource TextMuted}" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Изменить фото" Classes="soft" Click="OnPickAvatarClick" />
+                    <Button Content="Удалить" Classes="danger-text" Command="{Binding RemoveAvatarCommand}"
+                            IsVisible="{Binding AvatarImage, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+            <TextBlock Text="Имя" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+            <TextBox Text="{Binding Name}" PlaceholderText="Как к вам обращаться?" />
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+            <TextBlock Text="О себе" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+            <TextBox Text="{Binding Bio}" AcceptsReturn="True" Height="90" PlaceholderText="Расскажите немного о себе..." />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Spacing="10">
+            <Button Content="Сохранить" Command="{Binding SaveCommand}" Classes="accent" />
+            <TextBlock Text="Сохранено" Foreground="{DynamicResource Success}" VerticalAlignment="Center" FontWeight="SemiBold"
+                       IsVisible="{Binding SavedRecently}" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

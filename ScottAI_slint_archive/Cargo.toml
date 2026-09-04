@@ -1,0 +1,89 @@
+[package]
+name = "scott_ai"
+version = "0.1.0"
+edition = "2024"
+authors = ["Phantom"]
+description = "ScottAI Desktop Launcher"
+license = "MIT"
+
+[dependencies]
+
+# UI
+slint = { version = "1.13", features = ["raw-window-handle-06"] }
+
+# Native window blur (Glass style)
+window-vibrancy = "0.5"
+raw-window-handle = "0.6"
+
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error Handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Directories
+directories = "6"
+
+# Open files / browser
+open = "5"
+
+# Images
+image = "0.25"
+
+# UUID
+uuid = { version = "1", features = ["v4"] }
+
+# Time
+chrono = "0.4"
+
+# Random
+rand = "0.9"
+
+# Clipboard
+arboard = "3"
+
+# Regex
+regex = "1"
+
+# Lazy Static
+once_cell = "1"
+
+# OS Info
+sysinfo = "0.37"
+
+# Audio
+rodio = "0.21"
+
+# Config
+toml = "0.9"
+
+# File dialog
+rfd = "0.15"
+
+# Markdown
+pulldown-cmark = "0.13"
+
+[build-dependencies]
+slint-build = "1.13"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1

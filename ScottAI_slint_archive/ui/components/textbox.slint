@@ -1,0 +1,47 @@
+import { Theme } from "../theme.slint";
+
+export component StyledInput inherits Rectangle {
+    in property <string> placeholder: "";
+    in-out property <string> text <=> input.text;
+    in property <bool> password: false;
+    in property <bool> multiline: false;
+    in property <bool> enabled: true;
+    callback edited(string);
+    callback accepted(string);
+
+    height: multiline ? 120px : 44px;
+    border-radius: Theme.radius-sm;
+    background: Theme.bg-elevated;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.border;
+
+    animate border-color { duration: 150ms; }
+
+    input := TextInput {
+        x: 14px;
+        y: multiline ? 10px : 0px;
+        width: parent.width - 28px;
+        height: multiline ? parent.height - 20px : parent.height;
+        vertical-alignment: multiline ? TextVerticalAlignment.top : TextVerticalAlignment.center;
+        wrap: multiline ? TextWrap.word-wrap : TextWrap.no-wrap;
+        font-size: 15px;
+        font-family: Theme.font-family;
+        color: Theme.text-primary;
+        enabled: root.enabled;
+        input-type: root.password ? InputType.password : InputType.text;
+        edited => { root.edited(self.text); }
+        accepted => { root.accepted(self.text); }
+    }
+
+    if input.text == "" && !input.has-focus: Text {
+        x: 14px;
+        y: multiline ? 10px : 0px;
+        width: parent.width - 28px;
+        height: multiline ? 20px : parent.height;
+        vertical-alignment: multiline ? TextVerticalAlignment.top : TextVerticalAlignment.center;
+        text: root.placeholder;
+        color: Theme.text-muted;
+        font-size: 15px;
+        font-family: Theme.font-family;
+    }
+}

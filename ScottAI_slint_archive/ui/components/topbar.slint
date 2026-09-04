@@ -1,0 +1,51 @@
+import { Theme } from "../theme.slint";
+import { StatusIndicator } from "status_indicator.slint";
+
+export component TopBar inherits Rectangle {
+    in property <string> title: "ScottAI";
+    in property <string> subtitle: "";
+    in property <bool> backend-online: false;
+
+    height: 72px;
+    background: Theme.bg-topbar;
+
+    animate background { duration: 200ms; }
+
+    Rectangle {
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.border;
+    }
+
+    HorizontalLayout {
+        padding-left: 28px;
+        padding-right: 28px;
+        alignment: space-between;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+
+            Text {
+                text: root.title;
+                color: Theme.text-primary;
+                font-size: 26px;
+                font-weight: 700;
+                font-family: Theme.font-family;
+                animate color { duration: 200ms; }
+            }
+
+            if root.subtitle != "": Text {
+                text: root.subtitle;
+                color: Theme.text-secondary;
+                font-size: 13px;
+                font-family: Theme.font-family;
+            }
+        }
+
+        StatusIndicator {
+            online: root.backend-online;
+        }
+    }
+}
