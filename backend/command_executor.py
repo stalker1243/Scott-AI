@@ -10,6 +10,7 @@ import psutil
 import re
 import time
 import json
+from functools import partial
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
@@ -123,12 +124,17 @@ class CommandExecutor:
             "create_desktop_file": self.create_desktop_file,
             "open_desktop": self.open_desktop,
             
-            # Расширенные команды (v3.1)
-            "powershell": self.route_to_extended,
-            "file_operation": self.route_to_extended,
-            "system_command": self.route_to_extended,
-            "run_script": self.route_to_extended,
-            "open_url": self.route_to_extended,
+            # Расширенные команды (v3.1).
+            # Тип обязательно привязывается через partial: route_to_extended
+            # разбирает команду именно по нему, а вызывается ниже как
+            # handler(**params) — без привязки он получал пустой command_type и
+            # отвечал «Неизвестный тип расширенной команды» на всё подряд, из-за
+            # чего громкость, яркость и питание не работали вовсе.
+            "powershell": partial(self.route_to_extended, "powershell"),
+            "file_operation": partial(self.route_to_extended, "file_operation"),
+            "system_command": partial(self.route_to_extended, "system_command"),
+            "run_script": partial(self.route_to_extended, "run_script"),
+            "open_url": partial(self.route_to_extended, "open_url"),
         }
         
         handler = handlers.get(command_type)

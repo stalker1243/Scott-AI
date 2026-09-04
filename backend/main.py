@@ -668,6 +668,18 @@ class ScottAI:
                 parsed = command_parser.parse(command_text)
             print(f"🔍 Распарсена команда ({'очищено: ' + command_text if command_text != text else 'как есть'}): {parsed}")
 
+            # fast_intent распознаёт управление громкостью и яркостью, а также
+            # запрос списка процессов — по регулярным выражениям с якорями.
+            # command_parser этих формулировок не знает и возвращает на «сделай
+            # громче» тип unknown, а решение о выполнении принимается именно по
+            # нему, поэтому команда молча превращалась в вопрос к LLM. Там, где
+            # парсер ничего не понял, а интент уверен, доверяем интенту: он для
+            # того и вычисляется раньше.
+            if parsed.command_type == 'unknown' and intent.intent_type in ('system_command', 'list_processes'):
+                print(f"↪️ Парсер не понял фразу, беру тип из интента: {intent.intent_type}")
+                parsed.command_type = intent.intent_type
+                parsed.main_param = intent.main_param
+
             explicit_action = any(
                 lower_text.startswith(prefix) for prefix in [
                     'открой ', 'запусти ', 'открыть ', 'включи ', 'вкл ',
@@ -681,7 +693,8 @@ class ScottAI:
             action_command_types = {
                 'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
                 'get_currency', 'get_weather', 'get_news', 'system_info', 'manage_window',
-                'file_operation', 'system_command', 'run_script', 'open_url', 'powershell'
+                'file_operation', 'system_command', 'run_script', 'open_url', 'powershell',
+                'list_processes'
             }
             explicit_search = any(
                 keyword in lower_text for keyword in ['найди', 'ищи', 'гугли', 'поиск', 'search', 'find', 'look for', 'google', 'поискать', 'гугль', 'яндекс']
@@ -924,6 +937,20 @@ class ScottAI:
         # ============= ПОЛУЧИТЬ ИНФОРМАЦИЮ О СИСТЕМЕ =============
         elif cmd_type == 'system_info':
             result = executor.execute('get_system_info')
+            return result
+
+        # ============= СИСТЕМНЫЕ КОМАНДЫ (громкость, яркость, питание) =============
+        # Ветки для этого типа здесь не было вовсе: парсер исправно превращал
+        # «увеличь громкость» в system_command с main_param='volume_up', а
+        # выполнять было некому — команда доходила до общего конца метода и
+        # Scott отвечал «Я вас слушаю», как будто не понял.
+        elif cmd_type == 'system_command':
+            result = executor.execute('system_command', main_param=param)
+            return result
+
+        # ============= СПИСОК ПРОЦЕССОВ =============
+        elif cmd_type == 'list_processes':
+            result = executor.execute('list_processes')
             return result
 
         # ============= ОТКРЫТЬ САЙТ =============
