@@ -9,9 +9,25 @@ import sys
 import io
 import time
 
-# Установить UTF-8 кодировку для вывода
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+# Установить UTF-8 кодировку для вывода.
+#
+# Консоль Windows по умолчанию отдаёт cp1251, и эмодзи в сообщениях валят
+# print с UnicodeEncodeError. Но подменять поток вслепую нельзя: под pytest
+# вывод уже перехвачен, и подмена его буфера ломает захват — прогон падает с
+# «I/O operation on closed file» ещё до первой проверки. Поэтому оборачиваем
+# только то, что ещё не в UTF-8.
+def _force_utf8(stream):
+    encoding = (getattr(stream, 'encoding', '') or '').lower().replace('-', '')
+    if encoding == 'utf8':
+        return stream
+    try:
+        return io.TextIOWrapper(stream.buffer, encoding='utf-8')
+    except (AttributeError, ValueError):
+        return stream
+
+
+sys.stdout = _force_utf8(sys.stdout)
+sys.stderr = _force_utf8(sys.stderr)
 
 # 🔑 Загрузить переменные из .env файла
 from dotenv import load_dotenv
@@ -410,6 +426,17 @@ try:
     app.include_router(ai_router)
 except ImportError as e:
     print(f"⚠️ Endpoints управления ИИ не подключены: {e}")
+
+# Диагностика: логи, сведения о машине, сбор отчёта об ошибке для отправки
+# разработчику. Живёт в diagnostics_endpoints.py.
+try:
+    try:
+        from .diagnostics_endpoints import router as diagnostics_router
+    except ImportError:
+        from diagnostics_endpoints import router as diagnostics_router
+    app.include_router(diagnostics_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints диагностики не подключены: {e}")
 
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")

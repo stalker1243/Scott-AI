@@ -21,6 +21,12 @@ GET /context/history
 GET /custom-commands/list
 GET /custom-commands/stats
 GET /desktop-files
+GET /diagnostics/errors
+GET /diagnostics/gpu
+GET /diagnostics/logs
+GET /diagnostics/logs/available
+GET /diagnostics/report/download
+GET /diagnostics/system
 GET /extended/history
 GET /extended/metrics
 GET /extended/schedule/list
@@ -64,6 +70,7 @@ POST /custom-commands/add
 POST /custom-commands/delete
 POST /custom-commands/execute
 POST /custom-commands/update
+POST /diagnostics/report
 POST /extended/file/copy
 POST /extended/file/delete
 POST /extended/file/open-folder

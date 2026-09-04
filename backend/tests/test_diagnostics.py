@@ -1,0 +1,154 @@
+"""
+Диагностика и, главное, отсутствие секретов в том, что уходит наружу.
+
+Отчёт об ошибке пользователь отправляет постороннему человеку — разработчику,
+в чат, в issue. API-ключ внутри такого архива означал бы, что утечку устроили
+мы сами, своими руками и одной кнопкой. Поэтому проверок на секреты здесь
+больше, чем на всё остальное вместе взятое.
+"""
+
+import json
+import zipfile
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+FAKE_SECRETS = {
+    "GROQ_API_KEY": "gsk_ZZtestZZ1234567890abcdefghijklmnop",
+    "EXECUTE_TOKEN": "совершенно-произвольный-токен-пользователя-9182",
+    "GITHUB_TOKEN": "github_pat_11TESTTESTTEST1234567890abcdefgh",
+}
+
+
+@pytest.fixture
+def diag(monkeypatch):
+    import diagnostics
+
+    for name, value in FAKE_SECRETS.items():
+        monkeypatch.setenv(name, value)
+    return diagnostics
+
+
+# ==================== Маскировка ====================
+
+@pytest.mark.parametrize("name", list(FAKE_SECRETS))
+def test_env_secrets_are_masked(diag, name):
+    """
+    Значение секретной переменной вырезается из текста дословно.
+
+    Работает даже для EXECUTE_TOKEN, который пользователь придумывает сам и
+    который не подходит ни под один шаблон известных сервисов — его значение
+    берётся прямо из окружения.
+    """
+    value = FAKE_SECRETS[name]
+    masked = diag.mask_secrets(f"строка лога, в ней {value} посреди текста")
+    assert value not in masked
+    assert "***СКРЫТО***" in masked
+
+
+@pytest.mark.parametrize("secret", [
+    "sk-abcdefghijklmnopqrstuvwxyz012345",
+    "gsk_abcdefghijklmnopqrstuvwxyz01234",
+    "AIzaSyAbCdEfGhIjKlMnOpQrStUvWxYz01234",
+    "ghp_abcdefghijklmnopqrstuvwxyz012345",
+    "Bearer abcdefghijklmnopqrstuvwxyz0123",
+])
+def test_known_key_shapes_are_masked(diag, secret):
+    """Чужие ключи узнаются по форме — на случай, если в лог попал не наш."""
+    assert secret not in diag.mask_secrets(f"заголовок: {secret}")
+
+
+def test_ordinary_text_survives(diag):
+    """Маскировка не должна съедать обычные строки — иначе логи бесполезны."""
+    text = "2026-09-04 ERROR Не нашёл приложение «калькулятор»"
+    assert diag.mask_secrets(text) == text
+
+
+# ==================== Сведения о системе ====================
+
+def test_system_info_hides_secret_values(diag):
+    """
+    В сведениях о машине секретные переменные показаны как «задано», не значением.
+
+    Иначе отчёт раздавал бы ключи ещё до того, как дело дошло до логов.
+    """
+    info = diag.collect_system_info()
+    settings = info["настройки"]
+
+    for name, value in FAKE_SECRETS.items():
+        assert settings.get(name) in ("задано", "пусто"), f"{name} раскрыт"
+        assert value not in json.dumps(info, ensure_ascii=False)
+
+
+def test_gpu_info_reports_device(diag):
+    """Сведения о видеокарте отвечают на первый вопрос при жалобе на медленную работу."""
+    gpu = diag.collect_gpu_info()
+    assert "cuda_доступна" in gpu
+    assert "torch" in gpu
+
+
+# ==================== Отчёт ====================
+
+def test_report_contains_no_secrets(diag, tmp_path, monkeypatch):
+    """
+    Собранный архив не содержит ни одного секрета — ни в логах, ни в описании.
+
+    Самая важная проверка файла: всё остальное здесь про удобство, а это про
+    то, что мы не устроим пользователю утечку.
+    """
+    monkeypatch.setattr(diag, "REPORTS_DIR", tmp_path / "reports")
+
+    # лог, куда секреты уже попали — именно так и бывает в жизни
+    log = tmp_path / "backend_errors.log"
+    log.write_text(
+        f"ERROR запрос отклонён\nAuthorization: Bearer {FAKE_SECRETS['GROQ_API_KEY']}\n"
+        f"токен={FAKE_SECRETS['EXECUTE_TOKEN']}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(diag.LOG_FILES, "backend_errors.log", log)
+
+    result = diag.build_report(note="Scott не открывает калькулятор")
+    assert result["success"], result
+
+    with zipfile.ZipFile(result["path"]) as archive:
+        names = archive.namelist()
+        assert "system_info.json" in names
+        assert "описание_проблемы.txt" in names
+
+        for name in names:
+            blob = archive.read(name).decode("utf-8", errors="replace")
+            for secret in FAKE_SECRETS.values():
+                assert secret not in blob, f"{name} содержит секрет"
+
+
+def test_report_keeps_user_note(diag, tmp_path, monkeypatch):
+    """Описание своими словами попадает в архив: обычно оно полезнее логов."""
+    monkeypatch.setattr(diag, "REPORTS_DIR", tmp_path / "reports")
+    result = diag.build_report(note="Звук пропал после перезапуска")
+
+    with zipfile.ZipFile(result["path"]) as archive:
+        assert "Звук пропал" in archive.read("описание_проблемы.txt").decode("utf-8")
+
+
+def test_tail_log_masks_and_limits(diag, tmp_path, monkeypatch):
+    """Хвост лога ограничен по длине и тоже проходит через маскировку."""
+    log = tmp_path / "backend_errors.log"
+    log.write_text("\n".join(f"строка {i} {FAKE_SECRETS['GROQ_API_KEY']}" for i in range(100)), encoding="utf-8")
+    monkeypatch.setitem(diag.LOG_FILES, "backend_errors.log", log)
+
+    result = diag.tail_log("backend_errors.log", lines=10)
+
+    assert result["success"]
+    assert len(result["lines"]) == 10
+    assert all(FAKE_SECRETS["GROQ_API_KEY"] not in line for line in result["lines"])
+
+
+def test_unknown_log_is_rejected(diag):
+    """
+    Читать можно только известные логи.
+
+    Имя файла приходит от клиента, и без белого списка параметром `name` можно
+    было бы попросить любой файл на диске.
+    """
+    assert not diag.tail_log("../../.env")["success"]
