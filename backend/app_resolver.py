@@ -19,19 +19,43 @@ Get-StartApps/App Paths → нечёткое (fuzzy) совпадение по �
 выдуманный успех.
 """
 
+import configparser
 import glob
 import json
 import os
+import platform
 import re
+import shutil
 import subprocess
-import winreg
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-APP_PATHS_KEYS = [
-    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),
-    (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),
+IS_WINDOWS = platform.system() == "Windows"
+
+# winreg существует только на Windows: на Linux безусловный импорт уронил бы
+# весь модуль, а с ним и запуск приложений целиком.
+if IS_WINDOWS:
+    import winreg
+
+    APP_PATHS_KEYS = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"),
+    ]
+else:
+    winreg = None
+    APP_PATHS_KEYS = []
+
+# Куда Linux складывает описания установленных приложений. Flatpak и snap
+# добавляют свои каталоги — без них половина программ на современном рабочем
+# столе оказалась бы невидимой.
+DESKTOP_DIRS = [
+    "/usr/share/applications",
+    "/usr/local/share/applications",
+    os.path.expanduser("~/.local/share/applications"),
+    "/var/lib/flatpak/exports/share/applications",
+    os.path.expanduser("~/.local/share/flatpak/exports/share/applications"),
+    "/var/lib/snapd/desktop/applications",
 ]
 
 START_MENU_DIRS = [
@@ -87,8 +111,8 @@ IndexEntry = Tuple[str, str]
 class ResolvedApp:
     matched_name: str
     target: str
-    kind: str  # 'path' | 'appid'
-    source: str  # 'app_paths' | 'alias_app_paths' | 'startapps' | 'shortcut'
+    kind: str  # 'path' | 'appid' (Windows) | 'desktop' (Linux)
+    source: str  # 'app_paths' | 'alias_app_paths' | 'startapps' | 'shortcut' | 'desktop'
 
 
 def _normalize(s: str) -> str:
@@ -110,7 +134,27 @@ def _normalize(s: str) -> str:
 
 
 def _similarity(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b).ratio()
+    """
+    Насколько похожи запрос и название из каталога.
+
+    Посимвольного сходства мало: «firefox» и «Firefox Web Browser» — одно и то
+    же приложение, но SequenceMatcher даёт всего 0.54, потому что подпись в
+    меню втрое длиннее запроса. Поэтому запрос, целиком входящий в название,
+    получает высокую оценку отдельно — иначе на Linux, где программы подписаны
+    развёрнуто, не нашлось бы почти ничего.
+
+    Слишком короткие запросы (меньше трёх символов) такой прибавки не
+    получают: «vs» совпало бы с доброй половиной каталога.
+    """
+    ratio = SequenceMatcher(None, a, b).ratio()
+
+    if len(a) >= 3 and len(b) >= 3:
+        if b.startswith(a) or a.startswith(b):
+            ratio = max(ratio, 0.9)
+        elif f" {a} " in f" {b} " or f" {b} " in f" {a} ":
+            ratio = max(ratio, 0.85)
+
+    return ratio
 
 
 def _resolve_app_paths(name: str) -> Optional[str]:
@@ -182,6 +226,85 @@ _startapps_index_cache: Optional[Dict[str, str]] = None
 _shortcut_index_cache: Optional[Dict[str, str]] = None
 
 
+def _build_desktop_index() -> Dict[str, str]:
+    """
+    Каталог приложений Linux: {нормализованное_имя: путь_к_.desktop}.
+
+    Читается поле Name (и localized Name[ru], если есть) — пользователь называет
+    программу так, как она подписана в меню, а не именем исполняемого файла.
+    Скрытые записи (NoDisplay=true) пропускаются: это служебные ассоциации типов
+    файлов, а не то, что человек просит открыть.
+    """
+    index: Dict[str, str] = {}
+
+    for directory in DESKTOP_DIRS:
+        if not os.path.isdir(directory):
+            continue
+        for path in glob.glob(os.path.join(directory, "**", "*.desktop"), recursive=True):
+            try:
+                parser = configparser.ConfigParser(interpolation=None, strict=False)
+                parser.read(path, encoding="utf-8")
+                if not parser.has_section("Desktop Entry"):
+                    continue
+                entry = parser["Desktop Entry"]
+
+                if entry.get("NoDisplay", "false").strip().lower() == "true":
+                    continue
+                if entry.get("Type", "Application").strip() != "Application":
+                    continue
+
+                names = [entry.get("Name", ""), entry.get("Name[ru]", "")]
+                for name in names:
+                    key = _normalize(name)
+                    if key and key not in index:
+                        index[key] = path
+            except Exception:
+                # Битый .desktop не должен ломать весь индекс: пропускаем его.
+                continue
+
+    return index
+
+
+_desktop_index_cache: Optional[Dict[str, str]] = None
+
+
+def _get_desktop_index() -> Dict[str, str]:
+    global _desktop_index_cache
+    if _desktop_index_cache is None:
+        _desktop_index_cache = _build_desktop_index()
+    return _desktop_index_cache
+
+
+def _launch_desktop_entry(path: str) -> None:
+    """
+    Запустить приложение по его .desktop-файлу.
+
+    gtk-launch и gio делают это правильно — с учётом окружения, переменных и
+    поля Exec со всеми его подстановками вроде %U. Если ни того, ни другого нет,
+    приходится разбирать Exec самостоятельно, вырезая подстановки: они
+    предназначены для передачи файлов и без них команда работает.
+    """
+    entry_id = os.path.splitext(os.path.basename(path))[0]
+
+    if shutil.which("gtk-launch"):
+        subprocess.Popen(["gtk-launch", entry_id], start_new_session=True)
+        return
+    if shutil.which("gio"):
+        subprocess.Popen(["gio", "launch", path], start_new_session=True)
+        return
+
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.read(path, encoding="utf-8")
+    exec_line = parser["Desktop Entry"].get("Exec", "").strip()
+    if not exec_line:
+        raise RuntimeError(f"В {path} нет строки Exec")
+
+    argv = [part for part in exec_line.split() if not part.startswith("%")]
+    if not argv:
+        raise RuntimeError(f"Пустая команда запуска в {path}")
+    subprocess.Popen(argv, start_new_session=True)
+
+
 def _get_startapps_index() -> Dict[str, str]:
     global _startapps_index_cache
     if _startapps_index_cache is None:
@@ -204,6 +327,34 @@ def refresh_index() -> Dict[str, int]:
     return {"startapps": len(_startapps_index_cache), "shortcuts": len(_shortcut_index_cache)}
 
 
+def _resolve_linux(search_name: str) -> Optional[ResolvedApp]:
+    """
+    Найти приложение среди .desktop-файлов: точное совпадение, затем нечёткое.
+
+    Логика та же, что и на Windows, — отличается только источник каталога.
+    Нечёткое совпадение здесь особенно уместно: пользователь говорит «браузер»
+    или «файрфокс», а в меню приложение подписано «Firefox Web Browser».
+    """
+    index = _get_desktop_index()
+    if not index:
+        return None
+
+    if search_name in index:
+        return ResolvedApp(matched_name=search_name, target=index[search_name],
+                           kind="desktop", source="desktop")
+
+    best_key, best_score = None, 0.0
+    for key in index:
+        score = _similarity(search_name, key)
+        if score > best_score:
+            best_score, best_key = score, key
+
+    if best_key and best_score >= MIN_FUZZY_SCORE:
+        return ResolvedApp(matched_name=best_key, target=index[best_key],
+                           kind="desktop", source="desktop")
+    return None
+
+
 def resolve_app(name: str) -> Optional[ResolvedApp]:
     """Найти приложение по произвольному имени пользователя (любой установленный софт)."""
     normalized = _normalize(name)
@@ -212,6 +363,11 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
 
     alias = ALIASES.get(normalized)
     search_name = alias or normalized
+
+    if not IS_WINDOWS:
+        # На Linux алиасы вида «блокнот» → «notepad.exe» бессмысленны, поэтому
+        # ищем и по исходному имени тоже: подписи в меню там свои.
+        return _resolve_linux(search_name) or _resolve_linux(normalized)
 
     # 1. Точное совпадение в App Paths (быстро, надёжно для консольных/классических программ)
     path = _resolve_app_paths(normalized) or (_resolve_app_paths(alias) if alias else None)
@@ -258,11 +414,19 @@ def launch_app(name: str) -> Dict:
             "success": False,
             "matched_name": None,
             "source": None,
-            "error": f'Не нашёл установленное приложение «{name}» — ни в каталоге Windows, ни в App Paths, ни среди ярлыков меню "Пуск".',
+            "error": (
+                f'Не нашёл установленное приложение «{name}» — ни в каталоге Windows, '
+                'ни в App Paths, ни среди ярлыков меню "Пуск".'
+                if IS_WINDOWS else
+                f'Не нашёл установленное приложение «{name}» среди .desktop-файлов '
+                '(/usr/share/applications, ~/.local/share/applications, flatpak, snap).'
+            ),
         }
 
     try:
-        if resolved.kind == "appid":
+        if resolved.kind == "desktop":
+            _launch_desktop_entry(resolved.target)
+        elif resolved.kind == "appid":
             os.startfile(f"shell:appsFolder\\{resolved.target}")
         elif resolved.target.lower().endswith(".lnk"):
             # os.startfile сам разворачивает .lnk в целевую программу — как двойной клик.
