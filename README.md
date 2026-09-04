@@ -392,12 +392,11 @@ docker-compose up
 
 ## 📚 Документация и ресурсы
 
-### 📖 Документация (НОВОЕ v3.0)
-- **START_HERE.txt** - Для новичков (начни отсюда!)
-- **QUICK_INSTALL_GUIDE.md** - Быстрая установка (10 мин)
-- **INSTALLATION_AND_UPDATES.md** - Полная инструкция (разработчикам)
-- **SYSTEM_COMPLETE_GUIDE.md** - Полный гайд всей системы
-- **README_SYSTEM_COMPLETE.md** - Итоговое резюме
+### 📖 Документация
+- **CLAUDE.md** — устройство проекта, запуск, ловушки и планы. Единственный
+  актуальный документ; прежние гайды (START_HERE.txt, QUICK_INSTALL_GUIDE.md,
+  SYSTEM_COMPLETE_GUIDE.md и другие) описывали давно исчезнувшие версии и
+  удалены — искать их следует в истории git.
 
 ### 🌐 API и интеграция
 - **FastAPI docs**: http://localhost:8000/docs
