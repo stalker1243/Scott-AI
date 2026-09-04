@@ -28,6 +28,8 @@ import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
+import threading
+import tempfile
 from typing import Dict, Optional
 from contextlib import asynccontextmanager
 import uvicorn
@@ -229,6 +231,116 @@ try:
 except Exception:
     logging.exception('Failed to set asyncio exception handler')
 
+
+# ==================== ПРОГРЕВ МОДЕЛЕЙ ====================
+# Whisper и Silero грузятся лениво, при первом обращении, и вся эта плата
+# ложилась на первую голосовую команду пользователя: около 6 с на загрузку
+# Whisper и 1.5 с на Silero, а сверх загрузки — ещё по паре секунд на первые
+# прогоны, пока CUDA дотягивает ядра под реальную работу. Замерено: первая
+# команда после запуска обходилась в 7.3 с (4.5 на синтез, 2.7 на
+# распознавание), тогда как прогретые модели дают ~120 мс и ~490 мс.
+#
+# Прогрев идёт фоновой задачей, а не в теле lifespan: сервер должен отвечать
+# на /health сразу, иначе лаунчер минуту показывает статус «offline».
+WARMUP_MODELS = os.getenv("WARMUP_MODELS", "1").strip().lower() not in ("0", "false", "no")
+
+
+def _warmup_silero_in_thread(barrier: threading.Barrier) -> None:
+    """
+    Прогнать через Silero несколько холостых фраз внутри потока tts_executor.
+
+    Прогонов именно три, и это не запас на всякий случай: замеры показывают,
+    что первые ДВА вызова save_wav стоят около двух секунд каждый, а начиная
+    с третьего укладываются в 10-15 мс. Причём вход при этом один и тот же —
+    дело не в длине фразы, а в том, что CUDA дотягивает ядра под реальную
+    работу. Один холостой прогон, как было сначала, снимал только половину
+    платы, и первая фраза пользователя всё равно ждала две секунды.
+
+    Прогревается тот же путь, которым идут запросы (save_wav, а не apply_tts):
+    прогрев соседнего пути ничего не даёт.
+
+    Барьер разводит задачи по РАЗНЫМ потокам пула: без него пул выполнил бы
+    обе последовательно в первом освободившемся потоке, а второй остался бы
+    холодным.
+    """
+    tmp_path = None
+    try:
+        import silero_tts
+        barrier.wait(timeout=60)
+        fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="scott_warmup_")
+        os.close(fd)
+        model = silero_tts.get_model()
+        for _ in range(3):
+            model.save_wav(
+                text="разогрев",
+                speaker=silero_tts.DEFAULT_SILERO_VOICE,
+                sample_rate=silero_tts.SAMPLE_RATE,
+                audio_path=tmp_path,
+            )
+    except Exception as e:
+        print(f"⚠️ Прогрев Silero в потоке не удался: {e}")
+    finally:
+        # Файл временный и одноразовый: в audio_cache он не нужен, там лежат
+        # настоящие ответы Scott, которые переиспользуются между запусками.
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
+def _warmup_whisper_sync() -> None:
+    """Загрузить Whisper и прогнать через него секунду тишины."""
+    import numpy as np
+    model = _get_whisper_model()
+    model.transcribe(
+        np.zeros(16000, dtype=np.float32),
+        language="ru",
+        fp16=(_whisper_device == "cuda"),
+    )
+
+
+async def _warmup_models() -> None:
+    """
+    Разогреть тяжёлые модели в фоне, чтобы первая команда шла по горячему пути.
+
+    Порядок не случаен: сначала синтез (полторы секунды), потом распознавание
+    (шесть) — если пользователь заговорит с Scott сразу после запуска, к этому
+    моменту голос уже будет готов ответить.
+    """
+    loop = asyncio.get_running_loop()
+
+    # --- Синтез речи ---
+    try:
+        import scott_voice
+        current = scott_voice.get_current_voice()
+        if scott_voice._is_silero_voice(current):
+            t = time.perf_counter()
+            import silero_tts
+            # Веса тянем один раз в отдельном потоке: если бы обе задачи пула
+            # вызвали get_model() разом, они бы грузили модель параллельно.
+            await asyncio.to_thread(silero_tts.get_model)
+            barrier = threading.Barrier(TTS_WORKERS)
+            await asyncio.gather(*[
+                loop.run_in_executor(tts_executor, _warmup_silero_in_thread, barrier)
+                for _ in range(TTS_WORKERS)
+            ])
+            print(f"🔥 Silero прогрет за {(time.perf_counter() - t) * 1000:.0f} мс "
+                  f"({TTS_WORKERS} потока)")
+        else:
+            print(f"ℹ️ Прогрев синтеза пропущен: активен облачный голос «{current}»")
+    except Exception as e:
+        print(f"⚠️ Прогрев синтеза не удался: {e}")
+
+    # --- Распознавание речи ---
+    try:
+        t = time.perf_counter()
+        await asyncio.to_thread(_warmup_whisper_sync)
+        print(f"🔥 Whisper прогрет за {(time.perf_counter() - t) * 1000:.0f} мс")
+    except Exception as e:
+        print(f"⚠️ Прогрев Whisper не удался: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -243,8 +355,13 @@ async def lifespan(app: FastAPI):
     print(f"📍 WebSocket: ws://localhost:8000/ws/chat")
     print(f"📍 Docs: http://localhost:8000/docs")
     print("="*80 + "\n")
-    
+
+    warmup_task = asyncio.create_task(_warmup_models()) if WARMUP_MODELS else None
+
     yield  # Приложение работает здесь
+
+    if warmup_task and not warmup_task.done():
+        warmup_task.cancel()
     
     # ===== SHUTDOWN =====
     print("\n" + "="*80)
@@ -330,7 +447,8 @@ scott_profile = None
 knowledge_base = None
 system_monitor = None
 voice_trigger = None
-tts_executor = ThreadPoolExecutor(max_workers=2)
+TTS_WORKERS = 2
+tts_executor = ThreadPoolExecutor(max_workers=TTS_WORKERS)
 
 # Служебные слова, вырезаемые из фразы при извлечении поискового запроса для
 # веб-интеграций (см. ScottAI._extract_web_query) — то, что осталось после
