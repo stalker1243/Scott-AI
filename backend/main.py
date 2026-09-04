@@ -149,18 +149,6 @@ except ImportError as e:
     voice_rule_builder = None
     v33_router = None
 
-# Голосовые компоненты (v3.0)
-try:
-    try:
-        from .voice_endpoints import voice_router
-    except ImportError:
-        from voice_endpoints import voice_router
-    HAS_VOICE_ENDPOINTS = True
-except ImportError:
-    HAS_VOICE_ENDPOINTS = False
-    voice_router = None
-    print("⚠️ Голосовые endpoints не доступны. Установите требуемые пакеты.")
-
 # Версионные компоненты (v3.0)
 try:
     try:
@@ -382,10 +370,6 @@ try:
     print("🔒 Secure exec endpoint mounted at /internal/execute")
 except ImportError:
     print("⚠️ secure_exec router not available")
-
-# Подключить голосовые endpoints (v3.0)
-if HAS_VOICE_ENDPOINTS and voice_router:
-    app.include_router(voice_router)
 
 # Подключить версионные endpoints (v3.0)
 if HAS_VERSION_ENDPOINTS and version_router:

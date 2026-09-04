@@ -47,8 +47,6 @@ GET /versions/history
 GET /versions/items
 GET /versions/stats
 GET /voice/available
-GET /voice/status
-GET /voice/voices
 POST /ai/clear-memory
 POST /ai/configure
 POST /ai/execute
@@ -114,16 +112,10 @@ POST /timings/reset
 POST /versions/compare
 POST /versions/rollback
 POST /versions/track
-POST /voice/command-voice
 POST /voice/parse-macro
 POST /voice/parse-macro-action
 POST /voice/parse-rule
-POST /voice/recognize
-POST /voice/recognize-file
 POST /voice/select
-POST /voice/set-voice
-POST /voice/speak
-POST /voice/speak-stream
 POST /voice/suggest-name
 POST /web/github/search
 POST /web/youtube/search
