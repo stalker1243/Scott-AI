@@ -75,6 +75,30 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string? _voiceStatus;
     [ObservableProperty] private bool _voiceBusy;
 
+    // ---- Устройство для речи ----
+    // Автовыбор берёт видеокарту, когда она есть: разница принципиальная —
+    // распознавание фразы занимает около секунды против четырёх с половиной на
+    // процессоре. Ручной выбор нужен как аварийный выход: видеокарту может
+    // занять игра, драйвер — сбоить.
+    [ObservableProperty] private string _deviceChoice = "auto";
+    [ObservableProperty] private string _deviceInUse = "";
+    [ObservableProperty] private bool _cudaAvailable;
+    [ObservableProperty] private bool _deviceLockedByEnv;
+    [ObservableProperty] private string _deviceEnvVar = "";
+    [ObservableProperty] private bool _deviceBusy;
+    [ObservableProperty] private string? _deviceStatus;
+
+    public bool DeviceIsAuto => DeviceChoice == "auto";
+    public bool DeviceIsGpu => DeviceChoice == "cuda";
+    public bool DeviceIsCpu => DeviceChoice == "cpu";
+
+    partial void OnDeviceChoiceChanged(string value)
+    {
+        OnPropertyChanged(nameof(DeviceIsAuto));
+        OnPropertyChanged(nameof(DeviceIsGpu));
+        OnPropertyChanged(nameof(DeviceIsCpu));
+    }
+
     // ---- Версии ----
     public ObservableCollection<VersionItem> VersionedItems { get; } = new();
     [ObservableProperty] private bool _versionsLoading;
@@ -87,6 +111,7 @@ public partial class SettingsViewModel : ViewModelBase
         _ = LoadAiProviders();
         _ = LoadVersions();
         _ = LoadVoices();
+        _ = LoadDeviceSettings();
     }
 
     [RelayCommand]
@@ -148,6 +173,78 @@ public partial class SettingsViewModel : ViewModelBase
         SyncAccentSelection();
         PersistTheme();
     }
+
+    [RelayCommand]
+    private async Task LoadDeviceSettings()
+    {
+        var state = await _client.DeviceSettingsAsync();
+        ApplyDeviceState(state);
+    }
+
+    private void ApplyDeviceState(DeviceSettingsResponse? state)
+    {
+        if (state is null)
+        {
+            DeviceInUse = "backend не отвечает";
+            return;
+        }
+
+        CudaAvailable = state.CudaAvailable;
+
+        // Показываем состояние распознавания: оно дороже синтеза и заметнее для
+        // пользователя, а переключаются оба движка вместе.
+        if (state.Engines.TryGetValue("whisper", out var whisper))
+        {
+            DeviceChoice = whisper.Choice;
+            DeviceInUse = whisper.Device == "cuda" ? "видеокарта" : "процессор";
+            DeviceLockedByEnv = whisper.LockedByEnv;
+            DeviceEnvVar = whisper.EnvVar;
+        }
+    }
+
+    /// <summary>
+    /// Переключить оба движка сразу.
+    ///
+    /// Разделять их незачем: пользователь мыслит категорией «на чём работает
+    /// Scott», а не «на чём Whisper и отдельно Silero».
+    /// </summary>
+    private async Task SetDevice(string choice)
+    {
+        DeviceBusy = true;
+        DeviceStatus = null;
+        try
+        {
+            var (success, message, state) = await _client.SetDeviceAsync("whisper", choice);
+            if (!success)
+            {
+                DeviceStatus = message;
+                ToastService.Error(message);
+                return;
+            }
+
+            // Silero переключаем следом; если он откажется, распознавание уже
+            // переехало, и состояние покажет ровно это.
+            await _client.SetDeviceAsync("silero", choice);
+
+            ApplyDeviceState(state);
+            await LoadDeviceSettings();
+            DeviceStatus = "Модели перезагрузятся при следующей фразе";
+            ToastService.Success($"Устройство: {DeviceInUse}");
+        }
+        finally
+        {
+            DeviceBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private Task SetDeviceAuto() => SetDevice("auto");
+
+    [RelayCommand]
+    private Task SetDeviceGpu() => SetDevice("cuda");
+
+    [RelayCommand]
+    private Task SetDeviceCpu() => SetDevice("cpu");
 
     private void SyncAccentSelection()
     {

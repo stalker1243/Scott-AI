@@ -114,8 +114,10 @@ except ImportError:
 # роутера оказался бы менеджер с собственным состоянием в памяти.
 try:
     from . import runtime as scott_runtime
+    from . import device_settings as scott_device_settings
 except ImportError:
     import runtime as scott_runtime
+    import device_settings as scott_device_settings
 
 HAS_EXTENDED_EXECUTOR = scott_runtime.HAS_EXTENDED_EXECUTOR
 extended_executor = scott_runtime.extended_executor
@@ -437,6 +439,16 @@ try:
     app.include_router(diagnostics_router)
 except ImportError as e:
     print(f"⚠️ Endpoints диагностики не подключены: {e}")
+
+# Настройки, доступные из лаунчера: выбор устройства для речи.
+try:
+    try:
+        from .settings_endpoints import router as settings_router
+    except ImportError:
+        from settings_endpoints import router as settings_router
+    app.include_router(settings_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints настроек не подключены: {e}")
 
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
@@ -1177,21 +1189,21 @@ def _resolve_whisper_device() -> str:
     в CPU-сборке и RTX 3060 просто простаивала. На GPU та же модель отрабатывает
     за доли секунды.
 
-    Принудительно переопределяется переменной WHISPER_DEVICE в .env (cuda/cpu) —
-    например, чтобы вернуться на процессор при проблемах с драйвером.
+    Сам выбор живёт в device_settings: переменная WHISPER_DEVICE в .env, затем
+    сохранённый через Настройки лаунчера выбор, затем автоматика.
     """
-    forced = os.getenv("WHISPER_DEVICE", "").strip().lower()
-    if forced in ("cpu", "cuda"):
-        return forced
+    return scott_device_settings.resolve_device("whisper")
 
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return "cuda"
-        print("ℹ️ CUDA недоступна (torch собран без неё или нет драйвера) — Whisper пойдёт на CPU")
-    except Exception as e:
-        print(f"⚠️ Не удалось определить доступность CUDA: {e}")
-    return "cpu"
+
+def _unload_whisper_model() -> None:
+    """Выгрузить модель, чтобы она поднялась заново на выбранном устройстве."""
+    global _whisper_model_cache, _whisper_device
+    _whisper_model_cache = None
+    _whisper_device = None
+    print("🔊 Модель Whisper выгружена — поднимется заново на выбранном устройстве")
+
+
+scott_device_settings.register_reset_hook(_unload_whisper_model)
 
 
 def _get_whisper_model():

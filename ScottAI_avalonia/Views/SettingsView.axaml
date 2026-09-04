@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:models="using:ScottAI.Avalonia.Models"
@@ -63,6 +63,39 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+            </StackPanel>
+
+            <StackPanel Spacing="10">
+                <TextBlock Text="Устройство для речи" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                           Text="На видеокарте Scott распознаёт фразу примерно за секунду, на процессоре — за четыре с половиной. Автоматика берёт видеокарту, когда она доступна; переключайте вручную, если видеокарта занята или барахлит драйвер." />
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Content="Авто" Command="{Binding SetDeviceAutoCommand}" Classes="tab"
+                            Classes.tabactive="{Binding DeviceIsAuto}"
+                            IsEnabled="{Binding !DeviceBusy}" />
+                    <Button Content="Видеокарта" Command="{Binding SetDeviceGpuCommand}" Classes="tab"
+                            Classes.tabactive="{Binding DeviceIsGpu}"
+                            IsEnabled="{Binding CudaAvailable}" />
+                    <Button Content="Процессор" Command="{Binding SetDeviceCpuCommand}" Classes="tab"
+                            Classes.tabactive="{Binding DeviceIsCpu}"
+                            IsEnabled="{Binding !DeviceBusy}" />
+                </StackPanel>
+                <TextBlock FontSize="12" Foreground="{DynamicResource TextMuted}">
+                    <Run Text="Сейчас работает:" />
+                    <Run Text="{Binding DeviceInUse}" FontWeight="SemiBold" />
+                </TextBlock>
+                <TextBlock FontSize="12" Foreground="{DynamicResource TextMuted}"
+                           IsVisible="{Binding !CudaAvailable}"
+                           TextWrapping="Wrap"
+                           Text="Видеокарта недоступна: либо её нет, либо torch установлен в сборке для процессора." />
+                <TextBlock FontSize="12" Foreground="{DynamicResource Danger}" TextWrapping="Wrap"
+                           IsVisible="{Binding DeviceLockedByEnv}">
+                    <Run Text="Устройство задано в .env переменной" />
+                    <Run Text="{Binding DeviceEnvVar}" FontWeight="SemiBold" />
+                    <Run Text="— уберите её, чтобы переключать отсюда." />
+                </TextBlock>
+                <TextBlock Text="{Binding DeviceStatus}" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                           IsVisible="{Binding DeviceStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
             </StackPanel>
 
             <StackPanel Spacing="10">

@@ -313,6 +313,42 @@ public class BackendClient
         }
     }
 
+    // ---------- Устройство для речи ----------
+
+    public async Task<DeviceSettingsResponse?> DeviceSettingsAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<DeviceSettingsResponse>("/settings/device");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Переключить движок на другое устройство.
+    ///
+    /// Таймаут увеличен: backend выгружает модель, и следующее обращение к ней
+    /// поднимает веса заново — на процессоре это несколько секунд.
+    /// </summary>
+    public async Task<(bool Success, string Message, DeviceSettingsResponse? State)> SetDeviceAsync(string engine, string choice)
+    {
+        try
+        {
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(60));
+            var res = await _http.PostAsJsonAsync("/settings/device", new { engine, choice }, cts.Token);
+            var body = await res.Content.ReadFromJsonAsync<DeviceSettingsResponse>(cancellationToken: cts.Token);
+            var ok = res.IsSuccessStatusCode;
+            return (ok, body?.Message ?? (ok ? "Готово" : $"HTTP {(int)res.StatusCode}"), body);
+        }
+        catch (Exception e)
+        {
+            return (false, e.Message, null);
+        }
+    }
+
     /// <summary>
     /// Собрать архив с логами для отправки разработчику.
     ///

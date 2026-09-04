@@ -46,17 +46,39 @@ _load_lock = threading.Lock()
 
 
 def _resolve_device() -> str:
-    """Видеокарта, если доступна, иначе процессор. Переопределяется SILERO_DEVICE."""
-    forced = os.getenv("SILERO_DEVICE", "").strip().lower()
-    if forced in ("cpu", "cuda"):
-        return forced
+    """
+    Видеокарта, если доступна, иначе процессор.
+
+    Сам выбор живёт в device_settings — там же, где для Whisper, и там же он
+    меняется из Настроек лаунчера. Порядок приоритетов: переменная окружения
+    SILERO_DEVICE, затем сохранённый выбор пользователя, затем автоматика.
+    """
     try:
-        import torch
-        if torch.cuda.is_available():
-            return "cuda"
-    except Exception:
-        pass
-    return "cpu"
+        from .device_settings import resolve_device
+    except ImportError:
+        from device_settings import resolve_device
+    return resolve_device("silero")
+
+
+def unload_model() -> None:
+    """
+    Выгрузить модель, чтобы следующий синтез поднял её на другом устройстве.
+
+    Вызывается при смене устройства из интерфейса: без этого переключение
+    вступало бы в силу только после перезапуска backend.
+    """
+    global _model, _model_device
+    with _load_lock:
+        _model = None
+        _model_device = None
+    print("🎙️ Модель Silero выгружена — поднимется заново на выбранном устройстве")
+
+
+try:
+    from .device_settings import register_reset_hook
+except ImportError:
+    from device_settings import register_reset_hook
+register_reset_hook(unload_model)
 
 
 def is_available() -> bool:

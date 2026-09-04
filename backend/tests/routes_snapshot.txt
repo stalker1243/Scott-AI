@@ -43,6 +43,7 @@ GET /profile
 GET /profiles/current
 GET /profiles/list
 GET /profiles/stats
+GET /settings/device
 GET /templates/categories
 GET /templates/list
 GET /templates/popular
@@ -109,6 +110,7 @@ POST /profiles/switch
 POST /profiles/update
 POST /search-content
 POST /search-files
+POST /settings/device
 POST /speak
 POST /speech_to_text
 POST /templates/apply
