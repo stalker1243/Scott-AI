@@ -326,12 +326,36 @@ class ScottVoice:
         try:
             import hashlib
             use_silero = _is_silero_voice(voice)
+
+            try:
+                from .speech_text import prepare_for_speech, strip_decoration, has_speakable_content
+            except ImportError:
+                from speech_text import prepare_for_speech, strip_decoration, has_speakable_content
+
+            # Silero говорит только по-русски: числа и латиницу он молча
+            # выбрасывает, и «Запущено 285 процессов» звучит как «запущено
+            # процессов». Поэтому текст для него разворачивается словами, а для
+            # облачного edge-tts достаточно снять эмодзи — с числами и
+            # английским он справляется сам.
+            spoken_text = prepare_for_speech(text) if use_silero else strip_decoration(text).strip()
+
+            if use_silero and not has_speakable_content(spoken_text):
+                # Ни одной русской буквы — Silero на таком тексте бросает
+                # ValueError, и это выглядело как сбой движка: синтез молча
+                # уходил в облако. Честнее сразу отдать это edge-tts.
+                print(f"ℹ️ Нечего произносить по-русски в «{text[:40]}» — беру Edge TTS")
+                use_silero = False
+                voice = "ru-RU-DmitryNeural"
+                spoken_text = strip_decoration(text).strip()
             # Silero отдаёт WAV, edge-tts — MP3. Расширение входит в имя файла,
             # иначе кэш вернул бы WAV под видом mp3 и плеер бы на нём споткнулся.
             extension = "wav" if use_silero else "mp3"
             # Голос/скорость/тон — часть ключа кэша: иначе при смене голоса в
             # Настройках вернулся бы старый файл, озвученный прежним голосом.
-            hash_text = hashlib.md5(f"{voice}:{DEFAULT_RATE}:{DEFAULT_PITCH}:{text}".encode()).hexdigest()[:8]
+            # Ключ считается по ПОДГОТОВЛЕННОМУ тексту: разные исходники, звучащие
+            # одинаково, разумно делить один файл. Прежние файлы кэша при
+            # изменении подготовки просто перестают совпадать и создаются заново.
+            hash_text = hashlib.md5(f"{voice}:{DEFAULT_RATE}:{DEFAULT_PITCH}:{spoken_text}".encode()).hexdigest()[:8]
             save_file = self.audio_dir / f"scott_{hash_text}.{extension}"
             save_file = save_file.resolve()
 
@@ -341,7 +365,7 @@ class ScottVoice:
 
             if use_silero:
                 print(f"🎙️ Локальный синтез Silero (голос: {voice})")
-                silero_file = silero_tts.synthesize(text, str(save_file), voice)
+                silero_file = silero_tts.synthesize(spoken_text, str(save_file), voice)
                 if silero_file:
                     return silero_file
                 # Локальный движок не справился — не оставляем Scott немым,
@@ -353,7 +377,7 @@ class ScottVoice:
 
             if HAS_EDGE_TTS:
                 print(f"🎙️ Используем Edge TTS для синтеза (голос: {voice})")
-                edge_file = self._save_edge_tts(text, str(save_file), voice)
+                edge_file = self._save_edge_tts(spoken_text, str(save_file), voice)
                 return edge_file
 
             if not self.engine:
