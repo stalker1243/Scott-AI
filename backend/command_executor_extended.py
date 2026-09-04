@@ -10,6 +10,11 @@ import datetime
 from pathlib import Path
 from typing import Dict, Any, List
 import platform
+
+try:
+    from . import os_actions
+except ImportError:
+    import os_actions
 import schedule
 import time
 import threading
@@ -35,22 +40,12 @@ class ExtendedCommandExecutor:
         Выполнить PowerShell команду
         """
         try:
-            if platform.system() == 'Windows':
-                # Windows PowerShell
-                result = subprocess.run(
-                    ['powershell', '-Command', command],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-            else:
-                # Linux/Mac - bash
-                result = subprocess.run(
-                    ['/bin/bash', '-c', command],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
+            result = subprocess.run(
+                os_actions.shell_command(command),
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
             
             success = result.returncode == 0
             return {
@@ -66,25 +61,11 @@ class ExtendedCommandExecutor:
     # ==================== ФАЙЛОВЫЕ ОПЕРАЦИИ ====================
     
     def open_folder(self, path: str) -> Dict[str, Any]:
-        """
-        Открыть папку в файловом менеджере
-        """
-        try:
-            path = Path(path).resolve()
-            
-            if not path.exists():
-                return {'success': False, 'error': f'Папка не найдена: {path}'}
-            
-            if platform.system() == 'Windows':
-                os.startfile(path)
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['open', str(path)])
-            else:  # Linux
-                subprocess.run(['xdg-open', str(path)])
-            
-            return {'success': True, 'message': f'Папка открыта: {path}'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Открыть папку в файловом менеджере системы."""
+        result = os_actions.open_path(path)
+        if result["success"]:
+            return {"success": True, "message": f"Открываю {path}"}
+        return {"success": False, "error": result["error"]}
     
     def delete_file(self, file_path: str) -> Dict[str, Any]:
         """
@@ -141,133 +122,62 @@ class ExtendedCommandExecutor:
     # ==================== СИСТЕМНЫЕ КОМАНДЫ ====================
     
     def volume_up(self) -> Dict[str, Any]:
-        """Увеличить громкость"""
-        try:
-            if platform.system() == 'Windows':
-                self.execute_powershell(
-                    "(New-Object -ComObject WScript.Shell).SendKeys([char]175)"
-                )
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['osascript', '-e', 
-                    'set volume output volume ((output volume of (get volume settings)) + 10)'])
-            else:  # Linux
-                subprocess.run(['amixer', 'set', 'Master', '5%+'])
-            
-            return {'success': True, 'message': 'Громкость увеличена'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Увеличить громкость."""
+        result = os_actions.change_volume("up")
+        if result["success"]:
+            return {"success": True, "message": "Громкость увеличена"}
+        return {"success": False, "error": result["error"]}
     
     def volume_down(self) -> Dict[str, Any]:
-        """Уменьшить громкость"""
-        try:
-            if platform.system() == 'Windows':
-                self.execute_powershell(
-                    "(New-Object -ComObject WScript.Shell).SendKeys([char]174)"
-                )
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['osascript', '-e', 
-                    'set volume output volume ((output volume of (get volume settings)) - 10)'])
-            else:  # Linux
-                subprocess.run(['amixer', 'set', 'Master', '5%-'])
-            
-            return {'success': True, 'message': 'Громкость уменьшена'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Уменьшить громкость."""
+        result = os_actions.change_volume("down")
+        if result["success"]:
+            return {"success": True, "message": "Громкость уменьшена"}
+        return {"success": False, "error": result["error"]}
     
     def brightness_up(self) -> Dict[str, Any]:
-        """Увеличить яркость"""
-        try:
-            if platform.system() == 'Windows':
-                # Windows требует WMI
-                self.execute_powershell(
-                    'Get-WmiObject -Namespace root\\wmi -Class WmiMonitorBrightnessMethods | ' +
-                    'ForEach-Object { $_.WmiSetBrightness(1, 10) }'
-                )
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['osascript', '-e', 
-                    'tell application "System Events" to key code 145'])
-            else:  # Linux
-                subprocess.run(['xdotool', 'key', 'XF86MonBrightnessUp'])
-            
-            return {'success': True, 'message': 'Яркость увеличена'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Увеличить яркость экрана."""
+        result = os_actions.change_brightness("up")
+        if result["success"]:
+            return {"success": True, "message": "Яркость увеличена"}
+        return {"success": False, "error": result["error"]}
     
     def brightness_down(self) -> Dict[str, Any]:
-        """Уменьшить яркость"""
-        try:
-            if platform.system() == 'Windows':
-                self.execute_powershell(
-                    'Get-WmiObject -Namespace root\\wmi -Class WmiMonitorBrightnessMethods | ' +
-                    'ForEach-Object { $_.WmiSetBrightness(1, -10) }'
-                )
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['osascript', '-e', 
-                    'tell application "System Events" to key code 144'])
-            else:  # Linux
-                subprocess.run(['xdotool', 'key', 'XF86MonBrightnessDown'])
-            
-            return {'success': True, 'message': 'Яркость уменьшена'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Уменьшить яркость экрана."""
+        result = os_actions.change_brightness("down")
+        if result["success"]:
+            return {"success": True, "message": "Яркость уменьшена"}
+        return {"success": False, "error": result["error"]}
     
     def sleep_system(self) -> Dict[str, Any]:
-        """Включить спящий режим"""
-        try:
-            if platform.system() == 'Windows':
-                os.system('rundll32.exe powrprof.dll,SetSuspendState 0,1,0')
-            elif platform.system() == 'Darwin':
-                os.system('osascript -e "tell application \\"System Events\\" to sleep"')
-            else:  # Linux
-                os.system('systemctl suspend')
-            
-            return {'success': True, 'message': 'Система переводится в спящий режим'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Перевести компьютер в спящий режим."""
+        result = os_actions.power_action("sleep")
+        if result["success"]:
+            return {"success": True, "message": "Перевожу компьютер в спящий режим"}
+        return {"success": False, "error": result["error"]}
     
     def restart_system(self) -> Dict[str, Any]:
-        """Перезагрузить систему"""
-        try:
-            if platform.system() == 'Windows':
-                os.system('shutdown /r /t 30 /c "Перезагрузка инициирована Scott"')
-            elif platform.system() == 'Darwin':
-                os.system('osascript -e "tell application \\"System Events\\" to restart"')
-            else:  # Linux
-                os.system('sudo shutdown -r +1')
-            
-            return {'success': True, 'message': 'Система будет перезагружена через 30 сек'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Перезагрузить компьютер (с задержкой, чтобы успеть передумать)."""
+        result = os_actions.power_action("restart")
+        if result["success"]:
+            return {"success": True, "message": "Перезагрузка через 30 секунд"}
+        return {"success": False, "error": result["error"]}
     
     def shutdown_system(self) -> Dict[str, Any]:
-        """Выключить систему"""
-        try:
-            if platform.system() == 'Windows':
-                os.system('shutdown /s /t 30 /c "Выключение инициировано Scott"')
-            elif platform.system() == 'Darwin':
-                os.system('osascript -e "tell application \\"System Events\\" to shut down"')
-            else:  # Linux
-                os.system('sudo shutdown -h +1')
-            
-            return {'success': True, 'message': 'Система будет выключена через 30 сек'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Выключить компьютер (с задержкой, чтобы успеть передумать)."""
+        result = os_actions.power_action("shutdown")
+        if result["success"]:
+            return {"success": True, "message": "Выключение через 30 секунд"}
+        return {"success": False, "error": result["error"]}
     
     # ==================== URL ОПЕРАЦИИ ====================
     
     def open_url(self, url: str) -> Dict[str, Any]:
-        """
-        Открыть URL в браузере
-        """
-        try:
-            # Добавить протокол если его нет
-            if not url.startswith(('http://', 'https://', 'ftp://')):
-                url = 'https://' + url
-            
-            webbrowser.open(url)
-            return {'success': True, 'message': f'Открыт URL: {url}'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+        """Открыть ссылку в браузере по умолчанию."""
+        result = os_actions.open_url(url)
+        if result["success"]:
+            return {"success": True, "message": f"Открываю {url}"}
+        return {"success": False, "error": result["error"]}
     
     # ==================== РАСПИСАНИЕ И АВТОМАТИЗАЦИЯ ====================
     
