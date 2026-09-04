@@ -3,3 +3,6 @@ pytest-cov==4.1.0
 pytest-asyncio==0.21.1
 pytest-xdist==3.5.0
 httpx==0.25.0
+
+# requests отдельно ставить не нужно — он уже в requirements.txt как зависимость
+# backend; тесты на живом сервере (tests/test_live.py) ходят по HTTP именно им.
