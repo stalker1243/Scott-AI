@@ -2464,151 +2464,8 @@ async def export_analytics():
     return analytics_manager.export_analytics()
 
 
-# ============= ПРОФИЛИ ПОЛЬЗОВАТЕЛЕЙ (v3.3) =============
-
-@app.get("/profiles/list")
-async def list_profiles():
-    """Получить список всех профилей"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return {"profiles": profile_manager.list_profiles()}
-
-@app.get("/profiles/current")
-async def get_current_profile():
-    """Получить текущий профиль"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    profile = profile_manager.get_current_profile()
-    if profile:
-        return {"profile": profile.to_dict()}
-    return {"error": "Профиль не найден"}
-
-@app.post("/profiles/create")
-async def create_profile(data: Dict):
-    """Создать новый профиль"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return profile_manager.create_profile(
-        username=data.get('username', ''),
-        is_admin=data.get('is_admin', False)
-    )
-
-@app.post("/profiles/switch")
-async def switch_profile(data: Dict):
-    """Переключиться на профиль"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return profile_manager.switch_profile(data.get('username', ''))
-
-@app.post("/profiles/delete")
-async def delete_profile(data: Dict):
-    """Удалить профиль"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return profile_manager.delete_profile(data.get('username', ''))
-
-@app.post("/profiles/update")
-async def update_profile(data: Dict):
-    """Обновить профиль"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    username = data.get('username')
-    if not username:
-        return {"error": "Имя пользователя обязательно"}
-    return profile_manager.update_profile(username, **data)
-
-@app.get("/profiles/stats")
-async def profile_statistics():
-    """Получить статистику профилей"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return profile_manager.get_statistics()
-
-
-# ============= ШАБЛОНЫ (v3.3) =============
-
-@app.get("/templates/list")
-async def list_templates(category: str = None):
-    """Получить список шаблонов"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return {"templates": templates_manager.list_templates(category)}
-
-@app.get("/templates/categories")
-async def get_template_categories():
-    """Получить категории шаблонов"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return {"categories": templates_manager.list_categories()}
-
-@app.get("/templates/popular")
-async def get_popular_templates(limit: int = 5):
-    """Получить популярные шаблоны"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return {"templates": templates_manager.get_popular_templates(limit)}
-
-@app.post("/templates/apply")
-async def apply_template(data: Dict):
-    """Применить шаблон"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return templates_manager.apply_template(data.get('name', ''))
-
-@app.post("/templates/create")
-async def create_template(data: Dict):
-    """Создать кастомный шаблон"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return templates_manager.create_custom_template(
-        name=data.get('name', ''),
-        category=data.get('category', 'custom'),
-        description=data.get('description', ''),
-        commands=data.get('commands', []),
-        rules=data.get('rules', []),
-        icon=data.get('icon', '⭐')
-    )
-
-@app.post("/templates/delete")
-async def delete_template(data: Dict):
-    """Удалить шаблон"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return templates_manager.delete_template(data.get('name', ''))
-
-
 # ============= МАКРОСЫ (v3.3) =============
 
-@app.get("/macros/list")
-async def list_macros(enabled_only: bool = True):
-    """Получить список макросов"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return {"macros": macro_recorder.list_macros(enabled_only)}
-
-@app.get("/macros/status")
-async def get_recording_status():
-    """Получить статус записи"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return macro_recorder.get_recording_status()
-
-@app.post("/macros/start-recording")
-async def start_recording(data: Dict):
-    """Начать запись макроса"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return macro_recorder.start_recording(
-        macro_name=data.get('name', ''),
-        description=data.get('description', '')
-    )
-
-@app.post("/macros/stop-recording")
-async def stop_recording():
-    """Остановить запись"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return macro_recorder.stop_recording()
 
 @app.post("/macros/cancel-recording")
 async def cancel_recording():
@@ -2617,48 +2474,9 @@ async def cancel_recording():
         return {"error": "Компоненты v3.3 не доступны"}
     return macro_recorder.cancel_recording()
 
-@app.post("/macros/record-action")
-async def record_action(data: Dict):
-    """Записать действие"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return macro_recorder.record_action(
-        action_type=data.get('action_type', ''),
-        target=data.get('target', ''),
-        x=data.get('x', 0),
-        y=data.get('y', 0),
-        details=data.get('details', {})
-    )
-
-@app.post("/macros/execute")
-async def execute_macro(data: Dict):
-    """Выполнить макрос"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return macro_recorder.execute_macro(
-        macro_name=data.get('name', ''),
-        loop_count=data.get('loop_count', 1)
-    )
-
-@app.post("/macros/delete")
-async def delete_macro(data: Dict):
-    """Удалить макрос"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return macro_recorder.delete_macro(data.get('name', ''))
-
 
 # ============= ВЕРСИОНИРОВАНИЕ (v3.3) =============
 
-@app.get("/versions/history")
-async def get_version_history(item_id: str):
-    """Получить историю версий"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    history = version_manager.get_history(item_id)
-    if history:
-        return history
-    return {"error": f'История для "{item_id}" не найдена'}
 
 @app.get("/versions/current")
 async def get_current_version(item_id: str):
@@ -2670,38 +2488,6 @@ async def get_current_version(item_id: str):
         return version
     return {"error": f'Текущая версия для "{item_id}" не найдена'}
 
-@app.get("/versions/get")
-async def get_version(item_id: str, version_number: int):
-    """Получить конкретную версию"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    version = version_manager.get_version(item_id, version_number)
-    if version:
-        return version
-    return {"error": f'Версия {version_number} не найдена'}
-
-@app.post("/versions/track")
-async def track_change(data: Dict):
-    """Отследить изменение"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return version_manager.track_change(
-        item_id=data.get('item_id', ''),
-        item_type=data.get('item_type', ''),
-        data=data.get('data', {}),
-        author=data.get('author', 'system'),
-        change_description=data.get('description', '')
-    )
-
-@app.post("/versions/rollback")
-async def rollback_version(data: Dict):
-    """Откатиться к версии"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return version_manager.rollback(
-        item_id=data.get('item_id', ''),
-        version_number=data.get('version_number', 1)
-    )
 
 @app.post("/versions/compare")
 async def compare_versions(data: Dict):
@@ -2713,13 +2499,6 @@ async def compare_versions(data: Dict):
         v1=data.get('v1', 1),
         v2=data.get('v2', 2)
     )
-
-@app.get("/versions/stats")
-async def version_statistics():
-    """Получить статистику версий"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    return version_manager.get_statistics()
 
 
 # ============= СМАРТ УСЛОВИЯ (v3.3) =============
@@ -2759,21 +2538,6 @@ async def set_rule_logic(data: Dict):
 
 # ============= ГОЛОСОВОЕ СОЗДАНИЕ ПРАВИЛ (v3.3) =============
 
-@app.post("/voice/parse-rule")
-async def voice_parse_rule(data: Dict):
-    """Парсить голосовую команду для создания правила"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    
-    text = data.get('text', '')
-    result = voice_rule_builder.parse_voice_rule(text)
-    
-    # Проверить результат
-    validation = voice_rule_builder.validate_rule(result)
-    result['validation'] = validation
-    
-    return result
-
 
 @app.post("/voice/parse-macro-action")
 async def voice_parse_macro_action(data: Dict):
@@ -2785,24 +2549,8 @@ async def voice_parse_macro_action(data: Dict):
     return voice_rule_builder.parse_macro_instruction(text)
 
 
-@app.post("/voice/suggest-name")
-async def suggest_rule_name(data: Dict):
-    """Сгенерировать название для правила"""
-    if not HAS_V33_FEATURES:
-        return {"error": "Компоненты v3.3 не доступны"}
-    
-    name = voice_rule_builder.suggest_rule_name(
-        trigger_type=data.get('trigger_type', ''),
-        trigger_value=data.get('trigger_value', '')
-    )
-    
-    return {"suggested_name": name}
-
-
-
 # ============= SHUTDOWN HANDLING =============
 # Примечание: использование lifespan context manager выше вместо @app.on_event()
-
 
 
 # ============= ГЛАВНАЯ ФУНКЦИЯ =============
