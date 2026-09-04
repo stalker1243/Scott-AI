@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Media;
@@ -13,11 +13,14 @@ public partial class SettingsViewModel : ViewModelBase
 {
     private readonly BackendClient _client;
 
+    // Стартовые значения — те, что остались с прошлого запуска. Само оформление
+    // к этому моменту уже применено в App (до создания окна), здесь лишь
+    // приводится в соответствие состояние переключателей на странице.
     [ObservableProperty]
-    private bool _isDark = true;
+    private bool _isDark = SettingsStore.Current.IsDark;
 
     [ObservableProperty]
-    private string _currentStyle = "classic"; // "classic" | "glass" | "terminal"
+    private string _currentStyle = SettingsStore.Current.Style; // "classic" | "glass" | "terminal"
 
     public ObservableCollection<AccentSwatch> AccentSwatches { get; } = new(
         new[] { "#3B82F6", "#22C55E", "#A855F7", "#F59E0B", "#EF4444", "#00FFF2" }.Select(h => new AccentSwatch(h)));
@@ -28,7 +31,26 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private double _glassOpacity = ThemeService.GlassOpacityPercent;
 
-    partial void OnGlassOpacityChanged(double value) => ThemeService.SetGlassOpacity(value);
+    partial void OnGlassOpacityChanged(double value)
+    {
+        ThemeService.SetGlassOpacity(value);
+        PersistTheme();
+    }
+
+    /// <summary>
+    /// Запомнить оформление на следующий запуск. Снимок берётся с ThemeService,
+    /// а не с полей страницы: акцент он сбрасывает сам при смене стиля, и только
+    /// он знает, какой цвет в итоге применён.
+    /// </summary>
+    private void PersistTheme()
+    {
+        var settings = SettingsStore.Current;
+        settings.Style = CurrentStyle;
+        settings.IsDark = ThemeService.IsDark;
+        settings.AccentHex = ThemeService.CurrentAccentHex;
+        settings.GlassOpacity = ThemeService.GlassOpacityPercent;
+        SettingsStore.SaveCurrent();
+    }
 
     // ---- Модель ИИ ----
     public ObservableCollection<AiProvider> Providers { get; } = new();
@@ -73,6 +95,7 @@ public partial class SettingsViewModel : ViewModelBase
         CurrentStyle = "classic";
         ThemeService.ApplyStyle(AppStyle.Classic, IsDark);
         SyncAccentSelection();
+        PersistTheme();
     }
 
     [RelayCommand]
@@ -81,6 +104,7 @@ public partial class SettingsViewModel : ViewModelBase
         CurrentStyle = "glass";
         ThemeService.ApplyStyle(AppStyle.Glass);
         SyncAccentSelection();
+        PersistTheme();
     }
 
     [RelayCommand]
@@ -89,6 +113,7 @@ public partial class SettingsViewModel : ViewModelBase
         CurrentStyle = "terminal";
         ThemeService.ApplyStyle(AppStyle.Terminal);
         SyncAccentSelection();
+        PersistTheme();
     }
 
     [RelayCommand]
@@ -100,6 +125,7 @@ public partial class SettingsViewModel : ViewModelBase
             ThemeService.ApplyStyle(AppStyle.Classic, true);
             SyncAccentSelection();
         }
+        PersistTheme();
     }
 
     [RelayCommand]
@@ -111,6 +137,7 @@ public partial class SettingsViewModel : ViewModelBase
             ThemeService.ApplyStyle(AppStyle.Classic, false);
             SyncAccentSelection();
         }
+        PersistTheme();
     }
 
     [RelayCommand]
@@ -119,6 +146,7 @@ public partial class SettingsViewModel : ViewModelBase
         ThemeService.SetAccent(Color.Parse(swatch.Hex));
         CurrentAccentHex = swatch.Hex;
         SyncAccentSelection();
+        PersistTheme();
     }
 
     private void SyncAccentSelection()

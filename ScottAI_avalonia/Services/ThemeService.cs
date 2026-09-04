@@ -129,6 +129,38 @@ public static class ThemeService
         StyleApplied?.Invoke(style);
     }
 
+    /// <summary>
+    /// Восстановить оформление, сохранённое с прошлого запуска.
+    ///
+    /// Порядок важен: ApplyStyle сбрасывает акцент на цвет по умолчанию для
+    /// стиля, поэтому сохранённый акцент ставится после него, иначе он был бы
+    /// затёрт. Прозрачность выставляется до стиля, чтобы Glass отрисовался
+    /// сразу с нужной, а не мигнул чужой на старте.
+    /// </summary>
+    public static void ApplySaved(LauncherSettings settings)
+    {
+        GlassOpacityPercent = Math.Clamp(settings.GlassOpacity, 15, 100);
+
+        var style = settings.Style switch
+        {
+            "glass" => AppStyle.Glass,
+            "terminal" => AppStyle.Terminal,
+            _ => AppStyle.Classic,
+        };
+
+        ApplyStyle(style, settings.IsDark);
+
+        try
+        {
+            SetAccent(Color.Parse(settings.AccentHex));
+        }
+        catch (FormatException)
+        {
+            // В файле оказалась не пригодная к разбору строка — оставляем цвет
+            // по умолчанию, который уже выставил ApplyStyle.
+        }
+    }
+
     /// <summary>Изменить непрозрачность фона в Glass-стиле "на лету". Ничего не делает вне Glass — значение просто запоминается на будущее.</summary>
     public static void SetGlassOpacity(double percent)
     {
