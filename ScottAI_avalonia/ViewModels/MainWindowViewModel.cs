@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -54,12 +54,14 @@ public partial class MainWindowViewModel : ViewModelBase
     public AnalyticsViewModel AnalyticsPage { get; }
     public SettingsViewModel SettingsPage { get; }
     public ProfileViewModel ProfilePage { get; } = new();
+    public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
     {
         Home = new HomeViewModel(_client, NavigateChat);
         Chat = new ChatViewModel(_client);
         SystemPage = new SystemViewModel(_client);
+        LogsPage = new LogsViewModel(_client);
         AutomationPage = new AutomationViewModel(_client);
         AnalyticsPage = new AnalyticsViewModel(_client);
         SettingsPage = new SettingsViewModel(_client);
@@ -158,6 +160,14 @@ public partial class MainWindowViewModel : ViewModelBase
         CurrentPage = ProfilePage;
         PageTitle = "Профиль";
         ActivePage = "profile";
+    }
+
+    [RelayCommand]
+    private void NavigateLogs()
+    {
+        CurrentPage = LogsPage;
+        PageTitle = "Логи";
+        ActivePage = "logs";
     }
 
     [RelayCommand]

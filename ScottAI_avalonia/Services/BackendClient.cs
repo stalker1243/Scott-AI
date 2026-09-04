@@ -284,6 +284,54 @@ public class BackendClient
         var (success, message, _) = await V33PostAsync<object>("/versions/rollback", new { item_id = itemId, version });
         return (success, message);
     }
+
+    // ---------- Диагностика ----------
+
+    /// <summary>Последние ошибки из лога backend. Секреты вырезаны на стороне backend.</summary>
+    public async Task<List<LogEntry>> RecentErrorsAsync(int limit = 50)
+    {
+        try
+        {
+            var body = await _http.GetFromJsonAsync<LogEntriesResponse>($"/diagnostics/errors?limit={limit}");
+            return body?.Errors ?? new List<LogEntry>();
+        }
+        catch
+        {
+            return new List<LogEntry>();
+        }
+    }
+
+    public async Task<GpuInfo?> GpuInfoAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<GpuInfo>("/diagnostics/gpu");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Собрать архив с логами для отправки разработчику.
+    ///
+    /// Сборка читает и переписывает несколько файлов, поэтому таймаут здесь
+    /// больше общего: на разросшемся логе это занимает заметное время.
+    /// </summary>
+    public async Task<ReportResult?> BuildReportAsync(string? note)
+    {
+        try
+        {
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(60));
+            var res = await _http.PostAsJsonAsync("/diagnostics/report", new { note }, cts.Token);
+            return await res.Content.ReadFromJsonAsync<ReportResult>(cancellationToken: cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
 
 public class MetricsResponse

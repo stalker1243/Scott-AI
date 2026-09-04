@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:ScottAI.Avalonia.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -75,6 +75,13 @@
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="AccountCircleOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
                             <TextBlock Text="Профиль" HorizontalAlignment="Center" Classes="navlabel" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{Binding NavigateLogsCommand}" Classes="nav"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=logs}">
+                        <StackPanel Spacing="3">
+                            <mi:MaterialIcon Kind="TextBoxSearchOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Логи" HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                 </StackPanel>

@@ -1,0 +1,85 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             x:DataType="vm:LogsViewModel"
+             x:Class="ScottAI.Avalonia.Views.LogsView">
+    <Grid Margin="32" RowDefinitions="Auto,Auto,Auto,*">
+
+        <!-- Заголовок -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+            <StackPanel Grid.Column="0" Spacing="4">
+                <TextBlock Text="Логи и диагностика" FontSize="24" FontWeight="Bold"
+                           Foreground="{DynamicResource TextPrimary}" />
+                <TextBlock Text="Что пошло не так и как сообщить об этом разработчику"
+                           FontSize="12" Foreground="{DynamicResource TextMuted}" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Обновить" Command="{Binding RefreshCommand}"
+                    IsEnabled="{Binding !Loading}"
+                    Background="{DynamicResource BgElevated}" Foreground="{DynamicResource TextPrimary}"
+                    CornerRadius="8" Padding="14,8" VerticalAlignment="Center" />
+        </Grid>
+
+        <!-- Состояние машины -->
+        <Border Grid.Row="1" Margin="0,16,0,0" Background="{DynamicResource BgSurface}"
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                CornerRadius="12" Padding="16,14">
+            <StackPanel Spacing="6">
+                <TextBlock Text="Устройство для распознавания и синтеза речи"
+                           FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" FontSize="12" />
+                <TextBlock Text="{Binding GpuSummary}" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding GpuHint}" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{DynamicResource Danger}"
+                           IsVisible="{Binding GpuWarning}" />
+            </StackPanel>
+        </Border>
+
+        <!-- Сбор отчёта -->
+        <Border Grid.Row="2" Margin="0,14,0,0" Background="{DynamicResource BgSurface}"
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                CornerRadius="12" Padding="16,14">
+            <StackPanel Spacing="10">
+                <TextBlock Text="Сообщить о проблеме" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextSecondary}" FontSize="12" />
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                           Text="Опишите, что случилось — это помогает больше всего. Scott соберёт архив с логами и сведениями о компьютере. API-ключи и токены из архива вырезаются." />
+                <TextBox Text="{Binding Note}" AcceptsReturn="True" Height="70"
+                         PlaceholderText="Например: после перезапуска Scott перестал открывать браузер" />
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Content="Собрать отчёт" Command="{Binding BuildReportCommand}"
+                            IsEnabled="{Binding !Building}" Classes="accent"
+                            CornerRadius="8" Padding="14,8" />
+                    <Button Content="Открыть папку" Command="{Binding OpenReportFolderCommand}"
+                            IsVisible="{Binding ReportPath, Converter={x:Static conv:ObjectConverters.IsNotNull}}"
+                            Background="{DynamicResource BgElevated}" Foreground="{DynamicResource TextPrimary}"
+                            CornerRadius="8" Padding="14,8" />
+                    <TextBlock Text="{Binding Status}" VerticalAlignment="Center" FontSize="12"
+                               Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
+                </StackPanel>
+                <TextBlock Text="{Binding ReportPath}" FontSize="11" Foreground="{DynamicResource TextMuted}"
+                           TextWrapping="Wrap"
+                           IsVisible="{Binding ReportPath, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+            </StackPanel>
+        </Border>
+
+        <!-- Список ошибок -->
+        <Border Grid.Row="3" Margin="0,14,0,0" Background="{DynamicResource BgSurface}"
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="12">
+            <ScrollViewer>
+                <ItemsControl ItemsSource="{Binding Errors}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:LogEntry">
+                            <StackPanel Margin="16,10" Spacing="2">
+                                <TextBlock Text="{Binding Time}" FontSize="11"
+                                           Foreground="{DynamicResource TextMuted}" />
+                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12"
+                                           Foreground="{DynamicResource TextPrimary}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</UserControl>
