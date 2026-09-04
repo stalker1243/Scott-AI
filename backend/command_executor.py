@@ -165,11 +165,20 @@ class CommandExecutor:
         name_lower = name.lower().strip()
 
         if platform.system() != "Windows":
-            try:
-                subprocess.Popen([name] + (args.split() if args else []))
-                return f"✅ Открыл приложение: {name}"
-            except Exception as e:
-                return f"❌ Не смог открыть {name}: {str(e)}"
+            # Сначала пробуем как есть: пользователь мог назвать команду точно
+            # («firefox», «code»), и тогда лишний поиск ни к чему.
+            executable = shutil.which(name.split()[0]) if name.split() else None
+            if executable:
+                try:
+                    subprocess.Popen([executable] + (args.split() if args else []))
+                    return f"✅ Открыл приложение: {name}"
+                except Exception as e:
+                    print(f"⚠️ Прямой запуск «{name}» не удался ({e}), пробую каталог приложений")
+
+            # Иначе — общий поиск по .desktop-файлам. Раньше здесь стоял
+            # Popen([name]) без проверок: на просьбу «открой блокнот» система
+            # честно искала команду «блокнот» и, разумеется, не находила.
+            return self._launch_via_resolver(name)
 
         if name_lower in self.APP_MAP:
             executable = self.APP_MAP[name_lower]
@@ -195,6 +204,13 @@ class CommandExecutor:
                 else:
                     print(f"⚠️ APP_MAP указывает «{name}» → «{executable}», но такой программы нет в PATH — пробую универсальный поиск")
 
+        return self._launch_via_resolver(name)
+
+    def _launch_via_resolver(self, name: str) -> str:
+        """
+        Общий поиск приложения: реестр и меню «Пуск» на Windows,
+        .desktop-файлы на Linux. Одинаково вызывается с обеих платформ.
+        """
         try:
             from app_resolver import launch_app
         except ImportError:
@@ -240,14 +256,19 @@ class CommandExecutor:
                 return f"❌ Файл не найден: {path}"
             
             print(f"📄 Открываю файл: {path}")
-            
-            if platform.system() == "Windows":
-                os.startfile(path)
-            elif platform.system() == "Darwin":
-                subprocess.run(["open", path])
-            else:
-                subprocess.run(["xdg-open", path])
-            
+
+            # Через общий слой: он знает про все три системы и, в отличие от
+            # прежнего кода, возвращает настоящий результат. Раньше здесь
+            # рапортовалось об успехе даже когда xdg-open не отработал.
+            try:
+                from . import os_actions
+            except ImportError:
+                import os_actions
+
+            result = os_actions.open_path(path)
+            if not result["success"]:
+                return f"❌ Не смог открыть файл: {result['error']}"
+
             return f"✅ Открыл файл: {path}"
         except Exception as e:
             return f"❌ Ошибка при открытии файла: {str(e)}"

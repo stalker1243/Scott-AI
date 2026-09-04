@@ -47,20 +47,41 @@ class FileSystemManager:
         return None
 
     def _candidate_program_paths(self, program_name: str) -> List[str]:
-        """Сформировать кандидаты для запуска по имени программы."""
+        """
+        Сформировать кандидаты для запуска по имени программы.
+
+        Расширения и типовые места установки у систем разные: на Windows
+        программа — это .exe рядом с PATH или в System32, на Linux —
+        исполняемый файл без расширения в /usr/bin и соседних каталогах.
+        Перебирать чужие варианты бессмысленно: их там всё равно не будет.
+        """
+        is_windows = os.name == 'nt'
         candidates = []
+
+        suffixes = ['.exe', '.bat', '.cmd', '.lnk'] if is_windows else ['']
         env_path = os.environ.get('PATH', '')
         for entry in env_path.split(os.pathsep):
             if not entry:
                 continue
-            for suffix in ['.exe', '.bat', '.cmd', '.lnk']:
+            for suffix in suffixes:
                 candidates.append(os.path.join(entry, program_name + suffix))
-        candidates.extend([
-            os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'Programs', program_name),
-            os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'Microsoft', 'WindowsApps', program_name),
-            os.path.join('C:\\Windows\\System32', program_name),
-            os.path.join('C:\\Windows', program_name),
-        ])
+
+        if is_windows:
+            candidates.extend([
+                os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'Programs', program_name),
+                os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'Microsoft', 'WindowsApps', program_name),
+                os.path.join('C:\\Windows\\System32', program_name),
+                os.path.join('C:\\Windows', program_name),
+            ])
+        else:
+            candidates.extend([
+                os.path.join('/usr/bin', program_name),
+                os.path.join('/usr/local/bin', program_name),
+                os.path.join('/bin', program_name),
+                os.path.join('/snap/bin', program_name),
+                os.path.join(os.path.expanduser('~/.local/bin'), program_name),
+            ])
+
         return candidates
     
     def _search_in_directory(self, directory: str, program_name: str) -> Optional[str]:
@@ -155,11 +176,17 @@ class FileSystemManager:
         if not resolved_path:
             return {"success": False, "message": f"❌ Файл не найден: {file_path}"}
         
+        # os.startfile существует только на Windows — на Linux вызов падал бы с
+        # AttributeError. os_actions знает, чем открывают файлы в каждой системе.
         try:
-            os.startfile(resolved_path)
+            from . import os_actions
+        except ImportError:
+            import os_actions
+
+        result = os_actions.open_path(resolved_path)
+        if result["success"]:
             return {"success": True, "message": f"✅ Файл открыт: {os.path.basename(resolved_path)}"}
-        except Exception as e:
-            return {"success": False, "message": f"❌ Ошибка при открытии файла: {str(e)}"}
+        return {"success": False, "message": f"❌ Ошибка при открытии файла: {result['error']}"}
     
     def delete_file(self, file_path: str) -> Dict:
         """Удалить файл"""
