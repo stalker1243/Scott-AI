@@ -283,7 +283,10 @@ def is_ready(python: Optional[str] = None) -> bool:
     executable = python or sys.executable
     try:
         result = subprocess.run(
-            [executable, "-c", "import torch, whisper, fastapi; print('ok')"],
+            # omegaconf проверяется наравне с остальными: без него падает не
+            # импорт backend, а загрузка модели Silero — то есть уже после
+            # того, как мастер отчитается об успехе.
+            [executable, "-c", "import torch, whisper, fastapi, omegaconf; print('ok')"],
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0 or "ok" not in result.stdout:

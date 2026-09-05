@@ -342,3 +342,45 @@ def test_install_stops_without_pip(boot, monkeypatch):
     step = boot.install_dependencies("python")
     assert not step.done
     assert "get-pip" in step.error
+
+# ==================== Зависимости моделей ====================
+
+def test_readiness_checks_silero_dependency(boot, monkeypatch):
+    """
+    Готовность проверяет и omegaconf — зависимость, которую тянет Silero.
+
+    Найдено у человека, поставившего Scott из установщика: библиотеки стояли,
+    мастер отчитался бы об успехе, а загрузка модели падала с
+    «ModuleNotFoundError: No module named omegaconf». На машине разработчика
+    пакет оказался установлен заранее, поэтому пропажа и не всплывала.
+    """
+    checked = {}
+
+    class FakeResult:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        checked["code"] = cmd[-1] if cmd else ""
+        return FakeResult()
+
+    monkeypatch.setattr(boot.subprocess, "run", fake_run)
+    monkeypatch.setattr(boot, "models_ready", lambda: True)
+
+    assert boot.is_ready("python") is True
+    assert "omegaconf" in checked["code"], "проверка готовности не смотрит на omegaconf"
+
+
+def test_silero_dependency_pinned_in_requirements():
+    """
+    Пара к тесту выше: пакет перечислен в requirements.txt.
+
+    Сам backend его не импортирует — он нужен внутри модели, — поэтому при
+    чистке зависимостей его легко счесть лишним и удалить.
+    """
+    from pathlib import Path
+
+    requirements = Path(__file__).resolve().parent.parent / "requirements.txt"
+    text = requirements.read_text(encoding="utf-8")
+    assert "omegaconf" in text, "omegaconf пропал из зависимостей — Silero не загрузится"
