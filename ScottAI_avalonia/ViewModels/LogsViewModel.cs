@@ -171,7 +171,7 @@ public partial class LogsViewModel : ViewModelBase
             if (!string.IsNullOrWhiteSpace(ReportFolder))
             {
                 Process.Start(new ProcessStartInfo { FileName = ReportFolder, UseShellExecute = true });
-                ToastService.Info("Перетащите архив из открывшейся папки в чат");
+                ToastService.Info("Перетащите архив из папки в комментарии к посту");
             }
         }
         catch (Exception e)
