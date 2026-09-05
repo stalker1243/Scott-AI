@@ -189,16 +189,16 @@ def test_full_path_shortened_to_file_name(speech):
     r"""
     Полный путь вслух не читается.
 
-    «C:\Users\SKYNET\ScottAI\code\scott_program.c» звучало как «цэ двоеточие
+    «C:\Users\User\ScottAI\code\scott_program.c» звучало как «цэ двоеточие
     усерс скйнет скоттаи коде…» — понять из этого ничего нельзя, а путь
     целиком виден в чате.
     """
-    spoken = speech.shorten_paths(r"Файл: C:\Users\SKYNET\ScottAI\code\scott_program.c")
+    spoken = speech.shorten_paths(r"Файл: C:\Users\User\ScottAI\code\scott_program.c")
     assert spoken == "Файл: scott_program.c"
 
     # И то же самое по всей цепочке синтеза: без вызова shorten_paths внутри
     # prepare_for_speech правило было бы мёртвым.
-    voiced = speech.prepare_for_speech(r"Файл: C:\Users\SKYNET\ScottAI\code\scott_program.c")
+    voiced = speech.prepare_for_speech(r"Файл: C:\Users\User\ScottAI\code\scott_program.c")
     assert "усерс" not in voiced and "скйнет" not in voiced
 
 
