@@ -89,4 +89,5 @@ backend/jarvis_memory.json
 # документация для тех, кто им пользуется, — поэтому файл остаётся на диске,
 # но в репозиторий не уезжает.
 CLAUDE.md
+DEV_NOTES.md
 backend/scott_memory.json
