@@ -737,9 +737,16 @@ class ScottAI:
             # нему, поэтому команда молча превращалась в вопрос к LLM. Там, где
             # парсер ничего не понял, а интент уверен, доверяем интенту: он для
             # того и вычисляется раньше.
-            if parsed.command_type == 'unknown' and intent.intent_type in ('system_command', 'list_processes'):
+            if parsed.command_type == 'unknown' and intent.intent_type in ('system_command', 'list_processes', 'open_folder'):
                 print(f"↪️ Парсер не понял фразу, беру тип из интента: {intent.intent_type}")
                 parsed.command_type = intent.intent_type
+                parsed.main_param = intent.main_param
+
+            # Отдельный случай: парсер уверенно считает «открой загрузки»
+            # запуском приложения, потому что видит глагол «открой». Интент же
+            # разобрался, что речь о папке — и он тут точнее.
+            if intent.intent_type == 'open_folder' and parsed.command_type in ('open_app', 'unknown'):
+                parsed.command_type = 'open_folder'
                 parsed.main_param = intent.main_param
 
             explicit_action = any(
@@ -756,7 +763,7 @@ class ScottAI:
                 'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
                 'get_currency', 'get_weather', 'get_news', 'system_info', 'manage_window',
                 'file_operation', 'system_command', 'open_url',
-                'list_processes'
+                'list_processes', 'open_folder'
             }
             # 'powershell' и 'run_script' здесь намеренно отсутствуют. /command
             # не требует токена, и стоит появиться ветке выполнения для этих
@@ -1029,6 +1036,18 @@ class ScottAI:
         elif cmd_type == 'system_command':
             result = executor.execute('system_command', main_param=param)
             return result
+
+        # ============= ОТКРЫТЬ ПАПКУ =============
+        elif cmd_type == 'open_folder':
+            try:
+                from . import os_actions
+            except ImportError:
+                import os_actions
+
+            result = os_actions.open_user_folder(param)
+            if result["success"]:
+                return f"✅ Открыл папку: {result.get('output', param)}"
+            return f"❌ {result['error']}"
 
         # ============= СПИСОК ПРОЦЕССОВ =============
         elif cmd_type == 'list_processes':

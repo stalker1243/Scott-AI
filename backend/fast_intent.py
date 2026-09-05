@@ -168,6 +168,22 @@ class FastIntentEngine:
                 is_system=False
             )
 
+        # Открытие папки проверяется раньше открытия приложения: «открой
+        # загрузки» — просьба про каталог, а не про программу с таким
+        # названием, и раньше такие фразы заканчивались бесполезным «Не нашёл
+        # установленное приложение „папку загрузки“».
+        if self._matches_any(lower, self.OPEN_APP_PHRASES):
+            try:
+                from .os_actions import match_folder
+            except ImportError:
+                from os_actions import match_folder
+            folder = match_folder(lower)
+            if folder:
+                result = self._build_intent('open_folder', lower)
+                result.intent_subtype = folder
+                result.main_param = folder
+                return result
+
         if self._matches_any(lower, self.OPEN_APP_PHRASES):
             return self._build_intent('open_app', lower)
         if self._matches_any(lower, self.CREATE_FILE_PHRASES):

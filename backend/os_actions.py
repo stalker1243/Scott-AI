@@ -196,6 +196,117 @@ def power_action(action: str) -> Dict:
     return _run(command)
 
 
+# ==================== Папки пользователя ====================
+#
+# «Открой загрузки» — просьба про папку, а не про программу с таким названием.
+# Раньше такие фразы уходили в поиск приложений и заканчивались
+# бесполезным «Не нашёл установленное приложение „папку загрузки“».
+#
+# Имён у одной и той же папки много: человек говорит «загрузки», «скачанные»,
+# «downloads» — всё это один каталог.
+
+# Слова, которые почти наверняка означают именно папку: приложений с такими
+# названиями не бывает.
+ALWAYS_FOLDER = {
+    "downloads": ("загрузки", "загрузку", "загрузка", "скачанные", "скачивания", "downloads"),
+    "desktop": ("рабочий стол", "рабочем столе", "десктоп", "desktop"),
+    "home": ("домашняя папка", "домашнюю папку", "домашняя директория", "home"),
+}
+
+# А эти совпадают с названиями приложений: «Фотографии» и «Музыка» есть в меню
+# Пуск, и на просьбу «открой фотографии» человек чаще ждёт программу. Такие
+# слова считаются папкой, только если сказано слово «папка» — иначе фраза
+# уходит в обычный поиск приложений.
+FOLDER_IF_EXPLICIT = {
+    "documents": ("документы", "документами", "documents"),
+    "pictures": ("изображения", "картинки", "фотографии", "фото", "pictures"),
+    "music": ("музыка", "музыку", "музыкой", "music", "аудио"),
+    "videos": ("видео", "фильмы", "videos", "movies"),
+}
+
+FOLDER_ALIASES = {**ALWAYS_FOLDER, **FOLDER_IF_EXPLICIT}
+
+# Английские имена каталогов на Windows и ключи xdg на Linux.
+_WINDOWS_FOLDERS = {
+    "downloads": "Downloads",
+    "documents": "Documents",
+    "desktop": "Desktop",
+    "pictures": "Pictures",
+    "music": "Music",
+    "videos": "Videos",
+}
+
+_XDG_KEYS = {
+    "downloads": "DOWNLOAD",
+    "documents": "DOCUMENTS",
+    "desktop": "DESKTOP",
+    "pictures": "PICTURES",
+    "music": "MUSIC",
+    "videos": "VIDEOS",
+}
+
+
+def match_folder(text: str) -> Optional[str]:
+    """
+    Узнать в тексте название стандартной папки.
+
+    Спорные слова («фотографии», «музыка») распознаются только вместе со словом
+    «папка»: приложения с такими именами есть в меню Пуск, и на просьбу «открой
+    фотографии» человек скорее ждёт программу, а не каталог. Однозначные
+    («загрузки», «рабочий стол») срабатывают сразу.
+    """
+    lowered = text.lower().strip()
+    explicit = "папк" in lowered or "директор" in lowered
+
+    for key, names in ALWAYS_FOLDER.items():
+        if any(name in lowered for name in names):
+            return key
+
+    if explicit:
+        for key, names in FOLDER_IF_EXPLICIT.items():
+            if any(name in lowered for name in names):
+                return key
+
+    return None
+
+
+def user_folder(key: str) -> Optional[str]:
+    """
+    Путь к стандартной папке пользователя.
+
+    На Linux сначала спрашиваем у xdg-user-dir: в локализованной системе папка
+    может называться «Загрузки», и слепое ~/Downloads указало бы в пустоту.
+    """
+    home = str(Path.home())
+    if key == "home":
+        return home
+
+    if is_windows():
+        name = _WINDOWS_FOLDERS.get(key)
+        return os.path.join(home, name) if name else None
+
+    if current_os() == LINUX and find_tool("xdg-user-dir"):
+        xdg_key = _XDG_KEYS.get(key)
+        if xdg_key:
+            result = _run(["xdg-user-dir", xdg_key])
+            path = result.get("output", "").strip()
+            if result["success"] and path and path != home:
+                return path
+
+    name = _WINDOWS_FOLDERS.get(key)
+    return os.path.join(home, name) if name else None
+
+
+def open_user_folder(key: str) -> Dict:
+    """Открыть стандартную папку в файловом менеджере системы."""
+    path = user_folder(key)
+    if not path:
+        return {"success": False, "error": f"Не знаю, где находится «{key}»"}
+    if not os.path.isdir(path):
+        return {"success": False, "error": f"Папка не найдена: {path}"}
+    return open_path(path)
+
+
 # ==================== Открытие файлов и ссылок ====================
 
 def open_path(path: str) -> Dict:
