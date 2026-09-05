@@ -13,7 +13,7 @@
         Width="1400" Height="860"
         Background="{DynamicResource BgWindow}"
         FontFamily="{DynamicResource AppFontFamily}"
-        Title="ScottAI (Avalonia)"
+        Title="Scott AI"
         Icon="/Assets/scott.ico">
 
     <Panel>
@@ -241,7 +241,7 @@
          рядом: пока не поставлены torch и модели речи, работать всё равно
          нечему, и пускать человека в интерфейс, где ничего не отвечает, —
          значит показывать ему сломанную программу. -->
-    <Border IsVisible="{Binding FirstRun.Visible}" Background="{DynamicResource BgWindow}">
+    <Border IsVisible="{Binding FirstRun.Visible}" Background="{DynamicResource BgOpaque}">
         <StackPanel Width="520" Spacing="20" HorizontalAlignment="Center" VerticalAlignment="Center">
             <Image Source="{Binding Logo}" Width="72" Height="72" HorizontalAlignment="Center" />
 

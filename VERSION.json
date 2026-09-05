@@ -1,7 +1,7 @@
 {
   "app_name": "Scott AI",
-  "version": "1.0.1",
-  "build_number": 2,
+  "version": "1.0.2",
+  "build_number": 3,
   "release_date": "2026-09-06",
-  "notes": "Исправления после первой живой установки."
+  "notes": "Экран подготовки закрывает окно целиком."
 }

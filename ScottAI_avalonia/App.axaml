@@ -37,6 +37,8 @@
         <!-- Та же палитра, что и в Tauri-версии (Classic dark), чтобы обе версии
              лаунчера выглядели узнаваемо одинаково несмотря на разный стек. -->
         <SolidColorBrush x:Key="BgWindow">#10161F</SolidColorBrush>
+        <!-- Непрозрачный фон для экранов, закрывающих окно целиком. -->
+        <SolidColorBrush x:Key="BgOpaque">#10161F</SolidColorBrush>
         <SolidColorBrush x:Key="BgSidebar">#0D1420</SolidColorBrush>
         <SolidColorBrush x:Key="BgTopbar">#131B28</SolidColorBrush>
         <SolidColorBrush x:Key="BgSurface">#1A2332</SolidColorBrush>

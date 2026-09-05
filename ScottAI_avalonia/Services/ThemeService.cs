@@ -125,6 +125,16 @@ public static class ThemeService
             ? new FontFamily("Consolas, Cascadia Code, Courier New, monospace")
             : new FontFamily("Segoe UI, sans-serif");
 
+        // В Classic и Terminal фон и так непрозрачный, но ресурс должен
+        // существовать всегда: мастер обращается к нему при любом стиле.
+        if (style != AppStyle.Glass)
+        {
+            var opaque = style == AppStyle.Terminal
+                ? Terminal
+                : (dark ? ClassicDark : ClassicLight);
+            Application.Current!.Resources["BgOpaque"] = new SolidColorBrush(opaque["BgWindow"]);
+        }
+
         SetAccent(Color.Parse(DefaultAccents[style]));
         StyleApplied?.Invoke(style);
     }
@@ -185,6 +195,12 @@ public static class ThemeService
             var c = Glass[key];
             resources[key] = new SolidColorBrush(Color.FromArgb(alpha, c.R, c.G, c.B));
         }
+
+        // Фон для экранов, которые обязаны закрывать окно целиком (мастер
+        // первого запуска). В Glass обычный BgWindow намеренно полупрозрачный —
+        // ради размытия рабочего стола, — и сквозь мастер просвечивала главная
+        // страница вместе со статусом «online», хотя работать было ещё нечему.
+        resources["BgOpaque"] = new SolidColorBrush(Glass["BgWindow"]);
 
         SetBg("BgWindow", windowAlpha);
         SetBg("BgSidebar", windowAlpha);
