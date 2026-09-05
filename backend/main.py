@@ -339,6 +339,9 @@ async def lifespan(app: FastAPI):
     print(f"📍 Docs: http://localhost:8000/docs")
     print("="*80 + "\n")
 
+    # Слушателю нужен этот цикл, чтобы возвращать в него услышанные команды.
+    _set_main_loop(asyncio.get_running_loop())
+
     warmup_task = asyncio.create_task(_warmup_models()) if WARMUP_MODELS else None
 
     yield  # Приложение работает здесь
@@ -449,6 +452,16 @@ try:
     app.include_router(settings_router)
 except ImportError as e:
     print(f"⚠️ Endpoints настроек не подключены: {e}")
+
+# Прослушивание микрофона: старт, остановка, состояние.
+try:
+    try:
+        from .listen_endpoints import router as listen_router
+    except ImportError:
+        from listen_endpoints import router as listen_router
+    app.include_router(listen_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints прослушивания не подключены: {e}")
 
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
@@ -1064,6 +1077,81 @@ class ScottAI:
 
 # Инициализируем Scott AI
 scott_ai = ScottAI()
+
+
+# ============= ПРОСЛУШИВАНИЕ МИКРОФОНА =============
+# Scott слушает сам и выполняет только то, что сказано после его имени.
+# Слушатель создаётся здесь, потому что ему нужны Whisper и обработчик команд,
+# а роутер берёт готовый экземпляр из runtime — иначе импорты замкнулись бы.
+
+_main_loop = None
+
+
+def _set_main_loop(loop) -> None:
+    """Запомнить главный event loop: из него слушатель будет выполнять команды."""
+    global _main_loop
+    _main_loop = loop
+
+
+def _listener_transcribe(audio) -> str:
+    """
+    Распознать фразу, пришедшую с микрофона.
+
+    Whisper принимает массив напрямую — писать её во временный файл, как это
+    делает /speech_to_text для загруженных файлов, здесь незачем.
+    """
+    model = _get_whisper_model()
+    with timing_stage("01.распознавание.whisper"):
+        result = model.transcribe(audio, language="ru", fp16=(_whisper_device == "cuda"))
+    return (result.get("text") or "").strip()
+
+
+def _listener_handle(text: str) -> None:
+    """
+    Выполнить услышанную команду и озвучить ответ.
+
+    Вызывается из рабочего потока слушателя, а обработка команд асинхронная,
+    поэтому корутина передаётся в главный event loop. Ждать результат здесь
+    нельзя дольше разумного: пока поток занят, следующая фраза не разбирается.
+    """
+    if _main_loop is None:
+        print("⚠️ Главный цикл ещё не готов — команда пропущена")
+        return
+
+    async def run() -> None:
+        result = await scott_ai.process_command(text)
+        response = result.get("response", "")
+        if not response:
+            return
+        print(f"🤖 Scott: {response}")
+        voice = scott_runtime.scott_voice
+        if voice is not None:
+            try:
+                path = await asyncio.to_thread(voice.speak_to_file, response)
+                if path:
+                    await asyncio.to_thread(voice.play_audio, path)
+            except Exception as e:
+                print(f"⚠️ Не удалось озвучить ответ: {e}")
+
+    asyncio.run_coroutine_threadsafe(run(), _main_loop)
+
+
+try:
+    try:
+        from .listener import VoiceListener
+    except ImportError:
+        from listener import VoiceListener
+
+    scott_listener = VoiceListener(
+        transcribe=_listener_transcribe,
+        handle_command=_listener_handle,
+        check_trigger=check_voice_trigger,
+    )
+    scott_runtime.set_listener(scott_listener)
+    print("🎧 Слушатель готов (микрофон включается по команде из лаунчера)")
+except Exception as e:
+    scott_listener = None
+    print(f"⚠️ Слушатель недоступен: {e}")
 
 
 # ============= REST ENDPOINTS =============

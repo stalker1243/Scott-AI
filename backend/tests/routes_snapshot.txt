@@ -34,6 +34,8 @@ GET /health
 GET /ifttt/rules
 GET /ifttt/stats
 GET /list-processes
+GET /listen/devices
+GET /listen/status
 GET /macros/get
 GET /macros/list
 GET /macros/status
@@ -97,6 +99,8 @@ POST /ifttt/set-logic
 POST /ifttt/update-rule
 POST /internal/execute
 POST /kill-process
+POST /listen/start
+POST /listen/stop
 POST /macros/cancel-recording
 POST /macros/delete
 POST /macros/execute

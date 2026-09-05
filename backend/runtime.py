@@ -80,3 +80,15 @@ def set_scott_voice(voice) -> None:
     """Отдать модулю ссылку на созданный движок синтеза речи."""
     global scott_voice
     scott_voice = voice
+
+
+# ==================== Прослушивание микрофона ====================
+# По той же причине, что и голос: слушателю нужны Whisper и обработчик команд,
+# которые живут в main.py, поэтому создаётся он там, а сюда кладётся готовым.
+listener = None
+
+
+def set_listener(instance) -> None:
+    """Отдать модулю готовый VoiceListener."""
+    global listener
+    listener = instance
