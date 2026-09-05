@@ -177,7 +177,7 @@ public class BackendLauncher
     /// Лаунчер запускается из bin/Debug/net10.0, поэтому ищем вверх по дереву —
     /// тем же приёмом, которым EnvConfig находит .env.
     /// </summary>
-    private static string? FindBackendDirectory()
+    internal static string? FindBackendDirectory()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
 
@@ -202,7 +202,7 @@ public class BackendLauncher
     /// Виртуальные окружения проекта намеренно не используются — библиотеки
     /// ставятся в системный Python.
     /// </summary>
-    private static (string File, string Prefix)? FindPython()
+    internal static (string File, string Prefix)? FindPython()
     {
         foreach (var (file, prefix) in Candidates())
         {

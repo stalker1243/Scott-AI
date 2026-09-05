@@ -13,6 +13,9 @@ public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly BackendClient _client = new();
     private readonly BackendLauncher _backendLauncher = new();
+
+    /// <summary>Мастер первого запуска — виден, только пока машина не готова.</summary>
+    public FirstRunViewModel FirstRun { get; } = new();
     private readonly DispatcherTimer _healthTimer;
     private bool _everOnline;
 
@@ -107,6 +110,17 @@ public partial class MainWindowViewModel : ViewModelBase
     /// </summary>
     private async Task StartBackendAsync()
     {
+        // Сначала — готова ли машина вообще. Поднимать backend, когда не
+        // установлены torch и модели речи, бессмысленно: он упадёт на импорте,
+        // а человек увидит «offline» без объяснения. На готовой машине
+        // проверка занимает секунду и мастер не показывается.
+        BackendHint = "проверяю, всё ли установлено…";
+        if (!await FirstRun.EnsureReadyAsync())
+        {
+            BackendHint = "подготовка не завершена";
+            return;
+        }
+
         BackendHint = "проверяю Scott…";
         var (success, message) = await _backendLauncher.EnsureRunningAsync(_client);
         BackendHint = success ? "" : message;

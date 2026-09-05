@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:conv="using:ScottAI.Avalonia.Converters"
+        xmlns:aconv="using:Avalonia.Data.Converters"
         xmlns:models="using:ScottAI.Avalonia.Models"
         xmlns:mi="using:Material.Icons.Avalonia"
         mc:Ignorable="d" d:DesignWidth="1400" d:DesignHeight="860"
@@ -146,6 +147,47 @@
             </Grid>
         </Grid>
     </Grid>
+
+    <!-- Мастер первого запуска. Занимает окно целиком, а не показывается
+         рядом: пока не поставлены torch и модели речи, работать всё равно
+         нечему, и пускать человека в интерфейс, где ничего не отвечает, —
+         значит показывать ему сломанную программу. -->
+    <Border IsVisible="{Binding FirstRun.Visible}" Background="{DynamicResource BgWindow}">
+        <StackPanel Width="520" Spacing="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Image Source="{Binding Logo}" Width="72" Height="72" HorizontalAlignment="Center" />
+
+            <TextBlock Text="{Binding FirstRun.Title}" FontSize="22" FontWeight="Bold"
+                       HorizontalAlignment="Center" Foreground="{DynamicResource TextPrimary}" />
+
+            <TextBlock Text="{Binding FirstRun.Explanation}" TextWrapping="Wrap"
+                       TextAlignment="Center" Foreground="{DynamicResource TextSecondary}" />
+
+            <StackPanel Spacing="8" IsVisible="{Binding FirstRun.Error, Converter={x:Static aconv:ObjectConverters.IsNull}}">
+                <ProgressBar Value="{Binding FirstRun.Progress}" Minimum="0" Maximum="100" Height="6" />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="{Binding FirstRun.Status}" FontSize="12"
+                               Foreground="{DynamicResource TextMuted}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding FirstRun.Progress, StringFormat={}{0:0}%}"
+                               FontSize="12" Foreground="{DynamicResource TextMuted}" />
+                </Grid>
+            </StackPanel>
+
+            <Border IsVisible="{Binding FirstRun.Error, Converter={x:Static aconv:ObjectConverters.IsNotNull}}"
+                    Background="{DynamicResource BgElevated}" BorderBrush="{DynamicResource Danger}"
+                    BorderThickness="1" CornerRadius="10" Padding="14,12">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Установка не удалась" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Danger}" />
+                    <SelectableTextBlock Text="{Binding FirstRun.Error}" TextWrapping="Wrap"
+                                         FontSize="12" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="Чаще всего дело в оборвавшейся сети — уже скачанное не пропадёт, повтор продолжит с места остановки."
+                               TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}" />
+                    <Button Content="Попробовать снова" Classes="accent" HorizontalAlignment="Left"
+                            Command="{Binding FirstRun.RetryCommand}" IsVisible="{Binding FirstRun.CanRetry}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </Border>
 
     <!-- Модальное подтверждение опасных действий (kill process, удаление команд/правил/
          макросов/шаблонов) — раньше эти действия срабатывали мгновенно без предупреждения. -->
