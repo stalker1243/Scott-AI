@@ -152,3 +152,87 @@ def test_unknown_log_is_rejected(diag):
     было бы попросить любой файл на диске.
     """
     assert not diag.tail_log("../../.env")["success"]
+
+# ==================== Список ошибок ====================
+#
+# Раньше каждая строка с ERROR или Traceback шла в список отдельной записью, и
+# человек видел шесть одинаковых «Traceback (most recent call last):» — по ним
+# нельзя понять ровно ничего: сама ошибка стоит в последней строке блока.
+
+TRACEBACK_LOG = """2026-09-06 10:00:00,000 DEBUG httpx: всё в порядке
+Traceback (most recent call last):
+  File "main.py", line 10, in speak
+    voice.save_wav(text)
+  File "silero.py", line 51, in save_wav
+    raise ValueError("не найден голос eugene")
+ValueError: не найден голос eugene
+2026-09-06 10:00:05,000 DEBUG что-то обычное
+"""
+
+
+def _errors_from(tmp_path, monkeypatch, text):
+    """Подсунуть diagnostics временный лог и прочитать, что он из него достал."""
+    import diagnostics
+
+    log = tmp_path / "backend_errors.log"
+    log.write_text(text, encoding="utf-8")
+    monkeypatch.setitem(diagnostics.LOG_FILES, "backend_errors.log", log)
+    return diagnostics.recent_errors(50)
+
+
+def test_traceback_collapsed_to_its_message(tmp_path, monkeypatch):
+    """Трейсбек — одна запись, и в ней сама ошибка, а не слово «Traceback»."""
+    errors = _errors_from(tmp_path, monkeypatch, TRACEBACK_LOG)
+
+    assert len(errors) == 1, f"ожидалась одна запись, получено {len(errors)}"
+    assert errors[0]["text"] == "ValueError: не найден голос eugene"
+    assert "Traceback" not in errors[0]["text"]
+
+
+def test_traceback_details_kept(tmp_path, monkeypatch):
+    """
+    Подробности не теряются: они нужны при разборе, просто не в списке.
+    """
+    errors = _errors_from(tmp_path, monkeypatch, TRACEBACK_LOG)
+
+    assert "silero.py" in errors[0]["details"]
+    assert "Traceback" in errors[0]["details"]
+
+
+def test_repeated_errors_collapsed(tmp_path, monkeypatch):
+    """
+    Одинаковые ошибки подряд схлопываются со счётчиком.
+
+    В живом логе один и тот же отказ повторяется десятками — списка на десять
+    строк не хватит даже на одну настоящую причину.
+    """
+    errors = _errors_from(tmp_path, monkeypatch, TRACEBACK_LOG * 3)
+
+    assert len(errors) == 1
+    assert errors[0]["count"] == 3
+
+
+def test_plain_error_lines_kept(tmp_path, monkeypatch):
+    """
+    Пара к тестам выше: обычные строки ERROR никуда не деваются.
+
+    Не всякая ошибка приходит трейсбеком — многое пишется одной строкой.
+    """
+    errors = _errors_from(
+        tmp_path, monkeypatch,
+        "2026-09-06 10:00:00,000 ERROR main: не удалось открыть микрофон\n",
+    )
+
+    assert len(errors) == 1
+    assert "микрофон" in errors[0]["text"]
+    assert errors[0]["count"] == 1
+
+
+def test_debug_noise_ignored(tmp_path, monkeypatch):
+    """Отладочные строки в список не попадают — их в логе тысячи."""
+    errors = _errors_from(
+        tmp_path, monkeypatch,
+        "2026-09-06 10:00:00,000 DEBUG comtypes: Release POINTER\n" * 5,
+    )
+
+    assert errors == []

@@ -186,13 +186,32 @@ def tail_log(name: str, lines: int = 200) -> Dict:
     }
 
 
+def _summarise_traceback(block: List[str]) -> str:
+    """
+    Выжать из трейсбека строку, ради которой его читают.
+
+    Это последняя непустая строка — «ValueError: не найден голос eugene».
+    Строки «File ...» полезны при разборе, но в списке из десяти ошибок
+    занимают всё место, не отвечая на вопрос «что случилось».
+    """
+    for line in reversed(block):
+        text = line.strip()
+        if text and not text.startswith(("File ", "Traceback", "During handling",
+                                         "The above exception")):
+            return text
+    return "Traceback без сообщения"
+
+
 def recent_errors(limit: int = 50) -> List[Dict]:
     """
-    Только строки об ошибках из основного лога — то, что интересно пользователю.
+    Только ошибки из основного лога — то, что интересно человеку.
 
-    Уровень логирования в проекте DEBUG, и полный файл на сотни килобайт читать
-    бессмысленно: там подробности работы COM-объектов и HTTP-запросов. Здесь
-    остаются ERROR, CRITICAL и traceback'и.
+    Уровень логирования в проекте DEBUG, и полный файл на сотни килобайт
+    читать бессмысленно: там подробности работы COM-объектов и HTTP-запросов.
+
+    Трейсбек сворачивается в одну запись: показывается его последняя строка,
+    где тип исключения и сообщение. Раньше в списке было шесть одинаковых
+    «Traceback (most recent call last):» — по ним нельзя понять ровно ничего.
     """
     path = LOG_FILES["backend_errors.log"]
     if not path.exists():
@@ -203,16 +222,68 @@ def recent_errors(limit: int = 50) -> List[Dict]:
     except OSError:
         return []
 
-    interesting = []
-    for line in content.splitlines():
-        if re.search(r"\b(ERROR|CRITICAL|Traceback|Exception)\b", line):
-            stamp = ""
-            m = re.match(r"^(\d{4}-\d{2}-\d{2} [\d:,]+)", line)
-            if m:
-                stamp = m.group(1)
-            interesting.append({"time": stamp, "text": mask_secrets(line.strip())[:500]})
+    found: List[Dict] = []
+    block: List[str] = []
+    block_stamp = ""
 
-    return interesting[-max(1, limit):]
+    def flush_block() -> None:
+        """Закрыть накопленный трейсбек одной записью."""
+        nonlocal block, block_stamp
+        if block:
+            found.append({
+                "time": block_stamp,
+                "text": mask_secrets(_summarise_traceback(block))[:500],
+                "details": mask_secrets("\n".join(block))[:4000],
+            })
+            block = []
+            block_stamp = ""
+
+    for line in content.splitlines():
+        stamp_match = re.match(r"^(\d{4}-\d{2}-\d{2} [\d:,]+)", line)
+        stamp = stamp_match.group(1) if stamp_match else ""
+
+        if line.lstrip().startswith("Traceback (most recent call last)"):
+            flush_block()
+            block = [line.strip()]
+            block_stamp = stamp
+            continue
+
+        if block:
+            # Трейсбек продолжается, пока строки идут с отступом или это
+            # заголовки вложенных исключений.
+            if line.startswith((" ", "\t")) or line.strip().startswith(
+                ("During handling", "The above exception")
+            ):
+                block.append(line.rstrip())
+                continue
+
+            # Первая строка без отступа — это и есть само исключение.
+            if line.strip():
+                block.append(line.strip())
+            flush_block()
+            continue
+
+        if re.search(r"\b(ERROR|CRITICAL|Exception)\b", line):
+            found.append({
+                "time": stamp,
+                "text": mask_secrets(line.strip())[:500],
+                "details": "",
+            })
+
+    flush_block()
+
+    # Одинаковые ошибки подряд схлопываем: в логе они повторяются десятками,
+    # а человеку важен факт и сколько раз это случилось.
+    collapsed: List[Dict] = []
+    for entry in found:
+        if collapsed and collapsed[-1]["text"] == entry["text"]:
+            collapsed[-1]["count"] = collapsed[-1].get("count", 1) + 1
+            collapsed[-1]["time"] = entry["time"] or collapsed[-1]["time"]
+            continue
+        entry["count"] = 1
+        collapsed.append(entry)
+
+    return collapsed[-max(1, limit):]
 
 
 def build_report(note: Optional[str] = None) -> Dict:

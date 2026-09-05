@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace ScottAI.Avalonia.Models;
@@ -11,6 +11,23 @@ public class LogEntry
 
     [JsonPropertyName("text")]
     public string Text { get; set; } = "";
+
+    /// <summary>Сколько раз ошибка повторилась подряд. В логе один и тот же
+    /// отказ встречается десятками — списка не хватило бы даже на одну
+    /// настоящую причину.</summary>
+    [JsonPropertyName("count")]
+    public int Count { get; set; } = 1;
+
+    /// <summary>Полный трейсбек: в списке не показывается, но уезжает в архив
+    /// и виден при наведении.</summary>
+    [JsonPropertyName("details")]
+    public string Details { get; set; } = "";
+
+    public bool Repeated => Count > 1;
+
+    public string CountLabel => Count > 1 ? $"×{Count}" : "";
+
+    public bool HasDetails => !string.IsNullOrWhiteSpace(Details);
 }
 
 public class LogEntriesResponse

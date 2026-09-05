@@ -85,11 +85,22 @@
                 <ItemsControl ItemsSource="{Binding Errors}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="models:LogEntry">
-                            <StackPanel Margin="16,10" Spacing="2">
-                                <TextBlock Text="{Binding Time}" FontSize="11"
-                                           Foreground="{DynamicResource TextMuted}" />
+                            <StackPanel Margin="16,10" Spacing="3">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBlock Text="{Binding Time}" FontSize="11"
+                                               Foreground="{DynamicResource TextMuted}" />
+                                    <!-- «×5» вместо пяти одинаковых строк подряд. -->
+                                    <Border Background="{DynamicResource BgElevated}" CornerRadius="4"
+                                            Padding="5,1" IsVisible="{Binding Repeated}">
+                                        <TextBlock Text="{Binding CountLabel}" FontSize="10"
+                                                   Foreground="{DynamicResource TextSecondary}" />
+                                    </Border>
+                                </StackPanel>
+                                <!-- Полный трейсбек — в подсказке: в списке он занял бы
+                                     весь экран, а при разборе нужен. -->
                                 <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12"
-                                           Foreground="{DynamicResource TextPrimary}" />
+                                           Foreground="{DynamicResource TextPrimary}"
+                                           ToolTip.Tip="{Binding Details}" />
                             </StackPanel>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
