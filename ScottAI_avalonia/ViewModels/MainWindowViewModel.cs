@@ -16,6 +16,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
     /// <summary>Мастер первого запуска — виден, только пока машина не готова.</summary>
     public FirstRunViewModel FirstRun { get; } = new();
+
+    /// <summary>Полоска «вышла новая версия» — показывается один раз при запуске.</summary>
+    public UpdateViewModel Update { get; } = new("http://127.0.0.1:8000");
     private readonly DispatcherTimer _healthTimer;
     private bool _everOnline;
 
@@ -131,6 +134,14 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         await CheckHealthAsync();
+
+        // Обновления проверяются последними и молча: если backend не поднялся
+        // или GitHub недоступен, человек об этом не узнает — беспокоить его
+        // ради несостоявшейся проверки незачем.
+        if (success)
+        {
+            await Update.CheckAsync();
+        }
     }
 
     /// <summary>

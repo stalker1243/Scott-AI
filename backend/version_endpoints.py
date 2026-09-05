@@ -3,11 +3,17 @@ Scott AI v3.0 - Version Management API
 REST API endpoints for version checking and update management
 """
 
+import asyncio
 import json
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Optional
 from datetime import datetime
+
+try:
+    from . import updates
+except ImportError:
+    import updates
 
 version_router = APIRouter(prefix="/api/version", tags=["version"])
 
@@ -108,54 +114,27 @@ async def get_version_changelog(version: str):
     }
 
 @version_router.get("/update-check")
-async def check_for_updates(current_version: Optional[str] = None):
+async def check_for_updates(force: bool = False):
     """
-    Check if updates are available
-    
-    Args:
-        current_version: Current version string (optional)
-    
-    Returns:
-        - update_available: Boolean
-        - latest_version: Latest available version
-        - release_notes: Release notes for new version
-        - download_url: URL for downloading update
+    Вышла ли новая версия.
+
+    Раньше эта проверка была фикцией: она сравнивала версию из локального
+    VERSION.json с ней же самой и всегда отвечала «обновлений нет», никуда не
+    обращаясь. Теперь спрашиваем у GitHub Releases по-настоящему.
+
+    Ответ кэшируется на сутки (`force=true` обходит кэш): GitHub ограничивает
+    число запросов, а выпуски выходят куда реже.
+
+    Сетевой поход вынесен в отдельный поток — синхронный requests в async-
+    обработчике вешает весь backend, включая /health.
     """
-    version_info = load_version_info()
-    latest_version = version_info.get("version", "3.0.0")
-    
-    if not current_version:
-        current_version = latest_version
-    
-    # Simple version comparison (e.g., "3.0.0" > "2.9.9")
-    current_parts = [int(x) for x in current_version.split('.')]
-    latest_parts = [int(x) for x in latest_version.split('.')]
-    
-    has_update = latest_parts > current_parts
-    
-    update_info = {
-        "update_available": has_update,
-        "current_version": current_version,
-        "latest_version": latest_version,
-        "release_date": version_info.get("release_date"),
-    }
-    
-    if has_update:
-        changelog = version_info.get("changelog", {})
-        if latest_version in changelog:
-            update_info["release_notes"] = changelog[latest_version]
-        
-        installers = version_info.get("installers", {})
-        if "windows" in installers:
-            update_info["download_urls"] = {
-                "windows": installers["windows"].get("url"),
-                "portable": installers.get("portable", {}).get("url")
-            }
-    
+    info = await asyncio.to_thread(updates.check, force)
+
     return {
         "status": "success",
-        "data": update_info
+        "data": info.as_dict(),
     }
+
 
 @version_router.get("/requirements")
 async def get_system_requirements():
