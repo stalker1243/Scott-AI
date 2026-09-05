@@ -133,10 +133,19 @@ public partial class LogsViewModel : ViewModelBase
     [RelayCommand]
     private void ReportOnGitHub()
     {
+        // Описание уходит в адресную строку, а её длину браузеры ограничивают
+        // (обычно около 8 КБ). Длинный рассказ обрезаем: остальное человек
+        // допишет прямо на странице, где никаких ограничений нет.
+        var note = (Note ?? "").Trim();
+        if (note.Length > 1500)
+        {
+            note = note[..1500].TrimEnd() + "… (продолжите здесь)";
+        }
+
         var body = string.Join(Environment.NewLine, new[]
         {
             "### Что случилось",
-            string.IsNullOrWhiteSpace(Note) ? "" : Note.Trim(),
+            note,
             "",
             "### Что делали до этого",
             "",
