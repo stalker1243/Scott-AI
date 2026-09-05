@@ -23,6 +23,9 @@ public partial class LogsViewModel : ViewModelBase
 
     public ObservableCollection<LogEntry> Errors { get; } = new();
 
+    /// <summary>Пуст ли список — от этого зависит, показывать записи или пояснение.</summary>
+    public bool NoErrors => Errors.Count == 0 && !Loading;
+
     [ObservableProperty] private bool _loading;
     [ObservableProperty] private bool _building;
     [ObservableProperty] private string _note = "";
@@ -58,6 +61,8 @@ public partial class LogsViewModel : ViewModelBase
             {
                 Status = "Ошибок не найдено — всё в порядке";
             }
+
+            OnPropertyChanged(nameof(NoErrors));
         }
         finally
         {

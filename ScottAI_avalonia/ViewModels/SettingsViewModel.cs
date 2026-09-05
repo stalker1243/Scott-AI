@@ -297,7 +297,13 @@ public partial class SettingsViewModel : ViewModelBase
             SelectedProvider = Providers.Count > 0
                 ? (Providers.FirstOrDefault(p => p.Id == activeProvider) ?? Providers[0])
                 : null;
-            SelectedModel = activeModel;
+
+            // На свежей установке активной модели ещё нет, и эта строка затирала
+            // ту, что подставилась вместе с провайдером. Человек вводил ключ,
+            // жал «Применить» — и не происходило ничего: модель пустая.
+            SelectedModel = !string.IsNullOrWhiteSpace(activeModel)
+                ? activeModel
+                : SelectedProvider?.Models.FirstOrDefault()?.Id;
         }
         catch (System.Exception ex)
         {
@@ -318,10 +324,48 @@ public partial class SettingsViewModel : ViewModelBase
         SelectedModel = value?.Id == ActiveProvider ? ActiveModel : value?.Models.Count > 0 ? value.Models[0].Id : null;
     }
 
+    /// <summary>Сбросить профиль и оформление к первоначальному виду.</summary>
+    [RelayCommand]
+    private void ResetSettings()
+    {
+        SettingsStore.Reset();
+
+        // Оформление применяем сразу: иначе окно осталось бы в прежнем виде до
+        // перезапуска, и человек решил бы, что сброс не сработал.
+        ThemeService.ApplySaved(SettingsStore.Current);
+        IsDark = SettingsStore.Current.IsDark;
+        CurrentStyle = SettingsStore.Current.Style;
+        GlassOpacity = SettingsStore.Current.GlassOpacity;
+        SyncAccentSelection();
+
+        ToastService.Success("Настройки сброшены — имя, «о себе», аватар и оформление очищены");
+    }
+
     [RelayCommand]
     private async Task ApplyAi()
     {
-        if (SelectedProvider is null || string.IsNullOrWhiteSpace(SelectedModel)) return;
+        // Молчаливый выход отсюда — худшее, что можно сделать с человеком,
+        // который только что ввёл ключ: кнопка нажата, и ничего не произошло.
+        if (SelectedProvider is null)
+        {
+            AiError = "Выберите провайдера ИИ — например, Groq";
+            ToastService.Error(AiError);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SelectedModel))
+        {
+            // Модель почти всегда можно взять сама собой: у провайдера есть
+            // список, и первая в нём — разумный выбор по умолчанию.
+            SelectedModel = SelectedProvider.Models.FirstOrDefault()?.Id;
+        }
+
+        if (string.IsNullOrWhiteSpace(SelectedModel))
+        {
+            AiError = "У этого провайдера не нашлось моделей — выберите другого";
+            ToastService.Error(AiError);
+            return;
+        }
         AiApplying = true;
         AiError = null;
         AiStatus = null;

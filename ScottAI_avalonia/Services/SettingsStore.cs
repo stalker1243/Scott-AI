@@ -99,6 +99,38 @@ public static class SettingsStore
     /// их мало, файл крошечный, и так ничего не теряется при закрытии окна.</summary>
     public static void SaveCurrent() => Save(Current);
 
+    /// <summary>
+    /// Забыть всё, что лаунчер помнит о человеке: имя, «о себе», аватар,
+    /// оформление.
+    ///
+    /// Настройки лежат в %APPDATA% и намеренно переживают переустановку — иначе
+    /// каждое обновление сбрасывало бы вид программы. Но у этого есть обратная
+    /// сторона: поставив Scott заново, человек видит свой прежний профиль и
+    /// решает, что установка прошла не начисто. Отсюда явный способ начать
+    /// с чистого листа.
+    /// </summary>
+    public static void Reset()
+    {
+        // Значения обнуляются в существующем объекте, а не подменой ссылки:
+        // страницы держат именно его, и новая копия до них бы не дошла.
+        var clean = new LauncherSettings();
+
+        Current.Style = clean.Style;
+        Current.IsDark = clean.IsDark;
+        Current.AccentHex = clean.AccentHex;
+        Current.GlassOpacity = clean.GlassOpacity;
+        Current.UserName = clean.UserName;
+        Current.Bio = clean.Bio;
+        Current.AvatarOffsetX = clean.AvatarOffsetX;
+        Current.AvatarOffsetY = clean.AvatarOffsetY;
+        Current.AvatarZoom = clean.AvatarZoom;
+        Current.RunInBackground = clean.RunInBackground;
+        Current.IconVariant = clean.IconVariant;
+
+        SaveCurrent();
+        SaveAvatar(null);
+    }
+
     public static LauncherSettings Load()
     {
         try

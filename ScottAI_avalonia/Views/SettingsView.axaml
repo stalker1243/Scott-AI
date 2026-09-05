@@ -88,6 +88,14 @@
             </StackPanel>
 
             <StackPanel Spacing="10">
+                <TextBlock Text="Начать заново" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                           Text="Настройки хранятся отдельно от программы и переживают переустановку — поэтому после установки заново Scott выглядит так же, как раньше, и помнит ваше имя. Эта кнопка очищает имя, «о себе», аватар и оформление." />
+                <Button Content="Сбросить настройки" Classes="soft" HorizontalAlignment="Left"
+                        Command="{Binding ResetSettingsCommand}" />
+            </StackPanel>
+
+            <StackPanel Spacing="10">
                 <TextBlock Text="Работа в фоне" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
                 <CheckBox IsChecked="{Binding RunInBackground}"
                           Content="Продолжать слушать после закрытия окна" />

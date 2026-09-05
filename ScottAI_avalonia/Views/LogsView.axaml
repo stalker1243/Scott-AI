@@ -77,7 +77,20 @@
         <!-- Список ошибок -->
         <Border Grid.Row="3" Margin="0,14,0,0" Background="{DynamicResource BgSurface}"
                 BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="12">
-            <ScrollViewer>
+            <Panel>
+                <!-- Пустой список ничего не объясняет: человек видит пустоту и
+                     думает, что раздел сломан. Здесь сказано, что это хорошая
+                     новость, и что делать, если проблема всё же есть. -->
+                <StackPanel IsVisible="{Binding NoErrors}" Spacing="6"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="30">
+                    <TextBlock Text="Ошибок нет" FontWeight="SemiBold" HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock TextWrapping="Wrap" TextAlignment="Center" MaxWidth="420" FontSize="12"
+                               Foreground="{DynamicResource TextMuted}"
+                               Text="Scott не жаловался с последнего запуска. Если что-то всё равно работает не так — опишите это выше и соберите отчёт: в архив попадут логи целиком, даже когда ошибок в списке нет." />
+                </StackPanel>
+
+            <ScrollViewer IsVisible="{Binding !NoErrors}">
                 <ItemsControl ItemsSource="{Binding Errors}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="models:LogEntry">
@@ -102,6 +115,7 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </ScrollViewer>
+            </Panel>
         </Border>
     </Grid>
 </UserControl>
