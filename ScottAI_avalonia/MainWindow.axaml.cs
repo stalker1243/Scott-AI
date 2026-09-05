@@ -10,10 +10,31 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        // Backend, поднятый лаунчером, гасится вместе с окном: иначе после
-        // закрытия он остался бы висеть, занимая порт 8000 и видеокарту, а при
-        // следующем запуске новый экземпляр не смог бы открыть порт.
-        Closing += (_, _) => (DataContext as ViewModels.MainWindowViewModel)?.ShutdownBackend();
+        // Закрытие окна при включённом фоновом режиме прячет Scott в область
+        // уведомлений, а не завершает его: смысл голосового ассистента в том,
+        // чтобы услышать обращение тогда, когда окно давно закрыто. Выйти
+        // по-настоящему можно из меню иконки в трее — там же гасится backend.
+        //
+        // Если фоновый режим выключен, поведение прежнее: закрыли окно —
+        // остановили и backend, иначе он висел бы, занимая порт и видеокарту.
+        Closing += (sender, e) =>
+        {
+            if (Services.SettingsStore.Current.RunInBackground)
+            {
+                e.Cancel = true;
+                Hide();
+                return;
+            }
+
+            (DataContext as ViewModels.MainWindowViewModel)?.ShutdownBackend();
+            // global:: обязателен: пространство имён проекта тоже начинается с
+            // «ScottAI.Avalonia», и без него компилятор ищет Application внутри него.
+            if (global::Avalonia.Application.Current?.ApplicationLifetime
+                is global::Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                desktop.Shutdown();
+            }
+        };
         DataContext = new MainWindowViewModel();
 
         ThemeService.StyleApplied += OnStyleApplied;

@@ -283,6 +283,40 @@ def _warmup_whisper_sync() -> None:
     )
 
 
+async def _watch_parent() -> None:
+    """
+    Завершиться, если тот, кто нас запустил, исчез.
+
+    Лаунчер гасит backend при выходе, но только когда закрывается штатно.
+    Стоит завершить его через диспетчер задач — и backend остаётся сиротой:
+    держит порт 8000 и занимает видеокарту, а пользователь считает, что вышел
+    из программы. Проверено на живом запуске, так и происходило.
+
+    PID родителя приходит в переменной окружения: при обычном запуске из
+    терминала её нет, и слежка не включается — иначе backend завершался бы,
+    как только разработчик закроет свою консоль.
+    """
+    raw = os.getenv("SCOTT_PARENT_PID", "").strip()
+    if not raw.isdigit():
+        return
+
+    parent_pid = int(raw)
+    print(f"👁️ Слежу за родителем (PID {parent_pid}): исчезнет — завершусь")
+
+    try:
+        import psutil
+    except ImportError:
+        return
+
+    while True:
+        await asyncio.sleep(5)
+        if not psutil.pid_exists(parent_pid):
+            print("👋 Лаунчер закрылся — останавливаюсь, чтобы не висеть без дела")
+            # Мягкая остановка невозможна: uvicorn держит цикл, а сигналы на
+            # Windows приходят не туда. Завершаем процесс явно.
+            os._exit(0)
+
+
 async def _warmup_models() -> None:
     """
     Разогреть тяжёлые модели в фоне, чтобы первая команда шла по горячему пути.
@@ -343,6 +377,7 @@ async def lifespan(app: FastAPI):
     _set_main_loop(asyncio.get_running_loop())
 
     warmup_task = asyncio.create_task(_warmup_models()) if WARMUP_MODELS else None
+    asyncio.create_task(_watch_parent())
 
     yield  # Приложение работает здесь
 

@@ -75,6 +75,17 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private string? _voiceStatus;
     [ObservableProperty] private bool _voiceBusy;
 
+    // ---- Фоновая работа ----
+    // Для голосового ассистента работа в фоне — состояние по умолчанию: смысл
+    // в том, чтобы услышать обращение тогда, когда окно давно закрыто.
+    [ObservableProperty] private bool _runInBackground = SettingsStore.Current.RunInBackground;
+
+    partial void OnRunInBackgroundChanged(bool value)
+    {
+        SettingsStore.Current.RunInBackground = value;
+        SettingsStore.SaveCurrent();
+    }
+
     // ---- Устройство для речи ----
     // Автовыбор берёт видеокарту, когда она есть: разница принципиальная —
     // распознавание фразы занимает около секунды против четырёх с половиной на

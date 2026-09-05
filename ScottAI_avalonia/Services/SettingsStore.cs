@@ -38,6 +38,16 @@ public sealed class LauncherSettings
 
     /// <summary>Увеличение фото в рамке: 1 — вписано целиком, больше — приближено.</summary>
     public double AvatarZoom { get; set; } = 1.0;
+
+    /// <summary>
+    /// Продолжать работать после закрытия окна.
+    ///
+    /// Для голосового ассистента это состояние по умолчанию: смысл в том,
+    /// чтобы услышать «Скотт, открой браузер» тогда, когда окно давно закрыто.
+    /// Окно при этом прячется в область уведомлений, откуда его можно вернуть
+    /// или выйти по-настоящему.
+    /// </summary>
+    public bool RunInBackground { get; set; } = true;
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

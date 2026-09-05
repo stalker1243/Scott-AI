@@ -66,6 +66,14 @@
             </StackPanel>
 
             <StackPanel Spacing="10">
+                <TextBlock Text="Работа в фоне" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                <CheckBox IsChecked="{Binding RunInBackground}"
+                          Content="Продолжать слушать после закрытия окна" />
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                           Text="Окно спрячется в область уведомлений — Scott останется в трее и будет слышать обращение по имени. Выйти совсем можно через меню его значка." />
+            </StackPanel>
+
+            <StackPanel Spacing="10">
                 <TextBlock Text="Устройство для речи" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
                 <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
                            Text="На видеокарте Scott распознаёт фразу примерно за секунду, на процессоре — за четыре с половиной. Автоматика берёт видеокарту, когда она доступна; переключайте вручную, если видеокарта занята или барахлит драйвер." />

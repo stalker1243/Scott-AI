@@ -76,6 +76,11 @@ public class BackendLauncher
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                // Backend завершится сам, если лаунчер исчезнет. Штатный выход
+                // гасит его и без этого, но через диспетчер задач процесс
+                // убивают жёстко — и backend оставался сиротой, держа порт и
+                // видеокарту, пока пользователь считал, что вышел из программы.
+                Environment = { ["SCOTT_PARENT_PID"] = Environment.ProcessId.ToString() },
             });
         }
         catch (Exception e)

@@ -12,7 +12,8 @@
         Width="1400" Height="860"
         Background="{DynamicResource BgWindow}"
         FontFamily="{DynamicResource AppFontFamily}"
-        Title="ScottAI (Avalonia)">
+        Title="ScottAI (Avalonia)"
+        Icon="/Assets/scott.ico">
 
     <Panel>
     <Grid ColumnDefinitions="96,*">
