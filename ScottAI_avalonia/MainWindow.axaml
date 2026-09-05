@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:ScottAI.Avalonia.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -22,10 +22,12 @@
         <Border Grid.Column="0" Background="{DynamicResource BgSidebar}"
                 BorderBrush="{DynamicResource BorderColor}" BorderThickness="0,0,1,0">
             <DockPanel LastChildFill="False">
+                <!-- Логотип. Подложки под ним нет намеренно: у самой иконки тёмный
+                     фон со свечением по краю, и акцентный квадрат за прозрачными
+                     углами выглядел бы рамкой. -->
                 <Border Classes="logo" Width="52" Height="52" CornerRadius="14" Margin="0,22,0,24"
-                        Background="{DynamicResource Accent}" HorizontalAlignment="Center" DockPanel.Dock="Top">
-                    <TextBlock Text="S" FontSize="24" FontWeight="Bold" Foreground="White"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        HorizontalAlignment="Center" DockPanel.Dock="Top" ClipToBounds="True">
+                    <Image Source="/Assets/scott-logo.png" Width="52" Height="52" Stretch="UniformToFill" />
                 </Border>
 
                 <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="8,0">

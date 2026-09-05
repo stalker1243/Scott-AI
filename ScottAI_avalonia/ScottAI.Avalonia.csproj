@@ -4,6 +4,10 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Иконка самого .exe — в проводнике, на панели задач и в списке
+         установленных программ. Свойство Window.Icon отвечает только за
+         заголовок окна, файл в проводнике остаётся с иконкой по умолчанию. -->
+    <ApplicationIcon>Assets\scott.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
