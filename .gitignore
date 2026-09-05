@@ -82,7 +82,7 @@ installer/*.exe
 # это ещё и личная переписка владельца. Программа создаёт их сама при первом
 # запуске (см. _ensure_data_dir в main.py).
 backend/data/
-backend/jarvis_memory.json
+backend/*_memory.json
 
 # Рабочие заметки по проекту: как он устроен внутри, на чём уже обжигались,
 # что проверять при правках. Это записи для развития проекта, а не
@@ -90,4 +90,8 @@ backend/jarvis_memory.json
 # но в репозиторий не уезжает.
 CLAUDE.md
 DEV_NOTES.md
-backend/scott_memory.json
+
+# Ручные пробы времён разработки: не часть набора тестов (тот в
+# backend/tests), запускаются руками и требуют живого сервера.
+/test_greetings.py
+/test_voice_flow.py
