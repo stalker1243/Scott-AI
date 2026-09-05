@@ -1125,13 +1125,30 @@ def _listener_handle(text: str) -> None:
             return
         print(f"🤖 Scott: {response}")
         voice = scott_runtime.scott_voice
-        if voice is not None:
-            try:
-                path = await asyncio.to_thread(voice.speak_to_file, response)
-                if path:
-                    await asyncio.to_thread(voice.play_audio, path)
-            except Exception as e:
-                print(f"⚠️ Не удалось озвучить ответ: {e}")
+        if voice is None:
+            return
+
+        # На время ответа прослушивание приостанавливается: микрофон слышит
+        # колонки, и собственный голос возвращается к Scott как новая фраза.
+        # На живой проверке он так распознал сам себя — «Мимо: "Попробую
+        # открыть Google Chrome"». Пока в ответе нет его имени, дело кончается
+        # лишней работой Whisper, но стоит ему произнести «Скотт» — и он начнёт
+        # разговаривать сам с собой без остановки.
+        listening = scott_runtime.listener
+        if listening is not None:
+            listening.suspend()
+        try:
+            path = await asyncio.to_thread(voice.speak_to_file, response)
+            if path:
+                await asyncio.to_thread(voice.play_audio, path)
+        except Exception as e:
+            print(f"⚠️ Не удалось озвучить ответ: {e}")
+        finally:
+            if listening is not None:
+                # Небольшая пауза на эхо: звук из колонок доходит до микрофона
+                # с задержкой и не обрывается ровно на последнем слове.
+                await asyncio.sleep(0.4)
+                listening.resume()
 
     asyncio.run_coroutine_threadsafe(run(), _main_loop)
 

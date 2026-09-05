@@ -282,3 +282,46 @@ def test_stop_without_start_is_safe(listener_module):
     )
 
     assert instance.stop()["success"]
+
+
+# ==================== Собственный голос ====================
+
+def test_suspended_listener_ignores_audio(listener_module):
+    """
+    Пока Scott говорит, входящий звук не разбирается.
+
+    Микрофон слышит колонки, и собственный ответ возвращается к Scott как новая
+    фраза — на живой проверке он распознал сам себя («Мимо: "Попробую открыть
+    Google Chrome"»). Пока в ответе нет его имени, это лишь напрасная работа
+    Whisper, но стоит ему произнести «Скотт» — и он заговорит сам с собой.
+    """
+    instance, _, heard = run_stream(listener_module, silence(listener_module, 0.2))
+    instance.suspend()
+
+    # Прямая подача через _on_audio — тот же путь, которым идёт звук с микрофона.
+    loud = speech(listener_module, 1.0).reshape(-1, 1)
+    for start in range(0, len(loud), listener_module.BLOCK_SIZE):
+        instance._on_audio(loud[start:start + listener_module.BLOCK_SIZE], 0, None, None)
+
+    assert instance._blocks.qsize() == 0, "звук копится, хотя Scott говорит"
+    assert instance.is_suspended
+
+
+def test_resume_drops_stale_audio(listener_module):
+    """
+    Возвращаясь к прослушиванию, Scott забывает накопленное.
+
+    За время ответа в очереди мог осесть его собственный голос — разбирать его
+    теперь незачем.
+    """
+    instance = listener_module.VoiceListener(
+        transcribe=lambda audio: "",
+        handle_command=lambda text: None,
+    )
+    instance._blocks.put(np.zeros(listener_module.BLOCK_SIZE, dtype=np.float32))
+    instance.suspend()
+
+    instance.resume()
+
+    assert instance._blocks.qsize() == 0
+    assert not instance.is_suspended

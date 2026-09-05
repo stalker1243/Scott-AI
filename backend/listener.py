@@ -128,6 +128,9 @@ class VoiceListener:
         self._lock = threading.Lock()
 
         self._noise_floor = self.config.absolute_floor
+        # Пока Scott говорит, входящий звук не разбирается: иначе он слышит
+        # собственный ответ из колонок и принимает его за новую фразу.
+        self._suspended = False
 
     # ==================== Управление ====================
 
@@ -190,9 +193,46 @@ class VoiceListener:
         print("🎧 Scott перестал слушать")
         return {"success": True, "message": "Scott больше не слушает"}
 
+    # ==================== Собственный голос ====================
+
+    def suspend(self) -> None:
+        """
+        Перестать разбирать входящий звук, пока Scott говорит сам.
+
+        Микрофон слышит колонки: собственный ответ Scott возвращается к нему же
+        как новая фраза. На живой проверке это выглядело так — он произнёс
+        ответ, а следующей строкой в логе появилось «Мимо: "Попробую открыть
+        Google Chrome"», то есть он распознал сам себя. Пока в ответе не звучит
+        его имя, дело кончается лишней работой Whisper, но стоит Scott сказать
+        «Скотт» — и он начнёт разговаривать сам с собой без остановки.
+
+        Поток не закрывается: открывать микрофон заново на каждую реплику
+        долго и чревато щелчками. Блоки просто перестают складываться в очередь.
+        """
+        self._suspended = True
+
+    def resume(self) -> None:
+        """
+        Снова слушать.
+
+        Очередь блоков очищается: за время ответа там накопился собственный
+        голос Scott, и разбирать его теперь незачем.
+        """
+        while True:
+            try:
+                self._blocks.get_nowait()
+            except queue.Empty:
+                break
+        self._suspended = False
+
+    @property
+    def is_suspended(self) -> bool:
+        return self._suspended
+
     def status(self) -> dict:
         return {
             "listening": self._running,
+            "speaking": self._suspended,
             "available": HAS_SOUNDDEVICE,
             "noise_floor": round(self._noise_floor, 5),
             "phrases_heard": self.stats.phrases_heard,
@@ -216,6 +256,8 @@ class VoiceListener:
         """
         if status:
             self.stats.last_error = str(status)
+        if self._suspended:
+            return
         try:
             self._blocks.put_nowait(indata[:, 0].copy())
         except queue.Full:
