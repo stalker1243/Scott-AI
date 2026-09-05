@@ -83,8 +83,17 @@ RELATIVE = re.compile(
     re.IGNORECASE,
 )
 
+# Предлог необязателен: Whisper его проглатывает. На живой фразе «напомни мне
+# в 18:00 зайти в Discord» он выдал «напомним мне 18.00, зайти в discord» —
+# без «в» время не находилось вовсе.
 ABSOLUTE = re.compile(
-    r"(?:в|к|на)\s+(?P<hour>\d{1,2})[:.](?P<minute>\d{2})",
+    r"(?:(?:в|к|на)\s+)?(?P<hour>\d{1,2})[:.](?P<minute>\d{2})",
+    re.IGNORECASE,
+)
+
+# «в 9 утра», «в 7 вечера» — час без слова «часов», но с временем суток.
+ABSOLUTE_DAYPART = re.compile(
+    r"(?:(?:в|к|на)\s+)?(?P<hour>\d{1,2})\s+(?:утра|утром|дня|днём|днем|вечера|вечером|ночи|ночью)\b",
     re.IGNORECASE,
 )
 
@@ -104,6 +113,22 @@ def _amount_to_number(raw: str) -> Optional[int]:
     if raw.isdigit():
         return int(raw)
     return WORD_NUMBERS.get(raw.lower())
+
+
+def _apply_daypart(hour: int, lowered: str) -> int:
+    """Перевести названный час в 24-часовой по времени суток."""
+    part = DAYPART.search(lowered)
+    if not part:
+        return hour
+
+    word = part.group(1)
+    if word in ("вечера", "вечером") and hour < 12:
+        return hour + 12
+    if word in ("дня", "днём", "днем") and 1 <= hour <= 11:
+        return hour + 12
+    if word in ("ночи", "ночью") and hour == 12:
+        return 0
+    return hour
 
 
 def parse_time(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
@@ -137,12 +162,17 @@ def parse_time(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
             return now + timedelta(weeks=amount)
         return now + timedelta(days=amount)
 
-    match = ABSOLUTE.search(lowered) or ABSOLUTE_HOUR.search(lowered)
+    match = ABSOLUTE.search(lowered) or ABSOLUTE_HOUR.search(lowered) or ABSOLUTE_DAYPART.search(lowered)
     if match:
         hour = int(match.group("hour"))
         minute = int(match.groupdict().get("minute") or 0)
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             return None
+
+        # «Семь вечера» — это 19:00, а не 7:00. Раньше время суток из текста
+        # просто вырезалось, и напоминание «в 9 вечера» уезжало на девять утра
+        # следующего дня.
+        hour = _apply_daypart(hour, lowered)
 
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if TOMORROW.search(lowered):
@@ -165,11 +195,12 @@ def extract_subject(text: str) -> str:
     произнесёт вслух, когда придёт срок.
     """
     cleaned = text
-    for pattern in (*(p for p, _ in FIXED_DELAYS), RELATIVE, ABSOLUTE, ABSOLUTE_HOUR, TOMORROW, DAYPART):
+    for pattern in (*(p for p, _ in FIXED_DELAYS), RELATIVE, ABSOLUTE, ABSOLUTE_HOUR,
+                    ABSOLUTE_DAYPART, TOMORROW, DAYPART):
         cleaned = pattern.sub(" ", cleaned)
 
     cleaned = re.sub(
-        r"^\s*(скотт[,\s]+)?(напомни(?:ть)?|поставь напоминание|разбуди|подскажи)\s*(мне\s+)?",
+        r"^\s*(скотт[,\s]+)?(напомн(?:ите|ить|ишь|им|ю|и)?|поставь напоминание|разбуди|подскажи)\s*(мне\s+)?",
         "",
         cleaned,
         flags=re.IGNORECASE,

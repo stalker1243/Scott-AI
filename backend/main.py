@@ -1057,7 +1057,12 @@ class ScottAI:
         if cmd_type == 'open_app':
             result = executor.execute('open_app', name=param)
             if "✅" in result:
-                return scott_profile.get_response('success')
+                # Название открытого приложения обязательно называется вслух.
+                # Раньше ответом было безликое «Выполнено успешно», и когда
+                # Scott ошибался приложением, человек узнавал об этом только
+                # по выскочившему окну: на просьбу поставить напоминание он
+                # открыл Discord и отрапортовал об успехе.
+                return result.replace("✅ ", "")
             return result
 
         # ============= СОЗДАТЬ ФАЙЛ =============

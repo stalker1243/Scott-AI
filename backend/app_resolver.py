@@ -115,6 +115,61 @@ class ResolvedApp:
     source: str  # 'app_paths' | 'alias_app_paths' | 'startapps' | 'shortcut' | 'desktop'
 
 
+# Кириллица → латиница. Названия игр и программ человек произносит по-русски
+# («дельтарун», «дискорд»), а в каталоге Windows они записаны латиницей, и
+# посимвольное сравнение двух алфавитов даёт почти ноль. Перечислять всё
+# алиасами бессмысленно — установленных программ у каждого свои, поэтому
+# запрос переводится в латиницу и сравнивается уже с ней.
+CYRILLIC_TO_LATIN = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
+    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+}
+
+# Окончания винительного падежа: «запусти дельтаруна», «открой фотошопа».
+# Whisper передаёт сказанное дословно, а в каталоге название стоит в
+# именительном.
+CASE_ENDINGS = ("а", "у", "ом", "ы", "и")
+
+
+def transliterate(name: str) -> str:
+    """Перевести кириллическое название в латиницу; латиница остаётся как есть."""
+    return "".join(CYRILLIC_TO_LATIN.get(char, char) for char in name.lower())
+
+
+def _strip_case_ending(name: str) -> str:
+    """Убрать русское падежное окончание, если под ним остаётся осмысленное слово."""
+    for ending in CASE_ENDINGS:
+        if len(name) > len(ending) + 3 and name.endswith(ending):
+            return name[: -len(ending)]
+    return name
+
+
+def _search_variants(name: str) -> list:
+    """
+    Варианты написания запроса — от точного к вольному.
+
+    Порядок важен: сначала то, что человек сказал, и лишь потом догадки.
+    Совпадение по исходному имени всегда надёжнее, чем по обрубленному.
+    """
+    variants = [name]
+    has_cyrillic = any(char in CYRILLIC_TO_LATIN for char in name)
+
+    if has_cyrillic:
+        variants.append(transliterate(name))
+
+    without_ending = _strip_case_ending(name)
+    if without_ending != name:
+        variants.append(without_ending)
+        if has_cyrillic:
+            variants.append(transliterate(without_ending))
+
+    seen = set()
+    return [v for v in variants if v and not (v in seen or seen.add(v))]
+
+
 def _normalize(s: str) -> str:
     """
     Нормализовать имя для сравнения с каталогом.
@@ -151,7 +206,14 @@ def _similarity(a: str, b: str) -> float:
     if len(a) >= 3 and len(b) >= 3:
         if b.startswith(a) or a.startswith(b):
             ratio = max(ratio, 0.9)
-        elif f" {a} " in f" {b} " or f" {b} " in f" {a} ":
+        elif f" {a} " in f" {b} ":
+            ratio = max(ratio, 0.85)
+        elif f" {b} " in f" {a} " and len(a) <= len(b) * 2:
+            # Обратное вхождение — название каталога внутри запроса — годится
+            # только для коротких запросов. Иначе любая длинная фраза,
+            # где случайно упомянута программа, её запускает: на «напомним мне
+            # 18:00 зайти в discord» Scott открыл Discord сию секунду и
+            # отрапортовал об успехе, вместо того чтобы поставить напоминание.
             ratio = max(ratio, 0.85)
 
     return ratio
@@ -391,7 +453,13 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
     # искаться как «calculator», а в русской Windows приложение подписано
     # «Калькулятор» — совпадения не находилось ни по одному источнику. Алиас
     # должен дополнять запрос, а не вытеснять его.
-    for candidate in (search_name, normalized):
+    exact_candidates = []
+    for base in (search_name, normalized):
+        for variant in _search_variants(base):
+            if variant not in exact_candidates:
+                exact_candidates.append(variant)
+
+    for candidate in exact_candidates:
         if candidate in startapps:
             return ResolvedApp(matched_name=candidate, target=startapps[candidate],
                                kind="appid", source="startapps")
@@ -401,7 +469,7 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
 
     # 3. Нечёткое совпадение по объединённому каталогу (startapps приоритетнее при равном скоре)
     best_key, best_score, best_pool = None, 0.0, None
-    candidates = (search_name, normalized) if search_name != normalized else (search_name,)
+    candidates = exact_candidates
     for candidate in candidates:
         for key in startapps:
             score = _similarity(candidate, key)

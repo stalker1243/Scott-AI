@@ -225,9 +225,13 @@ class CommandParser:
         # 'google' (синоним из категории 'search') вырезался даже из команды
         # open_app «открой google chrome», и резолвер получал на вход обрубок
         # «chrome» вместо «google chrome».
+        # Вырезаются они ПО ГРАНИЦАМ СЛОВ и начиная с самых длинных. Простой
+        # replace() резал синоним внутри другого слова: в «запустить
+        # дельторуна» находилось «запусти», и резолвер получал на вход «ть
+        # дельторуна» — приложение, разумеется, не находилось.
         clean_text = text
-        for synonym in self.COMMAND_SYNONYMS.get(command_type, []):
-            clean_text = clean_text.replace(synonym, '')
+        for synonym in sorted(self.COMMAND_SYNONYMS.get(command_type, []), key=len, reverse=True):
+            clean_text = re.sub(rf"\b{re.escape(synonym)}\b", " ", clean_text)
         
         # Удаляем стоп-слова
         words = clean_text.split()

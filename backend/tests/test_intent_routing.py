@@ -135,6 +135,47 @@ def test_app_launch_not_stolen_by_run_code(intent_engine, phrase):
     assert intent.intent_type == "open_app", f"«{phrase}» -> {intent.intent_type}"
 
 
+# ==================== Случаи из живого разговора ====================
+
+@pytest.mark.parametrize("phrase,expected_param", [
+    ("запустить дельторуна", "дельторуна"),
+    ("запусти блокнот", "блокнот"),
+    ("открой google chrome", "google chrome"),
+    ("включить спотифай", "спотифай"),
+])
+def test_verb_cut_by_word_boundary(phrase, expected_param):
+    """
+    Глагол вырезается целиком, а не по первым буквам.
+
+    Взято из лога: на «запустить дельторуна» синоним «запусти» нашёлся внутри
+    слова «запустить», и резолвер получил на вход «ть дельторуна».
+    """
+    try:
+        from command_parser import CommandParser
+    except ImportError:
+        from backend.command_parser import CommandParser
+
+    parsed = CommandParser().parse(phrase)
+    assert parsed.main_param == expected_param, f"«{phrase}» -> {parsed.main_param!r}"
+
+
+@pytest.mark.parametrize("phrase", [
+    "напомним мне 18.00, зайти в discord",
+    "напомни мне в 18:00 зайти в дискорд",
+    "напомните вечером написать другу в телеграм",
+])
+def test_reminder_wins_over_app_launch(intent_engine, phrase):
+    """
+    Просьба напомнить не должна запускать названную программу сию секунду.
+
+    Ровно это и случилось в логе: Whisper передал «напомним» вместо
+    «напомни», правило не сработало, и Scott открыл Discord вместо
+    напоминания на вечер — отрапортовав «Выполнено успешно».
+    """
+    intent = intent_engine.detect(phrase)
+    assert intent.intent_type == "reminder", f"«{phrase}» -> {intent.intent_type}"
+
+
 # ==================== Вопросы, которые командами быть не должны ====================
 
 @pytest.mark.parametrize("phrase", [
