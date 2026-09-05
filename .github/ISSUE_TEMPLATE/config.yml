@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Предложить возможность
+    url: https://github.com/stalker1243/Scott-AI/discussions
+    about: Идеи и пожелания удобнее обсуждать здесь, а не в списке ошибок

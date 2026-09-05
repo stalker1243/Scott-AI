@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -121,6 +121,56 @@ public partial class LogsViewModel : ViewModelBase
         {
             Building = false;
         }
+    }
+
+    /// <summary>
+    /// Открыть страницу создания обращения на GitHub.
+    ///
+    /// Заголовок и тело подставляются заранее: человек, у которого что-то не
+    /// работает, не должен ещё и придумывать, какие сведения приложить. Сам
+    /// архив прикрепляется перетаскиванием — через ссылку его не передать.
+    /// </summary>
+    [RelayCommand]
+    private void ReportOnGitHub()
+    {
+        var body = string.Join(Environment.NewLine, new[]
+        {
+            "### Что случилось",
+            string.IsNullOrWhiteSpace(Note) ? "" : Note.Trim(),
+            "",
+            "### Что делали до этого",
+            "",
+            "### Архив с диагностикой",
+            ReportPath is null
+                ? "(соберите его кнопкой «Собрать отчёт» и перетащите сюда файл)"
+                : $"Файл: {System.IO.Path.GetFileName(ReportPath)} — перетащите его в это поле.",
+            "",
+            "Ключи и токены из архива вырезаны.",
+        });
+
+        var url = "https://github.com/stalker1243/Scott-AI/issues/new"
+                  + "?title=" + Uri.EscapeDataString(BuildTitle())
+                  + "&body=" + Uri.EscapeDataString(body);
+
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+        }
+        catch (Exception e)
+        {
+            ToastService.Error($"Не удалось открыть браузер: {e.Message}");
+        }
+    }
+
+    private string BuildTitle()
+    {
+        var note = (Note ?? "").Trim().Split('\n')[0];
+        if (note.Length == 0)
+        {
+            return "Проблема в работе Scott";
+        }
+
+        return note.Length <= 60 ? note : note[..60].TrimEnd() + "…";
     }
 
     /// <summary>Открыть папку с отчётом в проводнике — дальше пользователь приложит файл сам.</summary>

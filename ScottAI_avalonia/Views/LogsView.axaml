@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:models="using:ScottAI.Avalonia.Models"
@@ -54,6 +54,9 @@
                             IsVisible="{Binding ReportPath, Converter={x:Static conv:ObjectConverters.IsNotNull}}"
                             Background="{DynamicResource BgElevated}" Foreground="{DynamicResource TextPrimary}"
                             CornerRadius="8" Padding="14,8" />
+                    <Button Content="Сообщить на GitHub" Command="{Binding ReportOnGitHubCommand}"
+                            Classes="soft" Padding="14,9"
+                            ToolTip.Tip="Откроется страница обращения — приложите к ней собранный архив" />
                     <TextBlock Text="{Binding Status}" VerticalAlignment="Center" FontSize="12"
                                Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
                 </StackPanel>

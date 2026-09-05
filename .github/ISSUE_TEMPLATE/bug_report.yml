@@ -1,0 +1,62 @@
+name: Что-то не работает
+description: Scott ведёт себя не так, как ожидалось
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что нашли время написать. Чем точнее описание, тем быстрее
+        получится починить.
+
+        **Самое полезное — архив с диагностикой.** Соберите его в самом Scott:
+        вкладка «Логи» → «Собрать отчёт», затем перетащите файл в поле ниже.
+        Ключи и токены из архива вырезаются, туда попадают только логи и
+        сведения о компьютере.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что случилось
+      placeholder: После перезапуска Scott перестал открывать браузер по голосовой команде
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Что вы делали до этого
+      description: По шагам, если получится вспомнить
+      placeholder: |
+        1. Сказал «Скотт, открой браузер»
+        2. Он ответил, что не нашёл приложение
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия Scott
+      description: Видна в заголовке установщика или в файле VERSION.json
+      placeholder: "1.0.0"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: Видеокарта
+      options:
+        - NVIDIA
+        - Другая или встроенная
+        - Не знаю
+    validations:
+      required: false
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Архив с диагностикой
+      description: Перетащите сюда файл, собранный на вкладке «Логи»
+      placeholder: Перетащите файл в это поле
+    validations:
+      required: false
