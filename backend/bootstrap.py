@@ -16,10 +16,14 @@ Python 3.13, отдельной командой torch нужной сборки
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -52,6 +56,170 @@ def _report(progress: Optional[Progress], message: str, fraction: float) -> None
             pass
     else:
         print(f"[{fraction * 100:3.0f}%] {message}")
+
+
+# pip печатает размер файла перед загрузкой: «Downloading torch-….whl (3.9 GB)».
+# Это единственное надёжное число: сам прогресс-бар без терминала печатается
+# одной итоговой строкой, когда всё уже скачано.
+PIP_SIZE = re.compile(r"Downloading\s+\S+\s+\(([\d.]+)\s*(kB|MB|GB)\)", re.IGNORECASE)
+
+UNITS = {"kb": 1024, "mb": 1024 ** 2, "gb": 1024 ** 3}
+
+
+def _parse_download_size(line: str) -> Optional[float]:
+    """Размер скачиваемого файла в байтах, если pip его назвал."""
+    match = PIP_SIZE.search(line)
+    if not match:
+        return None
+    try:
+        return float(match.group(1)) * UNITS[match.group(2).lower()]
+    except (ValueError, KeyError):
+        return None
+
+
+def _folder_size(path: Path) -> int:
+    """Сколько байт лежит в папке. Ошибки игнорируются: файлы могут исчезать
+    прямо во время обхода — pip их удаляет, закончив с ними."""
+    total = 0
+    for item in path.rglob("*"):
+        try:
+            if item.is_file():
+                total += item.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _human(size: float) -> str:
+    """«820 МБ», «3.9 ГБ» — для строки состояния."""
+    if size >= UNITS["gb"]:
+        return f"{size / UNITS['gb']:.1f} ГБ"
+    return f"{size / UNITS['mb']:.0f} МБ"
+
+
+class _DownloadWatcher:
+    """
+    Наблюдатель за временной папкой pip.
+
+    Считать прогресс по выводу pip нельзя, а вот файл, который он туда кладёт,
+    растёт на глазах. Ожидаемый размер сообщает сам pip строкой Downloading —
+    до тех пор доля неизвестна, и показывается только объём.
+    """
+
+    def __init__(self, folder: Path, progress: Optional[Progress], message: str,
+                 start: float, span: float):
+        self.folder = folder
+        self.progress = progress
+        self.message = message
+        self.start = start
+        self.span = span
+        self.expected: Optional[float] = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+
+    def __enter__(self) -> "_DownloadWatcher":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._stop.set()
+        self._thread.join(timeout=2)
+
+    def _loop(self) -> None:
+        while not self._stop.wait(0.7):
+            size = _folder_size(self.folder)
+            if size <= 0:
+                continue
+
+            if not self.expected:
+                _report(self.progress, f"{self.message} {_human(size)}", self.start)
+                continue
+
+            if size >= self.expected:
+                # Скачивание кончилось: дальше pip распаковывает архив в ту же
+                # папку, и её размер обгоняет размер файла. Показывать «541 МБ
+                # из 111 МБ» бессмысленно — говорим, что происходит на самом
+                # деле, и держим полосу на месте.
+                _report(self.progress, "Распаковываю и устанавливаю…", self.start + self.span)
+                continue
+
+            share = size / self.expected
+            _report(self.progress, f"{self.message} {_human(size)} из {_human(self.expected)}",
+                    self.start + self.span * share)
+
+
+def _run_pip(
+    executable: str,
+    args: List[str],
+    progress: Optional[Progress],
+    message: str,
+    start: float,
+    span: float,
+    timeout: int = 3600,
+) -> tuple[bool, str]:
+    """
+    Запустить pip, показывая, сколько уже скачано.
+
+    Возвращает (успех, последние строки вывода) — хвост нужен для сообщения об
+    ошибке: без него человек видит «не удалось поставить torch» и ничего
+    больше.
+    """
+    command = [executable, "-m", "pip", "install", "--no-warn-script-location", *args]
+
+    with tempfile.TemporaryDirectory(prefix="scott_pip_") as tmp:
+        folder = Path(tmp)
+        # Своя временная папка нужна не для чистоты, а чтобы было за чем
+        # наблюдать: в общем %TEMP% лежит чужое, и размер там ничего не значит.
+        env = dict(os.environ, PYTHONUNBUFFERED="1", TMP=tmp, TEMP=tmp, TMPDIR=tmp)
+
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            env=env,
+        )
+
+        tail: List[str] = []
+        _report(progress, message, start)
+
+        with _DownloadWatcher(folder, progress, message, start, span) as watcher:
+            try:
+                for line in process.stdout or []:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    tail.append(line)
+                    del tail[:-40]
+
+                    size = _parse_download_size(line)
+                    if size:
+                        watcher.expected = size
+
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                return False, "установка затянулась — вероятно, оборвалась сеть"
+
+        return process.returncode == 0, "\n".join(tail[-12:])
+
+
+def models_ready() -> bool:
+    """
+    Скачаны ли модели речи.
+
+    Проверяются файлы в кэше torch, а не импорт: библиотеки могут стоять, а
+    веса — нет, и тогда первая же голосовая команда уходит качать 700 МБ,
+    заставляя человека ждать молча.
+    """
+    cache = Path(os.path.expanduser("~")) / ".cache"
+    whisper_model = cache / "whisper" / "small.pt"
+    silero = cache / "torch" / "hub" / "snakers4_silero-models_master"
+    return whisper_model.exists() and silero.exists()
 
 
 def has_nvidia_gpu() -> bool:
@@ -118,9 +286,14 @@ def is_ready(python: Optional[str] = None) -> bool:
             [executable, "-c", "import torch, whisper, fastapi; print('ok')"],
             capture_output=True, text=True, timeout=120,
         )
-        return result.returncode == 0 and "ok" in result.stdout
+        if result.returncode != 0 or "ok" not in result.stdout:
+            return False
     except Exception:
         return False
+
+    # Библиотеки без моделей — ещё не готовность: первая же команда уйдёт
+    # качать 700 МБ, и человек будет ждать молча.
+    return models_ready()
 
 
 def install_dependencies(python: Optional[str] = None, progress: Optional[Progress] = None) -> Step:
@@ -140,27 +313,26 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
     step = Step(title="Установка зависимостей")
 
     try:
-        _report(progress, "Скачиваю torch — это самая долгая часть, несколько минут…", 0.1)
-        result = subprocess.run(
-            [executable, "-m", "pip", "install", "--no-warn-script-location", *torch_args],
-            capture_output=True, text=True, timeout=3600,
+        # Доли шкалы поделены по весу: torch — почти четыре гигабайта, всё
+        # остальное вместе — меньше сотни мегабайт.
+        ok, tail = _run_pip(
+            executable, torch_args, progress,
+            "Скачиваю torch — самая долгая часть, несколько минут…",
+            start=0.10, span=0.45,
         )
-        if result.returncode != 0:
-            step.error = f"не удалось поставить torch: {result.stderr[-400:]}"
+        if not ok:
+            step.error = f"не удалось поставить torch: {tail[-400:]}"
             return step
 
-        _report(progress, "Ставлю остальные библиотеки…", 0.6)
-        result = subprocess.run(
-            [executable, "-m", "pip", "install", "--no-warn-script-location", "-r", str(requirements)],
-            capture_output=True, text=True, timeout=1800,
+        ok, tail = _run_pip(
+            executable, ["-r", str(requirements)], progress,
+            "Ставлю остальные библиотеки…",
+            start=0.55, span=0.20, timeout=1800,
         )
-        if result.returncode != 0:
-            step.error = f"не удалось поставить зависимости: {result.stderr[-400:]}"
+        if not ok:
+            step.error = f"не удалось поставить зависимости: {tail[-400:]}"
             return step
 
-    except subprocess.TimeoutExpired:
-        step.error = "установка затянулась дольше часа — вероятно, оборвалась сеть"
-        return step
     except Exception as e:
         step.error = str(e)
         return step
@@ -227,9 +399,50 @@ def prepare(python: Optional[str] = None, progress: Optional[Progress] = None) -
     return Step(title="Готово", done=True)
 
 
-if __name__ == "__main__":
-    # Запуск из установщика: печатаем ход работы в консоль.
-    outcome = prepare()
+def _emit(payload: dict) -> None:
+    """Одно событие — одна строка JSON. Читает лаунчер."""
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """
+    Точка входа для установщика и лаунчера.
+
+    С ключом --json ход работы печатается строками JSON: лаунчеру нужен не
+    текст, а доля выполнения, иначе он не сможет показать полосу прогресса.
+    Без ключа — обычный человекочитаемый вывод в консоль.
+    """
+    argv = sys.argv[1:] if argv is None else argv
+    as_json = "--json" in argv
+
+    if "--check" in argv:
+        # Быстрая проверка без установки: лаунчер спрашивает, нужен ли мастер.
+        ready = is_ready()
+        if as_json:
+            _emit({"type": "check", "ready": ready, "gpu": gpu_name()})
+        else:
+            print("готово" if ready else "нужна подготовка")
+        return 0 if ready else 2
+
+    def report(message: str, fraction: float) -> None:
+        if as_json:
+            _emit({"type": "progress", "message": message, "fraction": round(fraction, 4)})
+        else:
+            print(f"[{fraction * 100:3.0f}%] {message}", flush=True)
+
+    outcome = prepare(progress=report)
+
     if not outcome.done:
-        print(f"ОШИБКА: {outcome.error}", file=sys.stderr)
-        sys.exit(1)
+        if as_json:
+            _emit({"type": "error", "message": outcome.error})
+        else:
+            print(f"ОШИБКА: {outcome.error}", file=sys.stderr)
+        return 1
+
+    if as_json:
+        _emit({"type": "done"})
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

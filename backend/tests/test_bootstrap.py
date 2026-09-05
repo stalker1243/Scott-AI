@@ -141,3 +141,135 @@ def test_failure_is_reported_not_swallowed(boot, monkeypatch):
 
     assert not step.done
     assert "torch" in step.error
+
+# ==================== Прогресс установки ====================
+#
+# pip без терминала печатает прогресс-бар ОДНОЙ строкой, когда всё уже
+# скачано, — по его выводу полосу не построить. Единственное надёжное число в
+# его выводе появляется до загрузки: «Downloading torch-….whl (3.9 GB)».
+
+@pytest.mark.parametrize("line,expected_mb", [
+    ("Downloading torch-2.9.1-cp313-win_amd64.whl (110.9 MB)", 110.9),
+    ("  Downloading numpy-2.1.0.whl (12.6 MB)", 12.6),
+    ("Downloading torch-2.9.1+cu126-cp313-win_amd64.whl (3.9 GB)", 3.9 * 1024),
+    ("Downloading tiny-1.0.whl (59 kB)", 59 / 1024),
+])
+def test_download_size_parsed(boot, line, expected_mb):
+    """Размер файла достаётся из строки pip — на нём строится вся полоса."""
+    size = boot._parse_download_size(line)
+    assert size is not None, f"не разобрана строка: {line}"
+    assert abs(size / 1024 ** 2 - expected_mb) < 0.1
+
+
+@pytest.mark.parametrize("line", [
+    "Collecting torch==2.9.1",
+    "Installing collected packages: torch",
+    "   ---------------------------------------- 12.6/12.6 MB 5.2 MB/s",
+    "",
+])
+def test_not_a_size_line(boot, line):
+    """
+    Пара к тесту выше: прочие строки размером не считаются.
+
+    Строка с прогресс-баром сюда попадать не должна намеренно — она приходит
+    уже после загрузки и сбила бы отсчёт.
+    """
+    assert boot._parse_download_size(line) is None
+
+
+@pytest.mark.parametrize("size,text", [
+    (110.9 * 1024 ** 2, "111 МБ"),
+    (3.9 * 1024 ** 3, "3.9 ГБ"),
+    (512 * 1024 ** 2, "512 МБ"),
+])
+def test_human_readable_size(boot, size, text):
+    """Объём показывается человеку, а не в байтах."""
+    assert boot._human(size) == text
+
+
+def test_models_counted_as_readiness(boot, monkeypatch, tmp_path):
+    """
+    Установленные библиотеки без моделей — ещё не готовность.
+
+    Иначе мастер отчитается «всё готово», а первая же голосовая команда уйдёт
+    качать 700 МБ, и человек будет ждать молча, не понимая, что происходит.
+    """
+    monkeypatch.setattr(boot.os.path, "expanduser", lambda _: str(tmp_path))
+    assert boot.models_ready() is False
+
+    (tmp_path / ".cache" / "whisper").mkdir(parents=True)
+    (tmp_path / ".cache" / "whisper" / "small.pt").write_bytes(b"x")
+    assert boot.models_ready() is False, "одной модели мало"
+
+    (tmp_path / ".cache" / "torch" / "hub" / "snakers4_silero-models_master").mkdir(parents=True)
+    assert boot.models_ready() is True
+
+
+def test_check_mode_reports_readiness(boot, monkeypatch, capsys):
+    """
+    Режим --check отвечает лаунчеру, нужен ли мастер: кодом возврата и строкой
+    JSON. Текст разбирать лаунчеру нечем, а код возврата однозначен.
+    """
+    monkeypatch.setattr(boot, "is_ready", lambda: False)
+    monkeypatch.setattr(boot, "gpu_name", lambda: "NVIDIA GeForce RTX 3060")
+
+    code = boot.main(["--check", "--json"])
+    out = capsys.readouterr().out
+
+    assert code == 2, "неготовность должна отличаться кодом возврата"
+    assert '"ready": false' in out.lower()
+    assert "RTX 3060" in out
+
+
+def test_check_mode_when_ready(boot, monkeypatch, capsys):
+    """Пара к предыдущему: на готовой машине мастер не нужен."""
+    monkeypatch.setattr(boot, "is_ready", lambda: True)
+    monkeypatch.setattr(boot, "gpu_name", lambda: None)
+
+    assert boot.main(["--check", "--json"]) == 0
+    assert '"ready": true' in capsys.readouterr().out.lower()
+
+
+def test_json_mode_emits_progress_and_result(boot, monkeypatch, capsys):
+    """
+    В режиме --json каждое событие — отдельная строка JSON.
+
+    Лаунчеру нужен не текст, а доля выполнения: без неё полосу прогресса
+    нарисовать нечем.
+    """
+    import json
+
+    def fake_prepare(python=None, progress=None):
+        progress("Скачиваю torch: 1.2 ГБ из 3.9 ГБ", 0.3)
+        progress("Модели загружены", 0.95)
+        return boot.Step(title="Готово", done=True)
+
+    monkeypatch.setattr(boot, "prepare", fake_prepare)
+
+    assert boot.main(["--json"]) == 0
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert [e["type"] for e in events] == ["progress", "progress", "done"]
+    assert events[0]["fraction"] == 0.3
+    assert "3.9 ГБ" in events[0]["message"]
+
+
+def test_json_mode_reports_failure(boot, monkeypatch, capsys):
+    """
+    Сбой доходит до лаунчера как событие, а не молчанием.
+
+    Установка идёт минутами, и оборвавшаяся сеть — обычное дело; человек
+    должен увидеть, что именно не вышло.
+    """
+    import json
+
+    monkeypatch.setattr(
+        boot, "prepare",
+        lambda python=None, progress=None: boot.Step(title="Установка", error="оборвалась сеть"),
+    )
+
+    assert boot.main(["--json"]) == 1
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert events[-1]["type"] == "error"
+    assert "сеть" in events[-1]["message"]
