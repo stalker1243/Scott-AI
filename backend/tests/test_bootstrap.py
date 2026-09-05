@@ -384,3 +384,24 @@ def test_silero_dependency_pinned_in_requirements():
     requirements = Path(__file__).resolve().parent.parent / "requirements.txt"
     text = requirements.read_text(encoding="utf-8")
     assert "omegaconf" in text, "omegaconf пропал из зависимостей — Silero не загрузится"
+
+# ==================== Папка данных ====================
+
+def test_data_dir_created(tmp_path):
+    """
+    Папка для данных создаётся при запуске.
+
+    В дистрибутив она не входит (там данные конкретной машины), а модули
+    пишут в неё напрямую. Без создания у каждого, кто поставил Scott
+    установщиком, профили и макросы молча не сохранялись бы: ошибка записи
+    печатается в консоль, которой никто не видит.
+    """
+    import main
+
+    target = main._ensure_data_dir(str(tmp_path))
+
+    assert (tmp_path / "data").is_dir(), "папка данных не создана"
+    assert target.endswith("data")
+
+    # Повторный вызов не должен падать: backend перезапускают часто.
+    main._ensure_data_dir(str(tmp_path))
