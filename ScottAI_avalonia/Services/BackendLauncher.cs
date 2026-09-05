@@ -223,6 +223,17 @@ public class BackendLauncher
     /// </summary>
     private static IEnumerable<(string File, string Prefix)> Candidates()
     {
+        // Встроенный Python из дистрибутива — первым. На чужой машине его
+        // может не быть в PATH вовсе, а лаунчер отвечал «не нашёл Python»,
+        // хотя интерпретатор лежал в соседней папке. Именно в него мастер
+        // первого запуска ставит torch и модели, поэтому системный Python,
+        // даже если он есть, здесь ни при чём.
+        var bundled = FindBundledPython();
+        if (bundled is not null)
+        {
+            yield return (bundled, "");
+        }
+
         if (OperatingSystem.IsWindows())
         {
             yield return ("py", "-3.13 ");
@@ -234,6 +245,30 @@ public class BackendLauncher
             yield return ("python3", "");
             yield return ("python", "");
         }
+    }
+
+    /// <summary>
+    /// Python, положенный рядом установщиком: папка runtime возле программы.
+    ///
+    /// Ищется вверх от папки программы, как и backend: лаунчер лежит в
+    /// подпапке launcher, а runtime — рядом с ней.
+    /// </summary>
+    private static string? FindBundledPython()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+
+        while (dir != null)
+        {
+            var candidate = Path.Combine(dir.FullName, "runtime",
+                OperatingSystem.IsWindows() ? "python.exe" : "bin/python3");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+            dir = dir.Parent;
+        }
+
+        return null;
     }
 
     private static bool Probe(string file, string args)

@@ -5,9 +5,20 @@ Scott AI Assistant - FastAPI Backend V2.1
 Главный сервер с расширенным функционалом команд и интеллектуальным распознаванием вопросов
 """
 
+import os
 import sys
 import io
 import time
+
+# Своя папка — в пути поиска модулей.
+#
+# Обычный Python добавляет туда каталог запускаемого скрипта сам, а встроенная
+# сборка из дистрибутива — нет: файл ._pth переводит её в изолированный режим.
+# Из-за этого на чужой машине backend падал сразу: «No module named security»,
+# хотя security.py лежит рядом с main.py.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 # Установить UTF-8 кодировку для вывода.
 #

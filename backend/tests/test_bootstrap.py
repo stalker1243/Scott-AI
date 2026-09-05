@@ -129,18 +129,18 @@ def test_failure_is_reported_not_swallowed(boot, monkeypatch):
     непонятную ошибку вместо «не удалось скачать torch, проверьте интернет».
     """
     monkeypatch.setattr(boot, "is_ready", lambda python=None: False)
-
-    class FakeResult:
-        returncode = 1
-        stderr = "нет соединения с download.pytorch.org"
-        stdout = ""
-
-    monkeypatch.setattr(boot.subprocess, "run", lambda cmd, **kw: FakeResult())
+    # pip на месте — иначе установка остановится раньше, на нём.
+    monkeypatch.setattr(boot, "ensure_pip", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        boot, "_run_pip",
+        lambda *a, **kw: (False, "нет соединения с download.pytorch.org"),
+    )
 
     step = boot.prepare()
 
     assert not step.done
     assert "torch" in step.error
+    assert "download.pytorch.org" in step.error, "причина потерялась по дороге"
 
 # ==================== Прогресс установки ====================
 #
@@ -273,3 +273,72 @@ def test_json_mode_reports_failure(boot, monkeypatch, capsys):
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
     assert events[-1]["type"] == "error"
     assert "сеть" in events[-1]["message"]
+
+# ==================== pip во встроенном Python ====================
+#
+# Найдено живой проверкой установщика: в embeddable-сборке Python нет pip
+# вовсе, и мастер первого запуска на чужой машине падал на первом же шаге с
+# «No module named pip». Рядом с python.exe установщик кладёт get-pip.py.
+
+def test_pip_installed_from_bundled_script(boot, monkeypatch, tmp_path):
+    """Когда pip нет, он ставится из лежащего рядом get-pip.py."""
+    python = tmp_path / "python.exe"
+    python.write_bytes(b"")
+    (tmp_path / "get-pip.py").write_text("# заглушка", encoding="utf-8")
+
+    calls = []
+    states = iter([False, True])  # до установки нет, после — есть
+
+    monkeypatch.setattr(boot, "has_pip", lambda _: next(states))
+    monkeypatch.setattr(
+        boot.subprocess, "run",
+        lambda cmd, **kw: calls.append(cmd) or type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+    )
+
+    assert boot.ensure_pip(str(python)) is None
+    assert any("get-pip.py" in str(part) for part in calls[0]), "get-pip.py не запускался"
+
+
+def test_missing_get_pip_reported_clearly(boot, monkeypatch, tmp_path):
+    """
+    Пара к тесту выше: если и pip нет, и get-pip.py рядом не лежит, человек
+    должен увидеть, чего именно не хватает, а не «No module named pip» из
+    недр вывода pip.
+    """
+    python = tmp_path / "python.exe"
+    python.write_bytes(b"")
+
+    monkeypatch.setattr(boot, "has_pip", lambda _: False)
+
+    error = boot.ensure_pip(str(python))
+    assert error is not None
+    assert "get-pip.py" in error
+
+
+def test_existing_pip_left_alone(boot, monkeypatch, tmp_path):
+    """На обычном Python с pip ничего не запускается — ставить нечего."""
+    monkeypatch.setattr(boot, "has_pip", lambda _: True)
+    monkeypatch.setattr(
+        boot.subprocess, "run",
+        lambda *a, **kw: pytest.fail("pip уже есть, а установка всё равно запустилась"),
+    )
+
+    assert boot.ensure_pip("python") is None
+
+
+def test_install_stops_without_pip(boot, monkeypatch):
+    """
+    Установка зависимостей не начинается, пока нет pip.
+
+    Иначе первым же сообщением человек получал бы «не удалось поставить
+    torch» — с настоящей причиной, спрятанной внутри.
+    """
+    monkeypatch.setattr(boot, "ensure_pip", lambda *a, **kw: "нет pip и нет get-pip.py")
+    monkeypatch.setattr(
+        boot, "_run_pip",
+        lambda *a, **kw: pytest.fail("pip запустили, хотя его нет"),
+    )
+
+    step = boot.install_dependencies("python")
+    assert not step.done
+    assert "get-pip" in step.error

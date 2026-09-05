@@ -296,6 +296,57 @@ def is_ready(python: Optional[str] = None) -> bool:
     return models_ready()
 
 
+def has_pip(executable: str) -> bool:
+    """Есть ли pip у этого Python."""
+    try:
+        result = subprocess.run(
+            [executable, "-m", "pip", "--version"],
+            capture_output=True, text=True, timeout=120,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def ensure_pip(executable: str, progress: Optional[Progress] = None) -> Optional[str]:
+    """
+    Убедиться, что pip есть, и поставить его, если нет.
+
+    Во встроенной сборке Python (той, что лежит в дистрибутиве) pip
+    отсутствует — она урезана намеренно. Установщик кладёт рядом с python.exe
+    файл get-pip.py; им pip и ставится. Возвращает текст ошибки или None, если
+    всё в порядке.
+    """
+    if has_pip(executable):
+        return None
+
+    get_pip = Path(executable).resolve().parent / "get-pip.py"
+    if not get_pip.exists():
+        return (
+            "у этого Python нет pip, и рядом не нашлось get-pip.py — "
+            f"ожидался файл {get_pip}"
+        )
+
+    _report(progress, "Готовлю установщик пакетов…", 0.03)
+
+    try:
+        result = subprocess.run(
+            [executable, str(get_pip), "--no-warn-script-location"],
+            capture_output=True, text=True, timeout=900,
+            encoding="utf-8", errors="replace",
+        )
+    except Exception as e:
+        return f"не удалось поставить pip: {e}"
+
+    if result.returncode != 0:
+        return f"не удалось поставить pip: {(result.stderr or result.stdout)[-300:]}"
+
+    if not has_pip(executable):
+        return "pip установился, но не запускается"
+
+    return None
+
+
 def install_dependencies(python: Optional[str] = None, progress: Optional[Progress] = None) -> Step:
     """
     Поставить всё, что нужно backend.
@@ -311,6 +362,12 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
     _report(progress, explanation, 0.05)
 
     step = Step(title="Установка зависимостей")
+
+    # Без pip дальше делать нечего: во встроенной сборке Python его нет.
+    pip_error = ensure_pip(executable, progress)
+    if pip_error:
+        step.error = pip_error
+        return step
 
     try:
         # Доли шкалы поделены по весу: torch — почти четыре гигабайта, всё

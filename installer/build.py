@@ -15,19 +15,23 @@ torch зависит от того, есть ли в компьютере вид
 
 Запуск:
 
-    python installer/build.py            # собрать в installer/dist
-    python installer/build.py --clean    # предварительно очистив
+    python installer/build.py                # собрать в installer/dist
+    python installer/build.py --clean        # предварительно очистив
+    python installer/build.py --installer    # и упаковать в установочный .exe
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import shutil
 import subprocess
 import sys
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = ROOT / "installer"
@@ -90,6 +94,10 @@ def prepare_python(dest: Path) -> None:
 
     text = pth.read_text(encoding="utf-8")
     text = text.replace("#import site", "import site")
+    # Папка backend — в путях поиска: встроенная сборка не добавляет каталог
+    # запускаемого скрипта сама, и любой импорт соседнего модуля падает.
+    if "..\\backend" not in text:
+        text = text.replace(".\n", ".\n..\\backend\n", 1)
     if "Lib\\site-packages" not in text:
         text = text.replace("python313.zip", "python313.zip\nLib\\site-packages", 1)
     pth.write_text(text, encoding="utf-8")
@@ -161,10 +169,87 @@ def report_size(dest: Path) -> None:
     log("(torch и модели — ещё около 4.5 ГБ — ставятся при первом запуске)")
 
 
+def read_version() -> str:
+    """
+    Номер версии из VERSION.json — единственного места, где он записан.
+
+    Тот же файл читает backend (`/api/version/current`), и расхождение между
+    номером в установщике и номером внутри программы означало бы, что проверка
+    обновлений врёт.
+    """
+    version_file = ROOT / "VERSION.json"
+    try:
+        with open(version_file, encoding="utf-8") as f:
+            return json.load(f).get("version", "0.0.0")
+    except Exception as e:
+        log(f"не смог прочитать VERSION.json ({e}) — беру 0.0.0")
+        return "0.0.0"
+
+
+def find_iscc() -> Optional[Path]:
+    """
+    Где лежит компилятор Inno Setup.
+
+    winget ставит его в папку пользователя, а установщик с сайта — в
+    Program Files; проверяются оба места, потому что заранее неизвестно,
+    каким способом его поставили.
+    """
+    candidates = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe",
+        Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"),
+        Path(r"C:\Program Files\Inno Setup 6\ISCC.exe"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    found = shutil.which("ISCC.exe")
+    return Path(found) if found else None
+
+
+def build_installer(dest: Path) -> bool:
+    """Упаковать готовый дистрибутив в один установочный .exe."""
+    iscc = find_iscc()
+    if iscc is None:
+        log("не нашёл Inno Setup — установщик не собран")
+        log("поставить: winget install --id JRSoftware.InnoSetup")
+        return False
+
+    version = read_version()
+    script = INSTALLER / "scott.iss"
+    release = INSTALLER / "release"
+    release.mkdir(parents=True, exist_ok=True)
+
+    log(f"упаковываю установщик {version} (сжатие занимает пару минут)…")
+    result = subprocess.run(
+        [
+            str(iscc),
+            f"/DAppVersion={version}",
+            f"/DDistDir={dest}",
+            f"/DOutputDir={release}",
+            str(script),
+        ],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        cwd=str(INSTALLER),
+    )
+
+    if result.returncode != 0:
+        log("Inno Setup вернул ошибку:")
+        print(result.stdout[-2000:])
+        print(result.stderr[-1000:])
+        return False
+
+    package = release / f"ScottAI-{version}-setup.exe"
+    if package.exists():
+        log(f"установщик готов: {package} ({package.stat().st_size / 1024 ** 2:.0f} МБ)")
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Собрать дистрибутив Scott AI")
     parser.add_argument("--clean", action="store_true", help="очистить папку сборки перед началом")
     parser.add_argument("--skip-launcher", action="store_true", help="не собирать лаунчер (быстрее для проверки)")
+    parser.add_argument("--installer", action="store_true", help="упаковать результат в установочный .exe")
     args = parser.parse_args()
 
     if args.clean and DIST.exists():
@@ -180,6 +265,9 @@ def main() -> int:
     if not args.skip_launcher:
         build_launcher(DIST)
     report_size(DIST)
+
+    if args.installer and not build_installer(DIST):
+        return 1
 
     print(f"\nГотово: {DIST}")
     return 0

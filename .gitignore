@@ -70,3 +70,6 @@ reports/
 # Всё это получается из исходников командой installer/build.py.
 installer/dist/
 installer/.cache/
+# Собранный установщик — артефакт выпуска: его место в GitHub Releases, а не
+# в истории репозитория (61 МБ на каждую сборку).
+installer/release/
