@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -26,6 +26,18 @@ public sealed class LauncherSettings
     public string UserName { get; set; } = "";
 
     public string Bio { get; set; } = "";
+
+    // ---- Кадрирование аватара ----
+    // Фото почти никогда не годится «как есть»: лицо на снимке смещено от
+    // центра, и круглая рамка обрезает его как попало. Поэтому запоминается,
+    // какую именно часть картинки человек выбрал — сдвиг от центра в долях
+    // размера рамки и увеличение.
+    public double AvatarOffsetX { get; set; }
+
+    public double AvatarOffsetY { get; set; }
+
+    /// <summary>Увеличение фото в рамке: 1 — вписано целиком, больше — приближено.</summary>
+    public double AvatarZoom { get; set; } = 1.0;
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

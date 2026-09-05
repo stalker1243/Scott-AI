@@ -1,19 +1,31 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:myconv="using:ScottAI.Avalonia.Converters"
              x:DataType="vm:ProfileViewModel"
              x:Class="ScottAI.Avalonia.Views.ProfileView">
     <StackPanel Margin="40" Spacing="24" MaxWidth="560">
         <TextBlock Text="Профиль" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
 
         <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
+            <!-- Итоговый вид: ровно так аватар выглядит в интерфейсе -->
             <Border Width="88" Height="88" CornerRadius="44" ClipToBounds="True" Background="{DynamicResource Accent}">
                 <Grid>
                     <Image Source="{Binding AvatarImage}" Stretch="UniformToFill"
-                           IsVisible="{Binding AvatarImage, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+                           IsVisible="{Binding HasAvatar}">
+                        <Image.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform ScaleX="{Binding AvatarZoom}" ScaleY="{Binding AvatarZoom}" />
+                                <!-- Сдвиг пересчитан из большой рамки (220) в маленькую (88):
+                                     кадр подбирается на крупном превью, а показывается здесь. -->
+                                <TranslateTransform X="{Binding AvatarOffsetX, Converter={x:Static myconv:AvatarPreviewScaleConverter.Instance}}"
+                                                    Y="{Binding AvatarOffsetY, Converter={x:Static myconv:AvatarPreviewScaleConverter.Instance}}" />
+                            </TransformGroup>
+                        </Image.RenderTransform>
+                    </Image>
                     <TextBlock Text="👤" FontSize="34" HorizontalAlignment="Center" VerticalAlignment="Center"
-                               IsVisible="{Binding AvatarImage, Converter={x:Static conv:ObjectConverters.IsNull}}" />
+                               IsVisible="{Binding !HasAvatar}" />
                 </Grid>
             </Border>
             <StackPanel VerticalAlignment="Center" Spacing="8">
@@ -22,9 +34,43 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="Изменить фото" Classes="soft" Click="OnPickAvatarClick" />
                     <Button Content="Удалить" Classes="danger-text" Command="{Binding RemoveAvatarCommand}"
-                            IsVisible="{Binding AvatarImage, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+                            IsVisible="{Binding HasAvatar}" />
                 </StackPanel>
             </StackPanel>
+        </StackPanel>
+
+        <!-- Подбор кадра. Виден только когда есть что кадрировать. -->
+        <StackPanel Spacing="10" IsVisible="{Binding HasAvatar}">
+            <TextBlock Text="Положение фото" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+            <TextBlock Text="Перетащите снимок мышью, чтобы выбрать видимую часть. Колесо мыши или ползунок — приближение."
+                       FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" />
+
+            <Border Width="220" Height="220" CornerRadius="110" ClipToBounds="True"
+                    HorizontalAlignment="Left" Cursor="SizeAll"
+                    Background="{DynamicResource BgElevated}"
+                    BorderBrush="{DynamicResource Accent}" BorderThickness="2"
+                    PointerPressed="OnCropPressed" PointerMoved="OnCropMoved"
+                    PointerReleased="OnCropReleased" PointerWheelChanged="OnCropWheel">
+                <Image Source="{Binding AvatarImage}" Stretch="UniformToFill">
+                    <Image.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform ScaleX="{Binding AvatarZoom}" ScaleY="{Binding AvatarZoom}" />
+                            <TranslateTransform X="{Binding AvatarOffsetX}" Y="{Binding AvatarOffsetY}" />
+                        </TransformGroup>
+                    </Image.RenderTransform>
+                </Image>
+            </Border>
+
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
+                <TextBlock Grid.Column="0" Text="Приближение" VerticalAlignment="Center"
+                           FontSize="12" Foreground="{DynamicResource TextMuted}" />
+                <Slider Grid.Column="1" Minimum="1" Maximum="4" Value="{Binding AvatarZoom}"
+                        VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Text="{Binding AvatarZoom, StringFormat={}{0:0.0}×}"
+                           VerticalAlignment="Center" Width="40" FontSize="12"
+                           Foreground="{DynamicResource TextPrimary}" />
+                <Button Grid.Column="3" Content="Сбросить" Command="{Binding ResetCropCommand}" Classes="soft" />
+            </Grid>
         </StackPanel>
 
         <StackPanel Spacing="6">
