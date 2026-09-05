@@ -189,10 +189,16 @@ def _build_startapps_index() -> Dict[str, str]:
     Возвращает {нормализованное_имя: AppID}.
     """
     try:
+        # OutputEncoding задаётся явно: PowerShell на русской Windows выводит в
+        # кодировке консоли, а не в UTF-8, и кириллица приходила испорченной.
+        # С errors="ignore" она просто исчезала — «Калькулятор» превращался в
+        # пустую строку и в каталог не попадал. Так пропадали 58 приложений из
+        # 203: все, чьи имена по-русски.
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
              "Get-StartApps | ConvertTo-Json -Compress"],
-            capture_output=True, text=True, timeout=20, encoding="utf-8", errors="ignore",
+            capture_output=True, text=True, timeout=20, encoding="utf-8", errors="replace",
         )
         if result.returncode != 0 or not result.stdout.strip():
             return {}
@@ -378,22 +384,33 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
     startapps = _get_startapps_index()
     shortcuts = _get_shortcut_index()
 
-    # 2. Точное совпадение в каталоге Windows (Get-StartApps — самый полный источник)
-    if search_name in startapps:
-        return ResolvedApp(matched_name=search_name, target=startapps[search_name], kind="appid", source="startapps")
-    if search_name in shortcuts:
-        return ResolvedApp(matched_name=search_name, target=shortcuts[search_name], kind="path", source="shortcut")
+    # 2. Точное совпадение в каталоге Windows (Get-StartApps — самый полный источник).
+    #
+    # Проверяются ОБА варианта: и алиас, и то, что сказал пользователь. Раньше
+    # алиас подменял исходное имя целиком, и это мешало: «калькулятор» уходил
+    # искаться как «calculator», а в русской Windows приложение подписано
+    # «Калькулятор» — совпадения не находилось ни по одному источнику. Алиас
+    # должен дополнять запрос, а не вытеснять его.
+    for candidate in (search_name, normalized):
+        if candidate in startapps:
+            return ResolvedApp(matched_name=candidate, target=startapps[candidate],
+                               kind="appid", source="startapps")
+        if candidate in shortcuts:
+            return ResolvedApp(matched_name=candidate, target=shortcuts[candidate],
+                               kind="path", source="shortcut")
 
     # 3. Нечёткое совпадение по объединённому каталогу (startapps приоритетнее при равном скоре)
     best_key, best_score, best_pool = None, 0.0, None
-    for key in startapps:
-        score = _similarity(search_name, key)
-        if score > best_score:
-            best_score, best_key, best_pool = score, key, "startapps"
-    for key in shortcuts:
-        score = _similarity(search_name, key)
-        if score > best_score:
-            best_score, best_key, best_pool = score, key, "shortcut"
+    candidates = (search_name, normalized) if search_name != normalized else (search_name,)
+    for candidate in candidates:
+        for key in startapps:
+            score = _similarity(candidate, key)
+            if score > best_score:
+                best_score, best_key, best_pool = score, key, "startapps"
+        for key in shortcuts:
+            score = _similarity(candidate, key)
+            if score > best_score:
+                best_score, best_key, best_pool = score, key, "shortcut"
 
     if best_key and best_score >= MIN_FUZZY_SCORE:
         if best_pool == "startapps":
