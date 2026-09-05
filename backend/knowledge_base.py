@@ -1,5 +1,5 @@
 """
-База знаний и память JARVIS
+База знаний и память Scott
 Сохранение и восстановление информации из диалогов
 """
 
@@ -13,13 +13,31 @@ import requests
 class KnowledgeBase:
     """База знаний и память системы"""
     
-    def __init__(self, db_file: str = "jarvis_memory.json"):
+    def __init__(self, db_file: str = "scott_memory.json"):
         self.db_file = Path(db_file)
+        self._migrate_old_memory()
         self.memory = self.load_memory()
         self.conversation_history = []
         
         print(f"✅ База знаний инициализирована ({len(self.memory)} записей)")
     
+    def _migrate_old_memory(self) -> None:
+        """
+        Перенести память из файла со старым именем.
+
+        Ассистента переименовали в Scott, а вместе с ним и файл памяти. Без
+        переноса всё, что он выучил из разговоров, осталось бы в файле, к
+        которому он больше не обращается.
+        """
+        old = self.db_file.with_name("jarvis_memory.json")
+        if old.exists() and not self.db_file.exists():
+            try:
+                old.rename(self.db_file)
+                print(f"📦 Память перенесена: {old.name} → {self.db_file.name}")
+            except OSError as e:
+                print(f"⚠️ Не удалось перенести память ({e}) — читаю старый файл")
+                self.db_file = old
+
     def load_memory(self) -> Dict:
         """Загрузить память из файла"""
         try:
@@ -68,11 +86,11 @@ class KnowledgeBase:
         
         return results
     
-    def add_conversation(self, user_input: str, jarvis_response: str):
+    def add_conversation(self, user_input: str, assistant_response: str):
         """Добавить в историю разговоров"""
         self.conversation_history.append({
             "user": user_input,
-            "jarvis": jarvis_response,
+            "assistant": assistant_response,
             "timestamp": datetime.now().isoformat()
         })
         
@@ -128,7 +146,7 @@ class KnowledgeBase:
         q = question.lower()
         
         responses = {
-            "who": "I am JARVIS, your personal AI assistant.",
+            "who": "Я Скотт, ваш личный ассистент.",
             "what": "I am designed to help you with various tasks.",
             "how": "I work by processing your input and responding accordingly.",
             "hello": "Hello sir or madam. At your service.",

@@ -1570,7 +1570,7 @@ async def execute_command(command: Dict):
     text = command.get("text", "") or command.get("command", "")
     quiet_mode = command.get("quiet_mode", False)
     user_name = command.get("user_name", "User")
-    ai_name = command.get("ai_name", "JARVIS")
+    ai_name = command.get("ai_name", "Scott")
     
     if not text:
         return {"error": "Текст команды не предоставлен", "status": "error"}

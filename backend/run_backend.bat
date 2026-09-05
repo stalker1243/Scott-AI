@@ -1,9 +1,9 @@
 @echo off
-REM JARVIS AI Backend Server
+REM Scott AI Backend Server
 
 echo.
 echo ╔════════════════════════════════════════════════════════╗
-echo ║   🤖 JARVIS AI - BACKEND SERVER 🤖                     ║
+echo ║   🤖 SCOTT AI - BACKEND SERVER 🤖                     ║
 echo ║                                                        ║
 echo ║   Доступ: http://localhost:8000                       ║
 echo ║   WebSocket: ws://localhost:8000/ws/chat              ║
