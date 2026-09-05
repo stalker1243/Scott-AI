@@ -1,6 +1,9 @@
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using ScottAI.Avalonia.Models;
+using ScottAI.Avalonia.Services;
 using ScottAI.Avalonia.ViewModels;
 
 namespace ScottAI.Avalonia.Views;
@@ -10,6 +13,29 @@ public partial class ChatView : UserControl
     public ChatView()
     {
         InitializeComponent();
+    }
+
+    /// <summary>
+    /// Копирование блока кода в буфер обмена.
+    ///
+    /// Обработчик, а не команда во ViewModel: буфер обмена в Avalonia живёт у
+    /// окна (TopLevel), и добираться до него из ViewModel пришлось бы окольным
+    /// путём.
+    /// </summary>
+    private async void OnCopyCodeClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.DataContext is not MessageSegment segment)
+            return;
+
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+        {
+            ToastService.Error("Буфер обмена недоступен");
+            return;
+        }
+
+        await clipboard.SetTextAsync(segment.Text);
+        ToastService.Success("Код скопирован");
     }
 
     private async void OnPickImageClick(object? sender, RoutedEventArgs e)

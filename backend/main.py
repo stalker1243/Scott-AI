@@ -1153,7 +1153,10 @@ class ScottAI:
             # и повторять, что именно запускать, ему не придётся.
             self.last_program = written
 
-            preview = written["code"]
+            # Код обрамляется как блок markdown: по этой рамке лаунчер рисует
+            # его моноширинным шрифтом с кнопкой «Копировать», а синтез речи
+            # такие блоки не произносит.
+            preview = f"```{written['language']}\n{written['code'].strip()}\n```"
             return (
                 f"Готово, написал на {written['display']}. Файл: {written['path']}\n\n"
                 f"{preview}\n\n"

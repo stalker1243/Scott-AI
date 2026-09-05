@@ -138,8 +138,48 @@
                                                 <TextBlock Text="{Binding AttachmentName}" FontSize="11" Foreground="{DynamicResource TextSecondary}" />
                                             </StackPanel>
                                         </Border>
-                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource TextPrimary}" />
+                                        <!-- Сообщение показывается кусками: обычный текст и блоки кода.
+                                             У кода своя рамка, моноширинный шрифт и кнопка «Копировать» —
+                                             выделять программу мышью по строчкам неудобно. -->
+                                        <ItemsControl ItemsSource="{Binding Segments}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="models:MessageSegment">
+                                                    <Panel>
+                                                        <SelectableTextBlock IsVisible="{Binding IsText}"
+                                                                             Text="{Binding Text}" TextWrapping="Wrap"
+                                                                             Foreground="{DynamicResource TextPrimary}" />
+
+                                                        <Border IsVisible="{Binding IsCode}" Margin="0,6"
+                                                                Background="{DynamicResource BgElevated}"
+                                                                BorderBrush="{DynamicResource BorderColor}"
+                                                                BorderThickness="1" CornerRadius="8">
+                                                            <Grid RowDefinitions="Auto,Auto">
+                                                                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="10,6,6,2">
+                                                                    <TextBlock Grid.Column="0" Text="{Binding Caption}"
+                                                                               FontSize="11" VerticalAlignment="Center"
+                                                                               Foreground="{DynamicResource TextMuted}" />
+                                                                    <Button Grid.Column="1" Classes="soft" Padding="8,3"
+                                                                            Click="OnCopyCodeClick" ToolTip.Tip="Скопировать код">
+                                                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                                                            <mi:MaterialIcon Kind="ContentCopy" Width="13" Height="13" />
+                                                                            <TextBlock Text="Копировать" FontSize="11" />
+                                                                        </StackPanel>
+                                                                    </Button>
+                                                                </Grid>
+                                                                <ScrollViewer Grid.Row="1" MaxHeight="320"
+                                                                              HorizontalScrollBarVisibility="Auto"
+                                                                              VerticalScrollBarVisibility="Auto">
+                                                                    <SelectableTextBlock Text="{Binding Text}" Margin="10,2,10,10"
+                                                                                         FontFamily="Consolas,Menlo,Monospace"
+                                                                                         FontSize="12.5"
+                                                                                         Foreground="{DynamicResource TextPrimary}" />
+                                                                </ScrollViewer>
+                                                            </Grid>
+                                                        </Border>
+                                                    </Panel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                         <TextBlock Text="{Binding Time}" FontSize="11"
                                                    Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Right" />
                                     </StackPanel>

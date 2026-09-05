@@ -59,6 +59,39 @@ DECORATIVE = {
 }
 
 
+# Блок кода в ответе: ```язык … ```. Читать его вслух бессмысленно — Silero
+# честно произносит «решётка инклюд стдио точка аш», и слушать это невозможно.
+CODE_BLOCK = re.compile(r"```[^\n]*\n.*?```", re.DOTALL)
+
+
+def strip_code_blocks(text: str) -> str:
+    """
+    Заменить блоки кода упоминанием о них.
+
+    Код Scott показывает в чате, где его можно прочитать и скопировать
+    кнопкой; вслух достаточно сказать, что он там появился.
+    """
+    return CODE_BLOCK.sub(" Код показан в чате. ", text)
+
+
+# Полный путь к файлу: «C:\\\\Users\\\\SKYNET\\\\ScottAI\\\\code\\\\scott_program.c». Вслух это
+# превращалось в «цэ двоеточие усерс скйнет скоттаи коде скотт програм цэ» —
+# набор звуков, из которого ничего не понять. Путь целиком человек видит в
+# чате, произносить достаточно имя файла.
+FILE_PATH = re.compile(
+    r"(?:[A-Za-z]:)?(?:[\\/][^\\/\s]+){2,}"
+)
+
+
+def shorten_paths(text: str) -> str:
+    """Заменить полные пути к файлам их именами."""
+
+    def replace(match: re.Match) -> str:
+        return re.split(r"[\\/]", match.group(0))[-1]
+
+    return FILE_PATH.sub(replace, text)
+
+
 def strip_decoration(text: str) -> str:
     """Убрать эмодзи, значки и разметку — всё, что не читается вслух."""
     for source, replacement in DECORATIVE.items():
@@ -228,6 +261,8 @@ def prepare_for_speech(text: str, accents: bool = True) -> str:
     if not text:
         return ""
 
+    text = strip_code_blocks(text)
+    text = shorten_paths(text)
     text = strip_decoration(text)
     text = russify_latin(text)
     text = expand_numbers(text)

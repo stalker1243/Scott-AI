@@ -160,3 +160,59 @@ def test_accents_can_be_disabled(speech):
 def test_unknown_words_untouched(speech):
     """Слова, которых нет в словаре ударений, не трогаются."""
     assert speech.prepare_for_speech("Кот сидит на окне", accents=True).count("+") == 0
+
+# ==================== Код и пути ====================
+
+def test_code_block_not_spoken(speech):
+    """
+    Программу Scott показывает, а не зачитывает.
+
+    Вслух «#include <stdio.h>» превращается в набор звуков; код человек
+    читает в чате, где рядом есть кнопка «Копировать».
+    """
+    answer = (
+        "Готово, написал на C." + chr(10) + chr(10)
+        + "```c" + chr(10)
+        + "#include <stdio.h>" + chr(10)
+        + "int main(void) { return 0; }" + chr(10)
+        + "```" + chr(10) + chr(10)
+        + "Скажите «запусти программу»."
+    )
+    spoken = speech.prepare_for_speech(answer)
+    assert "include" not in spoken.lower()
+    assert "stdio" not in spoken.lower()
+    assert "код показан в чате" in spoken.lower()
+    assert "запусти" in spoken.lower()
+
+
+def test_full_path_shortened_to_file_name(speech):
+    r"""
+    Полный путь вслух не читается.
+
+    «C:\Users\SKYNET\ScottAI\code\scott_program.c» звучало как «цэ двоеточие
+    усерс скйнет скоттаи коде…» — понять из этого ничего нельзя, а путь
+    целиком виден в чате.
+    """
+    spoken = speech.shorten_paths(r"Файл: C:\Users\SKYNET\ScottAI\code\scott_program.c")
+    assert spoken == "Файл: scott_program.c"
+
+    # И то же самое по всей цепочке синтеза: без вызова shorten_paths внутри
+    # prepare_for_speech правило было бы мёртвым.
+    voiced = speech.prepare_for_speech(r"Файл: C:\Users\SKYNET\ScottAI\code\scott_program.c")
+    assert "усерс" not in voiced and "скйнет" not in voiced
+
+
+def test_linux_path_shortened(speech):
+    """Пути с прямыми слэшами сокращаются так же."""
+    assert speech.shorten_paths("Открыл /home/user/Загрузки") == "Открыл Загрузки"
+
+
+def test_fractions_and_domains_survive(speech):
+    """
+    Пара к тесту выше: не всё со слэшем и точкой — путь.
+
+    «3/4» и «example.com» должны дойти до синтеза целиком, иначе правило про
+    пути съело бы обычный текст.
+    """
+    text = "Соотношение 3/4 и адрес example.com"
+    assert speech.shorten_paths(text) == text
