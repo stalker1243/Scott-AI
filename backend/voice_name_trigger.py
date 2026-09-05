@@ -68,6 +68,29 @@ class VoiceNameTrigger:
         self.trigger_count = 0  # Счётчик срабатываний
         self.last_trigger_name = None  # Последнее использованное имя
     
+    @staticmethod
+    def _starts_with_name(text: str, name: str) -> bool:
+        """
+        Фраза начинается ИМЕНЕМ, а не словом, которое с него начинается.
+
+        Простой startswith здесь давал ложные срабатывания на каждом слове,
+        начинающемся со «скот»: «скотч закончился» превращался в обращение к
+        Scott с командой «ч закончился», «скотина» — в «ина». Имя должно
+        заканчиваться границей слова.
+        """
+        if not text.startswith(name):
+            return False
+        tail = text[len(name):]
+        return not tail or not (tail[0].isalpha() or tail[0] == '-')
+
+    @staticmethod
+    def _ends_with_name(text: str, name: str) -> bool:
+        """Фраза заканчивается именем, а не словом, которое им заканчивается."""
+        if not text.endswith(name):
+            return False
+        head = text[:len(text) - len(name)]
+        return not head or not (head[-1].isalpha() or head[-1] == '-')
+
     def check_trigger(self, text: str) -> VoiceTriggerResult:
         """
         Проверить наличие trigger в тексте
@@ -97,14 +120,25 @@ class VoiceNameTrigger:
                 trigger_position='none'
             )
         
-        # Нормализируем текст
+        # Нормализируем текст.
+        #
+        # Пунктуация по краям снимается ДО поиска, а не после. Живая проверка
+        # показала, почему это важно: «Спасибо, Скотт!» проходило мимо, потому
+        # что строка заканчивается восклицательным знаком, а не именем —
+        # endswith('скотт') не срабатывал. При этом «открой блокнот, Скотт» без
+        # знака работало, и разница выглядела необъяснимой.
+        #
+        # Перечислять варианты с пунктуацией в TRIGGER_NAMES (там уже есть
+        # 'scott,' и 'scott.') — заведомо проигрышный путь: знаков больше, чем
+        # можно предусмотреть, и Whisper ставит их как ему вздумается.
         normalized_text = text.lower().strip()
+        normalized_text = re.sub(r'^[\s,.!?…]+|[\s,.!?…]+$', '', normalized_text)
         
         # ==========================================
         # ПРОВЕРКА В НАЧАЛЕ (ВЫСОКИЙ ПРИОРИТЕТ)
         # ==========================================
         for trigger_name, full_name in self.TRIGGER_NAMES.items():
-            if normalized_text.startswith(trigger_name):
+            if self._starts_with_name(normalized_text, trigger_name):
                 # Извлекаем команду
                 command_start = len(trigger_name)
                 remaining_text = normalized_text[command_start:].strip()
@@ -127,7 +161,7 @@ class VoiceNameTrigger:
         # ПРОВЕРКА В КОНЦЕ (СРЕДНИЙ ПРИОРИТЕТ)
         # ==========================================
         for trigger_name, full_name in self.TRIGGER_NAMES.items():
-            if normalized_text.endswith(trigger_name):
+            if self._ends_with_name(normalized_text, trigger_name):
                 # Извлекаем команду
                 command_end = len(normalized_text) - len(trigger_name)
                 command_text = normalized_text[:command_end].strip()
@@ -145,6 +179,24 @@ class VoiceNameTrigger:
                     )
                     self._update_stats(result)
                     return result
+
+        # ==========================================
+        # ТОЛЬКО ИМЯ, БЕЗ КОМАНДЫ
+        # ==========================================
+        # «Скотт?» — это обращение, пусть и без просьбы. Считать его «мимо»
+        # неправильно: человек позвал, и молчание в ответ выглядит поломкой.
+        # Команда при этом пустая, и вызывающий код решает, что с этим делать —
+        # слушатель, например, отвечает, что слышит, но команды не было.
+        if normalized_text in self.TRIGGER_NAMES:
+            result = VoiceTriggerResult(
+                has_trigger=True,
+                name_used=self.TRIGGER_NAMES[normalized_text],
+                command_text='',
+                confidence=0.9,
+                trigger_position='start'
+            )
+            self._update_stats(result)
+            return result
         
         # ==========================================
         # ПРОВЕРКА В СЕРЕДИНЕ (НИЗКИЙ ПРИОРИТЕТ)
