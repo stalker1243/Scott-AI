@@ -47,6 +47,7 @@
         <SolidColorBrush x:Key="BorderColor">#2A3547</SolidColorBrush>
         <SolidColorBrush x:Key="Accent">#3B82F6</SolidColorBrush>
         <SolidColorBrush x:Key="AccentSoft">#263B82F6</SolidColorBrush>
+        <Color x:Key="AccentColor">#2E3B82F6</Color>
         <SolidColorBrush x:Key="AccentSofter">#143B82F6</SolidColorBrush>
         <SolidColorBrush x:Key="Success">#22C55E</SolidColorBrush>
         <SolidColorBrush x:Key="Danger">#EF4444</SolidColorBrush>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
@@ -17,6 +17,7 @@ public sealed record UpdateInfo(
     string AssetName,
     long AssetSize,
     string ReleaseUrl,
+    string ReleaseDate,
     string Error);
 
 /// <summary>
@@ -67,6 +68,7 @@ public sealed class UpdateService
                 AssetName: Text(data, "asset_name"),
                 AssetSize: Number(data, "asset_size"),
                 ReleaseUrl: Text(data, "release_url"),
+                ReleaseDate: Text(data, "published_at"),
                 Error: Text(data, "error"));
         }
         catch (Exception)

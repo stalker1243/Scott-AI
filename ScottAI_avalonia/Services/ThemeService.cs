@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Media;
@@ -202,6 +202,11 @@ public static class ThemeService
         // рамке/иконке, а в заметной площади заливки.
         resources["AccentSoft"] = new SolidColorBrush(Color.FromArgb(54, color.R, color.G, color.B));
         resources["AccentSofter"] = new SolidColorBrush(Color.FromArgb(34, color.R, color.G, color.B));
+
+        // Отдельно — сам цвет, а не кисть: градиенту нужен Color, кисть он не
+        // принимает. Используется в карточке обновления.
+        resources["AccentColor"] = Color.FromArgb(46, color.R, color.G, color.B);
+
         CurrentAccentHex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
     }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -44,6 +44,12 @@ public partial class UpdateViewModel : ViewModelBase
 
     [ObservableProperty] private string? _error;
 
+    /// <summary>«61 МБ» — сколько весит установщик. Человек вправе знать заранее.</summary>
+    [ObservableProperty] private string _sizeText = "";
+
+    /// <summary>Дата выпуска словами: «10 сентября 2026».</summary>
+    [ObservableProperty] private string _dateText = "";
+
     /// <summary>
     /// Спросить backend, вышло ли что-то новое.
     ///
@@ -61,10 +67,12 @@ public partial class UpdateViewModel : ViewModelBase
 
         _info = info;
         Headline = $"Вышла версия {info.LatestVersion}";
+        SizeText = FormatSize(info.AssetSize);
+        DateText = FormatDate(info.ReleaseDate);
 
-        // Заметки к выпуску бывают длинными; в полоску идёт начало, остальное
+        // Заметки к выпуску бывают длинными; в карточку идёт начало, остальное
         // человек прочтёт на странице выпуска.
-        Notes = Shorten(info.Notes, 220);
+        Notes = Shorten(CleanMarkup(info.Notes), 200);
         Visible = true;
     }
 
@@ -109,10 +117,16 @@ public partial class UpdateViewModel : ViewModelBase
         Status = "Скачиваю обновление…";
 
         _cancellation = new CancellationTokenSource();
+        var total = _info.AssetSize;
         var progress = new Progress<double>(share =>
         {
             Progress = share * 100;
-            Status = $"Скачиваю обновление… {share * 100:0}%";
+
+            // Проценты сами по себе мало что говорят: «12 из 61 МБ» сразу
+            // отвечает на вопрос, сколько ещё ждать.
+            Status = total > 0
+                ? $"Скачано {FormatSize((long)(total * share))} из {FormatSize(total)}"
+                : $"Скачано {share * 100:0}%";
         });
 
         var (path, error) = await _service.DownloadAsync(_info, progress, _cancellation.Token);
@@ -145,6 +159,72 @@ public partial class UpdateViewModel : ViewModelBase
 
     /// <summary>Просьба закрыть лаунчер: установщику нужны незанятые файлы.</summary>
     public event Action? RequestShutdown;
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes <= 0)
+        {
+            return "";
+        }
+
+        var megabytes = bytes / 1024.0 / 1024.0;
+        return megabytes >= 1024
+            ? $"{megabytes / 1024:0.#} ГБ"
+            : $"{megabytes:0} МБ";
+    }
+
+    private static string FormatDate(string iso)
+    {
+        // GitHub отдаёт дату в ISO 8601. Показывать её человеку в таком виде
+        // незачем, а падать из-за неразобранной строки — тем более.
+        if (DateTimeOffset.TryParse(iso, out var moment))
+        {
+            return moment.ToLocalTime().ToString("d MMMM yyyy",
+                new System.Globalization.CultureInfo("ru-RU"));
+        }
+
+        return "";
+    }
+
+    /// <summary>
+    /// Убрать разметку из заметок к выпуску.
+    ///
+    /// На GitHub их пишут в markdown, и в карточке это выглядит мусором:
+    /// «[!IMPORTANT]», «**жирный**», «## Заголовок», голые ссылки. Человеку
+    /// нужна суть, а полный текст открывается кнопкой «Что нового».
+    /// </summary>
+    private static string CleanMarkup(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "";
+        }
+
+        var lines = text.Split(new[] { (char)10, (char)13 },
+                               StringSplitOptions.RemoveEmptyEntries);
+        var kept = new System.Collections.Generic.List<string>();
+
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim().TrimStart('>', '#', '*', '-', ' ').Trim();
+            line = line.Replace("**", "").Replace("`", "");
+
+            // Служебные пометки и строки-ссылки в двух строках карточки
+            // бесполезны — пропускаем их и берём следующую осмысленную.
+            if (line.Length == 0 || line.StartsWith("[!") || line.StartsWith("http"))
+            {
+                continue;
+            }
+
+            kept.Add(line);
+            if (kept.Count >= 3)
+            {
+                break;
+            }
+        }
+
+        return string.Join(" · ", kept);
+    }
 
     private static string Shorten(string text, int limit)
     {
