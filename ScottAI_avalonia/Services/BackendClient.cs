@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -310,6 +310,35 @@ public class BackendClient
         catch
         {
             return null;
+        }
+    }
+
+    // ---------- Прослушивание микрофона ----------
+
+    public async Task<ListenStatus?> ListenStatusAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<ListenStatus>("/listen/status");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Включить или выключить прослушивание.</summary>
+    public async Task<(bool Success, string Message, ListenStatus? State)> SetListeningAsync(bool enabled)
+    {
+        try
+        {
+            var res = await _http.PostAsync(enabled ? "/listen/start" : "/listen/stop", null);
+            var body = await res.Content.ReadFromJsonAsync<ListenStatus>();
+            return (res.IsSuccessStatusCode, body?.Message ?? $"HTTP {(int)res.StatusCode}", body);
+        }
+        catch (Exception e)
+        {
+            return (false, e.Message, null);
         }
     }
 

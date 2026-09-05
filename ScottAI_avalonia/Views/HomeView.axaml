@@ -1,6 +1,7 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:conv="using:Avalonia.Data.Converters"
              x:DataType="vm:HomeViewModel"
              x:Class="ScottAI.Avalonia.Views.HomeView">
     <StackPanel Margin="40" Spacing="24">
@@ -36,9 +37,24 @@
             </Border>
         </StackPanel>
 
-        <Button Name="LaunchButton" Content="Открыть чат" Command="{Binding LaunchChatCommand}"
-                HorizontalAlignment="Left"
-                Background="{DynamicResource Accent}" Foreground="White" Padding="20,12"
-                CornerRadius="10" FontWeight="SemiBold" />
+        <StackPanel Spacing="12">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button Name="LaunchButton" Content="Открыть чат" Command="{Binding LaunchChatCommand}"
+                        Background="{DynamicResource Accent}" Foreground="White" Padding="20,12"
+                        CornerRadius="10" FontWeight="SemiBold" />
+                <Button Content="{Binding ListenButtonText}" Command="{Binding ToggleListeningCommand}"
+                        IsEnabled="{Binding MicAvailable}"
+                        Background="{DynamicResource BgElevated}" Foreground="{DynamicResource TextPrimary}"
+                        Padding="20,12" CornerRadius="10" FontWeight="SemiBold" />
+            </StackPanel>
+
+            <TextBlock Text="{Binding ListenHint}" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextMuted}" />
+            <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"
+                       IsVisible="{Binding LastHeard, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
+                <Run Text="Последнее услышанное:" />
+                <Run Text="{Binding LastHeard}" FontStyle="Italic" />
+            </TextBlock>
+        </StackPanel>
     </StackPanel>
 </UserControl>

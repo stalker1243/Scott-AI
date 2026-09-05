@@ -1,7 +1,9 @@
-using System;
+﻿using System;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ScottAI.Avalonia.Models;
 using ScottAI.Avalonia.Services;
 
 namespace ScottAI.Avalonia.ViewModels;
@@ -26,6 +28,21 @@ public partial class HomeViewModel : ViewModelBase
     [ObservableProperty]
     private int _processCount;
 
+    // ---- Прослушивание микрофона ----
+    // Scott слушает непрерывно, но выполняет только то, что сказано после его
+    // имени. Поэтому счётчиков два: сколько фраз он услышал вообще и сколько
+    // из них были обращены к нему — по разнице сразу видно, слышит ли он
+    // комнату и узнаёт ли себя.
+    [ObservableProperty] private bool _isListening;
+    [ObservableProperty] private bool _micAvailable = true;
+    [ObservableProperty] private bool _listenBusy;
+    [ObservableProperty] private string _listenHint = "Scott не слушает";
+    [ObservableProperty] private string _lastHeard = "";
+
+    public string ListenButtonText => IsListening ? "Не слушать" : "Слушать";
+
+    partial void OnIsListeningChanged(bool value) => OnPropertyChanged(nameof(ListenButtonText));
+
     public HomeViewModel(BackendClient client, Action onLaunchChat)
     {
         _client = client;
@@ -39,6 +56,66 @@ public partial class HomeViewModel : ViewModelBase
         _animTimer.Start();
 
         _ = PollMetricsAsync();
+        _ = RefreshListening();
+    }
+
+    [RelayCommand]
+    private async Task ToggleListening()
+    {
+        ListenBusy = true;
+        try
+        {
+            var (success, message, state) = await _client.SetListeningAsync(!IsListening);
+            if (!success)
+            {
+                ListenHint = message;
+                ToastService.Error(message);
+                return;
+            }
+
+            ApplyListenState(state);
+            ToastService.Success(IsListening ? "Scott слушает — обратитесь к нему по имени" : "Scott больше не слушает");
+        }
+        finally
+        {
+            ListenBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RefreshListening()
+    {
+        ApplyListenState(await _client.ListenStatusAsync());
+    }
+
+    private void ApplyListenState(ListenStatus? state)
+    {
+        if (state is null)
+        {
+            IsListening = false;
+            ListenHint = "backend не отвечает";
+            return;
+        }
+
+        IsListening = state.Listening;
+        MicAvailable = state.Available;
+        LastHeard = state.LastText;
+
+        if (!state.Available)
+        {
+            ListenHint = "Записывать звук нечем: не установлена библиотека sounddevice";
+        }
+        else if (!state.Listening)
+        {
+            ListenHint = "Scott не слушает";
+        }
+        else
+        {
+            // Показываем обе цифры: если фразы слышны, а обращений нет — значит
+            // Scott не узнаёт своё имя, и это совсем другая проблема, чем
+            // «микрофон не слышит».
+            ListenHint = $"Слушаю. Услышано фраз: {state.PhrasesHeard}, из них ко мне: {state.Triggered}";
+        }
     }
 
     private void TickAnimation()
