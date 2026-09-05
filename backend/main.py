@@ -373,9 +373,19 @@ async def http_exception_handler(request, exc):
     )
 
 # CORS
+# Источники ограничены петлевым адресом. Со «*» и allow_credentials любая
+# открытая в браузере страница могла слать запросы на localhost:8000 — то есть
+# посторонний сайт получал возможность запускать программы на компьютере
+# пользователя. Лаунчер ходит с этой же машины, ему звёздочка не нужна.
+_LOCAL_ORIGINS = [
+    f"http://{host}:{port}"
+    for host in ("localhost", "127.0.0.1")
+    for port in ("1420", "5173", "8000", "8001", "3000")
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_LOCAL_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -745,9 +755,16 @@ class ScottAI:
             action_command_types = {
                 'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
                 'get_currency', 'get_weather', 'get_news', 'system_info', 'manage_window',
-                'file_operation', 'system_command', 'run_script', 'open_url', 'powershell',
+                'file_operation', 'system_command', 'open_url',
                 'list_processes'
             }
+            # 'powershell' и 'run_script' здесь намеренно отсутствуют. /command
+            # не требует токена, и стоит появиться ветке выполнения для этих
+            # типов — произвольная команда оболочки станет доступна любому, кто
+            # дотянулся до порта. Выполнять их можно только через
+            # /extended/powershell и /internal/execute: там есть и Bearer-токен,
+            # и ограничитель частоты, и белый список.
+            SHELL_TYPES = {'powershell', 'run_script'}
             explicit_search = any(
                 keyword in lower_text for keyword in ['найди', 'ищи', 'гугли', 'поиск', 'search', 'find', 'look for', 'google', 'поискать', 'гугль', 'яндекс']
             )
@@ -791,6 +808,19 @@ class ScottAI:
                 or explicit_action
                 or explicit_system
             )
+
+            if parsed.command_type in SHELL_TYPES:
+                refusal = (
+                    "Выполнять команды оболочки голосом я не буду — это делается "
+                    "через защищённый эндпоинт с токеном."
+                )
+                print(f"🛡️ Отказ: попытка выполнить «{parsed.command_type}» через /command")
+                knowledge_base.add_conversation(text, refusal)
+                return {
+                    "type": "refused",
+                    "response": refusal,
+                    "quiet_mode": quiet_mode,
+                }
 
             if should_execute_action:
                 with timing_stage("команда.выполнение"):
@@ -2010,7 +2040,17 @@ if __name__ == "__main__":
     print("🤖 SCOTT AI ASSISTANT - Backend Server v2.0")
     print("="*80)
     
-    backend_host = os.getenv("BACKEND_HOST", "0.0.0.0")
+    # По умолчанию — только петлевой адрес. Scott выполняет команды на этой
+    # машине: открывает приложения, читает файлы, управляет питанием. На
+    # 0.0.0.0 он был доступен всей локальной сети, причём /command токена не
+    # требует — сосед по Wi-Fi мог открывать программы и смотреть, что лежит на
+    # рабочем столе. Лаунчер работает на том же компьютере, так что снаружи
+    # backend видеть незачем.
+    #
+    # Если доступ по сети всё же нужен (например, лаунчер на другом
+    # устройстве), BACKEND_HOST задаётся явно — но тогда ОБЯЗАТЕЛЬНО закройте
+    # порт брандмауэром или поставьте перед ним обратный прокси с проверкой.
+    backend_host = os.getenv("BACKEND_HOST", "127.0.0.1")
     backend_port = int(os.getenv("BACKEND_PORT", "8000"))
     backend_reload = os.getenv("BACKEND_RELOAD", "false").lower() in ("1", "true", "yes")
 
