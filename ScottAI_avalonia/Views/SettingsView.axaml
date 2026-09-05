@@ -66,6 +66,28 @@
             </StackPanel>
 
             <StackPanel Spacing="10">
+                <TextBlock Text="Иконка приложения" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                           Text="Меняется значок в трее, заголовке окна и логотип слева. Тёмная лучше видна на тёмной панели задач, светлая — на светлой. Значок самого файла программы остаётся прежним: он вшит при сборке." />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button Classes="iconpick" AutomationProperties.Name="Тёмная иконка" Command="{Binding SetIconCommand}" CommandParameter="dark"
+                            Classes.tabactive="{Binding IconVariant, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=dark}">
+                        <StackPanel Spacing="6">
+                            <Image Source="/Assets/scott-logo.png" Width="56" Height="56" />
+                            <TextBlock Text="Тёмная" FontSize="12" HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button Classes="iconpick" AutomationProperties.Name="Светлая иконка" Command="{Binding SetIconCommand}" CommandParameter="light"
+                            Classes.tabactive="{Binding IconVariant, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=light}">
+                        <StackPanel Spacing="6">
+                            <Image Source="/Assets/scott-logo-light.png" Width="56" Height="56" />
+                            <TextBlock Text="Светлая" FontSize="12" HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+
+            <StackPanel Spacing="10">
                 <TextBlock Text="Работа в фоне" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
                 <CheckBox IsChecked="{Binding RunInBackground}"
                           Content="Продолжать слушать после закрытия окна" />

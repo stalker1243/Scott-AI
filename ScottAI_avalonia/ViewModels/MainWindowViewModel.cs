@@ -34,6 +34,10 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isClassicStyle = ThemeService.CurrentStyle == AppStyle.Classic;
 
+    /// <summary>Логотип в сайдбаре — та же иконка, что у окна и в трее.</summary>
+    [ObservableProperty]
+    private global::Avalonia.Media.Imaging.Bitmap _logo = AppIconService.LoadLogo();
+
     [ObservableProperty]
     private bool _dialogVisible;
 
@@ -72,6 +76,9 @@ public partial class MainWindowViewModel : ViewModelBase
         _currentPage = Home;
 
         ThemeService.StyleApplied += style => IsClassicStyle = style == AppStyle.Classic;
+
+        // Смена иконки в Настройках должна быть видна сразу, без перезапуска.
+        AppIconService.IconChanged += variant => Logo = AppIconService.LoadLogo(variant);
 
         DialogService.ConfirmRequested += (title, message, confirmLabel, danger) =>
         {

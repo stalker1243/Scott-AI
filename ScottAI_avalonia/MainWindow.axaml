@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:ScottAI.Avalonia.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -27,60 +27,60 @@
                      углами выглядел бы рамкой. -->
                 <Border Classes="logo" Width="52" Height="52" CornerRadius="14" Margin="0,22,0,24"
                         HorizontalAlignment="Center" DockPanel.Dock="Top" ClipToBounds="True">
-                    <Image Source="/Assets/scott-logo.png" Width="52" Height="52" Stretch="UniformToFill" />
+                    <Image Source="{Binding Logo}" Width="52" Height="52" Stretch="UniformToFill" />
                 </Border>
 
                 <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="8,0">
-                    <Button Command="{Binding NavigateHomeCommand}" Classes="nav"
+                    <Button Command="{Binding NavigateHomeCommand}" Classes="nav" AutomationProperties.Name="Главная"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=home}">
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="Home" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
                             <TextBlock Text="Главная" HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding NavigateChatCommand}" Classes="nav"
+                    <Button Command="{Binding NavigateChatCommand}" Classes="nav" AutomationProperties.Name="Чат"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=chat}">
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="ChatOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
                             <TextBlock Text="Чат" HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding NavigateSystemCommand}" Classes="nav"
+                    <Button Command="{Binding NavigateSystemCommand}" Classes="nav" AutomationProperties.Name="Система"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=system}">
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="Cpu64Bit" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
                             <TextBlock Text="Система" HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding NavigateAutomationCommand}" Classes="nav"
+                    <Button Command="{Binding NavigateAutomationCommand}" Classes="nav" AutomationProperties.Name="Автомат."
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=automation}">
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="LightningBolt" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
                             <TextBlock Text="Автомат." HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding NavigateAnalyticsCommand}" Classes="nav"
+                    <Button Command="{Binding NavigateAnalyticsCommand}" Classes="nav" AutomationProperties.Name="Аналит."
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=analytics}">
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="ChartBar" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
                             <TextBlock Text="Аналит." HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding NavigateSettingsCommand}" Classes="nav"
+                    <Button Command="{Binding NavigateSettingsCommand}" Classes="nav" AutomationProperties.Name="Настр."
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=settings}">
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="CogOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
                             <TextBlock Text="Настр." HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding NavigateProfileCommand}" Classes="nav"
+                    <Button Command="{Binding NavigateProfileCommand}" Classes="nav" AutomationProperties.Name="Профиль"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=profile}">
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="AccountCircleOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
                             <TextBlock Text="Профиль" HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding NavigateLogsCommand}" Classes="nav"
+                    <Button Command="{Binding NavigateLogsCommand}" Classes="nav" AutomationProperties.Name="Логи"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=logs}">
                         <StackPanel Spacing="3">
                             <mi:MaterialIcon Kind="TextBoxSearchOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
@@ -350,6 +350,24 @@
             </Setter>
         </Style>
         <Style Selector="Button.tab.tabactive">
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
+            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+        </Style>
+
+        <!-- Выбор иконки приложения: карточка с картинкой и подписью. Рамка
+             заметная и в невыбранном состоянии — иначе на светлой иконке
+             границу карточки не видно вовсе. -->
+        <Style Selector="Button.iconpick">
+            <Setter Property="Background" Value="{DynamicResource BgElevated}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="12,10" />
+        </Style>
+
+        <Style Selector="Button.iconpick.tabactive">
             <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
             <Setter Property="Foreground" Value="{DynamicResource Accent}" />
             <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />

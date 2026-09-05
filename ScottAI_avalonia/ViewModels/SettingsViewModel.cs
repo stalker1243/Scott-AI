@@ -86,6 +86,24 @@ public partial class SettingsViewModel : ViewModelBase
         SettingsStore.SaveCurrent();
     }
 
+    // ---- Иконка приложения ----
+    // Два варианта различаются фоном самой иконки: тёмная со свечением хороша
+    // на тёмной панели задач, светлая — на светлой. Привязывать её к теме
+    // лаунчера нельзя: тема окна и тема панели задач у человека независимы.
+    [ObservableProperty] private string _iconVariant = SettingsStore.Current.IconVariant;
+
+    [RelayCommand]
+    private void SetIcon(string variant)
+    {
+        if (variant != AppIconService.Dark && variant != AppIconService.Light)
+            return;
+
+        IconVariant = variant;
+        AppIconService.Apply(variant);
+        SettingsStore.Current.IconVariant = variant;
+        SettingsStore.SaveCurrent();
+    }
+
     // ---- Устройство для речи ----
     // Автовыбор берёт видеокарту, когда она есть: разница принципиальная —
     // распознавание фразы занимает около секунды против четырёх с половиной на

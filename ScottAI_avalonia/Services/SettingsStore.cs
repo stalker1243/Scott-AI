@@ -48,6 +48,15 @@ public sealed class LauncherSettings
     /// или выйти по-настоящему.
     /// </summary>
     public bool RunInBackground { get; set; } = true;
+
+    /// <summary>
+    /// Какая иконка у приложения: "dark" или "light".
+    ///
+    /// Выбор оставлен человеку, а не привязан к теме лаунчера: тема окна и
+    /// тема панели задач у него могут не совпадать, и на светлой панели
+    /// тёмная иконка со свечением выглядит чёрным пятном.
+    /// </summary>
+    public string IconVariant { get; set; } = "dark";
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

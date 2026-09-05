@@ -23,6 +23,9 @@ public partial class App : Application
             // отрисоваться в стиле по умолчанию и на глазах перекраситься.
             ThemeService.ApplySaved(SettingsStore.Current);
             desktop.MainWindow = new MainWindow();
+            // Иконка ставится ПОСЛЕ создания окна: до этого момента её просто
+            // некуда применять — MainWindow ещё не существует.
+            AppIconService.Apply(SettingsStore.Current.IconVariant);
 
             // Закрытие окна не должно завершать приложение, пока включён
             // фоновый режим: Scott продолжает слушать, а окно прячется в трей.
