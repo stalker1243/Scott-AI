@@ -29,7 +29,6 @@ GET /diagnostics/report/download
 GET /diagnostics/system
 GET /extended/history
 GET /extended/metrics
-GET /extended/schedule/list
 GET /health
 GET /ifttt/rules
 GET /ifttt/stats
@@ -45,6 +44,7 @@ GET /profile
 GET /profiles/current
 GET /profiles/list
 GET /profiles/stats
+GET /reminders
 GET /settings/device
 GET /templates/categories
 GET /templates/list
@@ -79,8 +79,6 @@ POST /extended/file/delete
 POST /extended/file/open-folder
 POST /extended/history/clear
 POST /extended/powershell
-POST /extended/schedule/add
-POST /extended/schedule/cancel
 POST /extended/system/brightness-down
 POST /extended/system/brightness-up
 POST /extended/system/restart
@@ -112,6 +110,9 @@ POST /profiles/create
 POST /profiles/delete
 POST /profiles/switch
 POST /profiles/update
+POST /reminders/add
+POST /reminders/cancel
+POST /reminders/clear
 POST /search-content
 POST /search-files
 POST /settings/device

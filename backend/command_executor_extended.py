@@ -15,7 +15,6 @@ try:
     from . import os_actions
 except ImportError:
     import os_actions
-import schedule
 import time
 import threading
 
@@ -23,7 +22,6 @@ class ExtendedCommandExecutor:
     """Исполнитель расширенных команд"""
     
     def __init__(self):
-        self.scheduled_commands: List[Dict] = []
         self.command_history: List[Dict] = []
         self.metrics = {
             'total_commands': 0,
@@ -181,57 +179,9 @@ class ExtendedCommandExecutor:
     
     # ==================== РАСПИСАНИЕ И АВТОМАТИЗАЦИЯ ====================
     
-    def schedule_command(self, command: str, time_str: str, command_type: str = 'powershell') -> Dict[str, Any]:
-        """
-        Запланировать выполнение команды
-        time_str формат: "HH:MM" или "every X minutes"
-        """
-        try:
-            task_id = datetime.datetime.now().timestamp()
-            
-            task = {
-                'id': task_id,
-                'command': command,
-                'time': time_str,
-                'type': command_type,
-                'created_at': datetime.datetime.now().isoformat()
-            }
-            
-            self.scheduled_commands.append(task)
-            
-            # Начать отдельный поток для выполнения расписания
-            if len(self.scheduled_commands) == 1:
-                self._start_scheduler()
-            
-            return {'success': True, 'message': f'Команда запланирована на {time_str}', 'task_id': task_id}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
     
-    def _start_scheduler(self):
-        """Начать scheduler в отдельном потоке"""
-        def run_scheduler():
-            while self.scheduled_commands:
-                schedule.run_pending()
-                time.sleep(30)  # Проверка каждые 30 сек
-        
-        thread = threading.Thread(target=run_scheduler, daemon=True)
-        thread.start()
     
-    def list_scheduled_commands(self) -> Dict[str, Any]:
-        """Получить список запланированных команд"""
-        return {
-            'success': True,
-            'commands': self.scheduled_commands,
-            'count': len(self.scheduled_commands)
-        }
     
-    def cancel_scheduled_command(self, task_id: float) -> Dict[str, Any]:
-        """Отменить запланированную команду"""
-        try:
-            self.scheduled_commands = [t for t in self.scheduled_commands if t['id'] != task_id]
-            return {'success': True, 'message': 'Команда отменена'}
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
     
     # ==================== ИСТОРИЯ И МЕТРИКИ ====================
     
@@ -285,7 +235,7 @@ class ExtendedCommandExecutor:
         return {'success': True, 'message': 'История очищена'}
     
     def __repr__(self):
-        return f"ExtendedCommandExecutor(commands={self.metrics['total_commands']}, scheduled={len(self.scheduled_commands)})"
+        return f"ExtendedCommandExecutor(commands={self.metrics['total_commands']})"
 
 
 def get_extended_executor() -> ExtendedCommandExecutor:

@@ -146,6 +146,14 @@ class FastIntentEngine:
         re.compile(r'\b(?:диспетчер\s+задач|список\s+задач)\b', re.I),
     ]
 
+    # Просьба напомнить или сделать что-то позже. Требуется либо глагол
+    # «напомни», либо явное «через …» / «в …» вместе с обещанием — иначе под
+    # правило попала бы любая фраза со словом «через».
+    REMINDER_PHRASES = re.compile(
+        r"\b(напомни(?:ть)?|напоминание|разбуди|поставь\s+таймер|засеки)\b",
+        re.IGNORECASE,
+    )
+
     QUESTION_PATTERN = re.compile(
         r'^(?:' + r'|'.join(re.escape(word) for word in QUESTION_WORDS) + r')[\s\?]',
         re.IGNORECASE
@@ -167,6 +175,14 @@ class FastIntentEngine:
                 is_command=False,
                 is_system=False
             )
+
+        # Напоминания проверяются раньше всего остального: во фразе «напомни
+        # через час открыть почту» есть и «открыть», и «почту», и без этой
+        # проверки она ушла бы запускать почтовую программу прямо сейчас.
+        if self.REMINDER_PHRASES.search(lower):
+            result = self._build_intent('reminder', lower)
+            result.main_param = text
+            return result
 
         # Открытие папки проверяется раньше открытия приложения: «открой
         # загрузки» — просьба про каталог, а не про программу с таким

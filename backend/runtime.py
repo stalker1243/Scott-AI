@@ -92,3 +92,15 @@ def set_listener(instance) -> None:
     """Отдать модулю готовый VoiceListener."""
     global listener
     listener = instance
+
+
+# ==================== Напоминания ====================
+# Служба создаётся в main.py: ей нужен способ произнести напоминание вслух,
+# а голос живёт там же.
+reminders = None
+
+
+def set_reminders(service) -> None:
+    """Отдать модулю запущенную службу напоминаний."""
+    global reminders
+    reminders = service

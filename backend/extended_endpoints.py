@@ -167,40 +167,8 @@ async def url_open(data: Dict):
     extended_executor.log_command(f"open_url:{url}", 'open_url', result['success'])
     return result
 
-@router.post("/extended/schedule/add")
-async def schedule_add(data: Dict):
-    """Добавить запланированную команду"""
-    if not HAS_EXTENDED_EXECUTOR:
-        return {"success": False, "error": "Расширенный исполнитель не доступен"}
-    
-    command = data.get('command', '')
-    time_str = data.get('time', '')
-    command_type = data.get('type', 'powershell')
-    
-    if not command or not time_str:
-        return {"success": False, "error": "Команда и время обязательны"}
-    
-    return extended_executor.schedule_command(command, time_str, command_type)
 
-@router.get("/extended/schedule/list")
-async def schedule_list():
-    """Получить список запланированных команд"""
-    if not HAS_EXTENDED_EXECUTOR:
-        return {"success": False, "error": "Расширенный исполнитель не доступен"}
-    
-    return extended_executor.list_scheduled_commands()
 
-@router.post("/extended/schedule/cancel")
-async def schedule_cancel(data: Dict):
-    """Отменить запланированную команду"""
-    if not HAS_EXTENDED_EXECUTOR:
-        return {"success": False, "error": "Расширенный исполнитель не доступен"}
-    
-    task_id = data.get('task_id')
-    if task_id is None:
-        return {"success": False, "error": "ID задачи не указан"}
-    
-    return extended_executor.cancel_scheduled_command(task_id)
 
 @router.get("/extended/metrics")
 async def extended_metrics():

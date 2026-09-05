@@ -508,6 +508,16 @@ try:
 except ImportError as e:
     print(f"⚠️ Endpoints прослушивания не подключены: {e}")
 
+# Напоминания и отложенные дела.
+try:
+    try:
+        from .reminder_endpoints import router as reminder_router
+    except ImportError:
+        from reminder_endpoints import router as reminder_router
+    app.include_router(reminder_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints напоминаний не подключены: {e}")
+
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
 try:
@@ -772,7 +782,7 @@ class ScottAI:
             # нему, поэтому команда молча превращалась в вопрос к LLM. Там, где
             # парсер ничего не понял, а интент уверен, доверяем интенту: он для
             # того и вычисляется раньше.
-            if parsed.command_type == 'unknown' and intent.intent_type in ('system_command', 'list_processes', 'open_folder'):
+            if parsed.command_type == 'unknown' and intent.intent_type in ('system_command', 'list_processes', 'open_folder', 'reminder'):
                 print(f"↪️ Парсер не понял фразу, беру тип из интента: {intent.intent_type}")
                 parsed.command_type = intent.intent_type
                 parsed.main_param = intent.main_param
@@ -782,6 +792,13 @@ class ScottAI:
             # разобрался, что речь о папке — и он тут точнее.
             if intent.intent_type == 'open_folder' and parsed.command_type in ('open_app', 'unknown'):
                 parsed.command_type = 'open_folder'
+                parsed.main_param = intent.main_param
+
+            # Напоминание сильнее любого разбора: во фразе «напомни через час
+            # открыть почту» парсер видит «открыть почту» и предлагает сделать
+            # это немедленно — то есть ровно не то, о чём просили.
+            if intent.intent_type == 'reminder':
+                parsed.command_type = 'reminder'
                 parsed.main_param = intent.main_param
 
             explicit_action = any(
@@ -798,7 +815,7 @@ class ScottAI:
                 'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
                 'get_currency', 'get_weather', 'get_news', 'system_info', 'manage_window',
                 'file_operation', 'system_command', 'open_url',
-                'list_processes', 'open_folder'
+                'list_processes', 'open_folder', 'reminder'
             }
             # 'powershell' и 'run_script' здесь намеренно отсутствуют. /command
             # не требует токена, и стоит появиться ветке выполнения для этих
@@ -1072,6 +1089,26 @@ class ScottAI:
             result = executor.execute('system_command', main_param=param)
             return result
 
+        # ============= НАПОМИНАНИЕ =============
+        elif cmd_type == 'reminder':
+            try:
+                from . import reminders as reminders_module
+            except ImportError:
+                import reminders as reminders_module
+
+            service = scott_runtime.reminders
+            if service is None:
+                return "❌ Служба напоминаний не запущена"
+
+            when = reminders_module.parse_time(original_text)
+            if when is None:
+                return ("Не понял, на какое время. Скажите, например, "
+                        "«напомни через десять минут» или «напомни в 15:30»")
+
+            subject = reminders_module.extract_subject(original_text)
+            item = service.add(subject or "напоминание", when)
+            return f"✅ Напомню {when.strftime('%d.%m в %H:%M')}: {item.text}"
+
         # ============= ОТКРЫТЬ ПАПКУ =============
         elif cmd_type == 'open_folder':
             try:
@@ -1235,6 +1272,60 @@ def _listener_handle(text: str) -> None:
                 listening.resume()
 
     asyncio.run_coroutine_threadsafe(run(), _main_loop)
+
+
+# ============= НАПОМИНАНИЯ =============
+# Scott работает в фоне, поэтому «напомни через час» должно пережить и
+# закрытие окна, и перезапуск — служба хранит дела в файле и сама следит за
+# временем.
+
+def _speak_reminder(item) -> None:
+    """
+    Произнести напоминание вслух.
+
+    Вызывается из потока службы, а озвучивание асинхронное, поэтому корутина
+    передаётся в главный цикл — тем же способом, каким это делает слушатель.
+    """
+    text = f"Напоминаю: {item.text}" if item.text else "Напоминание"
+    print(f"⏰ {text}")
+
+    if _main_loop is None:
+        return
+
+    async def run() -> None:
+        voice = scott_runtime.scott_voice
+        if voice is None:
+            return
+        listening = scott_runtime.listener
+        if listening is not None:
+            listening.suspend()
+        try:
+            path = await asyncio.to_thread(voice.speak_to_file, text)
+            if path:
+                await asyncio.to_thread(voice.play_audio, path)
+        except Exception as e:
+            print(f"⚠️ Не удалось озвучить напоминание: {e}")
+        finally:
+            if listening is not None:
+                await asyncio.sleep(0.4)
+                listening.resume()
+
+    asyncio.run_coroutine_threadsafe(run(), _main_loop)
+
+
+try:
+    try:
+        from .reminders import ReminderService
+    except ImportError:
+        from reminders import ReminderService
+
+    scott_reminders = ReminderService(on_fire=_speak_reminder)
+    scott_reminders.start()
+    scott_runtime.set_reminders(scott_reminders)
+    print(f"⏰ Служба напоминаний запущена (в очереди: {len(scott_reminders.pending())})")
+except Exception as e:
+    scott_reminders = None
+    print(f"⚠️ Служба напоминаний недоступна: {e}")
 
 
 try:

@@ -36,7 +36,6 @@ sounddevice==0.5.5
 num2words==0.5.14
 
 # ===== РАСШИРЕННЫЕ ФУНКЦИИ =====
-schedule==1.2.2
 numpy==2.3.4
 scipy==1.17.1
 
