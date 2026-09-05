@@ -123,8 +123,30 @@ public partial class LogsViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Показывать ли кнопку Telegram: пока адрес не задан, её нет.</summary>
-    public bool HasTelegram => SupportLinks.HasTelegram;
+    /// <summary>Есть ли чат, куда можно написать и приложить архив.</summary>
+    public bool HasTelegramChat => SupportLinks.HasChat;
+
+    /// <summary>Есть ли канал с новостями — туда только читать.</summary>
+    public bool HasTelegramChannel => SupportLinks.HasChannel;
+
+    /// <summary>Открыть канал с новостями и новыми версиями.</summary>
+    [RelayCommand]
+    private void OpenTelegramChannel()
+    {
+        if (!SupportLinks.HasChannel)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = SupportLinks.TelegramChannel, UseShellExecute = true });
+        }
+        catch (Exception e)
+        {
+            ToastService.Error($"Не удалось открыть Telegram: {e.Message}");
+        }
+    }
 
     /// <summary>
     /// Открыть чат поддержки в Telegram и папку с отчётом рядом.
@@ -137,14 +159,14 @@ public partial class LogsViewModel : ViewModelBase
     [RelayCommand]
     private void ReportInTelegram()
     {
-        if (!SupportLinks.HasTelegram)
+        if (!SupportLinks.HasChat)
         {
             return;
         }
 
         try
         {
-            Process.Start(new ProcessStartInfo { FileName = SupportLinks.Telegram, UseShellExecute = true });
+            Process.Start(new ProcessStartInfo { FileName = SupportLinks.TelegramChat, UseShellExecute = true });
 
             if (!string.IsNullOrWhiteSpace(ReportFolder))
             {

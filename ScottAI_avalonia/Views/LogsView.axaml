@@ -60,9 +60,15 @@
                     <!-- Кнопка появляется, только когда адрес чата задан: вести
                          человека по нерабочей ссылке хуже, чем не показывать её. -->
                     <Button Content="Написать в Telegram" Command="{Binding ReportInTelegramCommand}"
-                            IsVisible="{Binding HasTelegram}"
+                            IsVisible="{Binding HasTelegramChat}"
                             Classes="soft" Padding="14,9"
                             ToolTip.Tip="Откроется чат и папка с архивом — перетащите файл в чат" />
+                    <!-- Канал — только чтение: новости и новые версии. Отчёт
+                         туда отправить нельзя, поэтому и подписана она иначе. -->
+                    <Button Content="Канал в Telegram" Command="{Binding OpenTelegramChannelCommand}"
+                            IsVisible="{Binding HasTelegramChannel}"
+                            Classes="soft" Padding="14,9"
+                            ToolTip.Tip="Новости и новые версии Scott" />
                     <TextBlock Text="{Binding Status}" VerticalAlignment="Center" FontSize="12"
                                Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
                 </StackPanel>
