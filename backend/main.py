@@ -518,6 +518,16 @@ try:
 except ImportError as e:
     print(f"⚠️ Endpoints напоминаний не подключены: {e}")
 
+# Написание, сборка и запуск программ.
+try:
+    try:
+        from .code_endpoints import router as code_router
+    except ImportError:
+        from code_endpoints import router as code_router
+    app.include_router(code_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints работы с кодом не подключены: {e}")
+
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
 try:
@@ -604,6 +614,10 @@ class ScottAI:
         
         self.scott_voice = scott_voice
         self.voice_async = ScottVoiceAsync()
+
+        # Последняя написанная программа: следом человек говорит «запусти», и
+        # повторять, что именно запускать, ему не приходится.
+        self.last_program = None
         
         # Фразы для ответов (когда режим тишины выключен)
         self.acknowledgement_phrases = [
@@ -782,7 +796,7 @@ class ScottAI:
             # нему, поэтому команда молча превращалась в вопрос к LLM. Там, где
             # парсер ничего не понял, а интент уверен, доверяем интенту: он для
             # того и вычисляется раньше.
-            if parsed.command_type == 'unknown' and intent.intent_type in ('system_command', 'list_processes', 'open_folder', 'reminder'):
+            if parsed.command_type == 'unknown' and intent.intent_type in ('system_command', 'list_processes', 'open_folder', 'reminder', 'write_code', 'run_code'):
                 print(f"↪️ Парсер не понял фразу, беру тип из интента: {intent.intent_type}")
                 parsed.command_type = intent.intent_type
                 parsed.main_param = intent.main_param
@@ -801,6 +815,17 @@ class ScottAI:
                 parsed.command_type = 'reminder'
                 parsed.main_param = intent.main_param
 
+            # Просьба написать программу тоже сильнее разбора: во фразе
+            # «напиши программу на C» парсер видит «программу» и пытается
+            # что-то запустить.
+            if intent.intent_type == 'write_code':
+                parsed.command_type = 'write_code'
+                parsed.main_param = intent.main_param
+
+            if intent.intent_type == 'run_code':
+                parsed.command_type = 'run_code'
+                parsed.main_param = intent.main_param
+
             explicit_action = any(
                 lower_text.startswith(prefix) for prefix in [
                     'открой ', 'запусти ', 'открыть ', 'включи ', 'вкл ',
@@ -815,7 +840,7 @@ class ScottAI:
                 'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
                 'get_currency', 'get_weather', 'get_news', 'system_info', 'manage_window',
                 'file_operation', 'system_command', 'open_url',
-                'list_processes', 'open_folder', 'reminder'
+                'list_processes', 'open_folder', 'reminder', 'write_code', 'run_code'
             }
             # 'powershell' и 'run_script' здесь намеренно отсутствуют. /command
             # не требует токена, и стоит появиться ветке выполнения для этих
@@ -1088,6 +1113,52 @@ class ScottAI:
         elif cmd_type == 'system_command':
             result = executor.execute('system_command', main_param=param)
             return result
+
+        # ============= ЗАПУСТИТЬ НАПИСАННОЕ =============
+        elif cmd_type == 'run_code':
+            try:
+                from . import code_assistant
+            except ImportError:
+                import code_assistant
+
+            program = self.last_program
+            if not program:
+                return "Сначала попросите написать программу — потом запущу."
+
+            outcome = code_assistant.build_and_run(program["path"], program["language"], run_it=True)
+            if outcome["stage"] == "build" and not outcome["success"]:
+                return "❌ Программа не собралась:\n" + outcome["error"][:600]
+            if not outcome["success"]:
+                return "❌ Программа завершилась с ошибкой:\n" + outcome.get("error", "")[:400]
+
+            output = outcome.get("output") or "(программа ничего не вывела)"
+            return "✅ Запустил. Вывод программы:\n" + output
+
+        # ============= НАПИСАТЬ ПРОГРАММУ =============
+        elif cmd_type == 'write_code':
+            try:
+                from . import code_assistant
+            except ImportError:
+                import code_assistant
+
+            written = code_assistant.write_program(
+                original_text,
+                get_intelligent_answerer(),
+                name="scott_program",
+            )
+            if not written["success"]:
+                return f"❌ {written['message']}"
+
+            # Запоминаем последнюю программу: следом человек скажет «запусти»,
+            # и повторять, что именно запускать, ему не придётся.
+            self.last_program = written
+
+            preview = written["code"]
+            return (
+                f"Готово, написал на {written['display']}. Файл: {written['path']}\n\n"
+                f"{preview}\n\n"
+                "Скажите «запусти программу», если хотите её выполнить."
+            )
 
         # ============= НАПОМИНАНИЕ =============
         elif cmd_type == 'reminder':

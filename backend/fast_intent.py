@@ -154,6 +154,45 @@ class FastIntentEngine:
         re.IGNORECASE,
     )
 
+    # Просьба написать программу. Требуется и глагол, и слово о коде — иначе
+    # под правило попал бы любой разговор про программы («какие программы
+    # запущены»).
+    CODE_REQUEST = re.compile(
+        r"\b(напиши|написать|сделай|создай|сгенерируй|набросай)\b[^.]{0,60}?"
+        r"\b(программ\w*|код|скрипт|функци\w*|класс|приложени\w*)\b",
+        re.IGNORECASE,
+    )
+
+    # Признак, что речь именно о коде, а не о «программе тренировок». Слово
+    # «программа» в русском слишком общее: без этой проверки «сделай программу
+    # тренировок» и «как написать хорошую программу занятий» уходили писать
+    # исходники. Засчитывается язык программирования, явно кодовое слово или
+    # оборот «программу, которая…».
+    PROGRAMMING_HINT = re.compile(
+        r"\b(код|скрипт\w*|функци\w*|класс|алгоритм\w*|си|python|питон\w*|пайтон\w*|java|джава|javascript|js|шарп\w*|golang|rust|раст|паскаль|pascal|bash|баш|powershell)\b"
+        r"|\bc\+\+|\bc#|\bc\b|\bgo\b"
+        r"|программ\w*\s*,?\s*котор",
+        re.IGNORECASE,
+    )
+
+    # Просьба запустить только что написанное. Отдельно от общего «запусти»,
+    # которое открывает приложения: здесь речь о программе, которую Scott сам
+    # и написал минуту назад.
+    RUN_CODE_REQUEST = re.compile(
+        r"\b(запусти|запустить|выполни|выполнить|проверь)\b\s*"
+        r"(?:её|ее|его|эту|этот|это|свою|свой)?\s*"
+        r"\b(программ\w*|код|скрипт\w*)\b",
+        re.IGNORECASE,
+    )
+
+    # «Запусти её» — без существительного вовсе. Названием приложения такое
+    # быть не может, а вот написанной минуту назад программой — вполне; если
+    # программы нет, ветка run_code честно об этом скажет.
+    RUN_CODE_PRONOUN = re.compile(
+        r"^(запусти|запустить|выполни|выполнить|проверь)\s+(её|ее|его|эту|этот|это)\s*[.!]?$",
+        re.IGNORECASE,
+    )
+
     QUESTION_PATTERN = re.compile(
         r'^(?:' + r'|'.join(re.escape(word) for word in QUESTION_WORDS) + r')[\s\?]',
         re.IGNORECASE
@@ -175,6 +214,14 @@ class FastIntentEngine:
                 is_command=False,
                 is_system=False
             )
+
+        # Просьба написать программу — раньше открытия приложений: во фразе
+        # «напиши программу на C» есть слово «программу», и без этой проверки
+        # Scott полез бы искать приложение с таким названием.
+        if self.CODE_REQUEST.search(lower) and self.PROGRAMMING_HINT.search(lower):
+            result = self._build_intent('write_code', lower)
+            result.main_param = text
+            return result
 
         # Напоминания проверяются раньше всего остального: во фразе «напомни
         # через час открыть почту» есть и «открыть», и «почту», и без этой
@@ -199,6 +246,11 @@ class FastIntentEngine:
                 result.intent_subtype = folder
                 result.main_param = folder
                 return result
+
+        # Просьба запустить написанное — раньше открытия приложений: «запусти
+        # программу» иначе уходит искать приложение с названием «программу».
+        if self.RUN_CODE_REQUEST.search(lower) or self.RUN_CODE_PRONOUN.match(lower):
+            return self._build_intent('run_code', lower)
 
         if self._matches_any(lower, self.OPEN_APP_PHRASES):
             return self._build_intent('open_app', lower)

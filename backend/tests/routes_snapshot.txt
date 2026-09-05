@@ -16,6 +16,8 @@ GET /api/version/installers
 GET /api/version/requirements
 GET /api/version/status
 GET /api/version/update-check
+GET /code/instructions
+GET /code/tools
 GET /context/current
 GET /context/history
 GET /custom-commands/list
@@ -66,6 +68,9 @@ POST /analytics/export
 POST /api/version/update-settings
 POST /ask
 POST /chat
+POST /code/build
+POST /code/run
+POST /code/write
 POST /command
 POST /context/clear
 POST /context/set-variable

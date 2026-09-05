@@ -76,6 +76,65 @@ def test_system_info_recognised(intent_engine, phrase):
     assert intent.is_command, f"«{phrase}» не признана командой"
 
 
+# ==================== Написание и запуск программ ====================
+
+@pytest.mark.parametrize("phrase", [
+    "напиши программу на C которая выводит Hello, World!",
+    "напиши код на питоне который считает факториал",
+    "создай скрипт для переименования файлов",
+    "сделай программу на C++ с циклом",
+])
+def test_code_requests_recognised(intent_engine, phrase):
+    """Просьба написать код доходит до code_assistant, а не до LLM как вопрос."""
+    intent = intent_engine.detect(phrase)
+    assert intent.intent_type == "write_code", f"«{phrase}» -> {intent.intent_type}"
+
+
+@pytest.mark.parametrize("phrase", [
+    "запусти программу",
+    "запусти код",
+    "выполни программу",
+    "запусти её",
+])
+def test_run_code_recognised(intent_engine, phrase):
+    """
+    «Запусти программу» — про написанное Scott, а не про приложение.
+
+    Без отдельного правила фраза уходила в open_app, и Scott искал в системе
+    приложение с названием «программу».
+    """
+    intent = intent_engine.detect(phrase)
+    assert intent.intent_type == "run_code", f"«{phrase}» -> {intent.intent_type}"
+
+
+@pytest.mark.parametrize("phrase", [
+    "сделай программу тренировок на неделю",
+    "как написать хорошую программу тренировок",
+])
+def test_non_code_programs_are_not_code(intent_engine, phrase):
+    """
+    Пара к тесту выше. «Программа» по-русски значит и расписание тренировок, и
+    телепередачи — поэтому слова «напиши программу» мало: нужен ещё признак
+    программирования (язык, слово «код», оборот «программу, которая…»).
+    """
+    intent = intent_engine.detect(phrase)
+    assert intent.intent_type != "write_code", f"«{phrase}» ошибочно принята за просьбу о коде"
+
+
+@pytest.mark.parametrize("phrase", [
+    "запусти блокнот",
+    "открой калькулятор",
+    "запусти игру",
+])
+def test_app_launch_not_stolen_by_run_code(intent_engine, phrase):
+    """
+    Пара к предыдущему тесту: правило про запуск программы не должно
+    перехватывать обычный запуск приложений — оба начинаются с «запусти».
+    """
+    intent = intent_engine.detect(phrase)
+    assert intent.intent_type == "open_app", f"«{phrase}» -> {intent.intent_type}"
+
+
 # ==================== Вопросы, которые командами быть не должны ====================
 
 @pytest.mark.parametrize("phrase", [
@@ -84,6 +143,8 @@ def test_system_info_recognised(intent_engine, phrase):
     "покажи процессы фотосинтеза",
     "что такое громкость звука в физике",
     "какие процессы происходят в клетке",
+    "как написать хорошую программу тренировок",
+    "что такое программа передач",
     "что такое команда в спорте",
     "при какой температуре кипит вода",
     "как зовут президента Франции",
