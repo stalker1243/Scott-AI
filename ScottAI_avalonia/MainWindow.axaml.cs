@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using ScottAI.Avalonia.Services;
 using ScottAI.Avalonia.ViewModels;
 
@@ -9,6 +9,11 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // Backend, поднятый лаунчером, гасится вместе с окном: иначе после
+        // закрытия он остался бы висеть, занимая порт 8000 и видеокарту, а при
+        // следующем запуске новый экземпляр не смог бы открыть порт.
+        Closing += (_, _) => (DataContext as ViewModels.MainWindowViewModel)?.ShutdownBackend();
         DataContext = new MainWindowViewModel();
 
         ThemeService.StyleApplied += OnStyleApplied;

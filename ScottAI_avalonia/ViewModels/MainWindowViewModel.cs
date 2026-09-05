@@ -12,8 +12,12 @@ namespace ScottAI.Avalonia.ViewModels;
 public partial class MainWindowViewModel : ViewModelBase
 {
     private readonly BackendClient _client = new();
+    private readonly BackendLauncher _backendLauncher = new();
     private readonly DispatcherTimer _healthTimer;
     private bool _everOnline;
+
+    /// <summary>Что происходит с backend, пока он поднимается.</summary>
+    [ObservableProperty] private string _backendHint = "";
 
     [ObservableProperty]
     private ViewModelBase _currentPage;
@@ -83,8 +87,38 @@ public partial class MainWindowViewModel : ViewModelBase
         _healthTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _healthTimer.Tick += async (_, _) => await CheckHealthAsync();
         _healthTimer.Start();
-        _ = CheckHealthAsync();
+        _ = StartBackendAsync();
     }
+
+    /// <summary>
+    /// Поднять backend, если он ещё не работает.
+    ///
+    /// Раньше лаунчер только проверял состояние и при отсутствии backend вечно
+    /// показывал «offline» — человек, открывший программу впервые, решал, что
+    /// она сломана, и никакой подсказки не получал. Теперь backend запускается
+    /// сам, а если запустить не удалось, причина видна словами.
+    /// </summary>
+    private async Task StartBackendAsync()
+    {
+        BackendHint = "проверяю Scott…";
+        var (success, message) = await _backendLauncher.EnsureRunningAsync(_client);
+        BackendHint = success ? "" : message;
+
+        if (!success)
+        {
+            ToastService.Error(message);
+        }
+
+        await CheckHealthAsync();
+    }
+
+    /// <summary>
+    /// Остановить backend при закрытии окна — но только если запускали его мы.
+    ///
+    /// Процесс, поднятый человеком в терминале, остаётся жить: он мог оставить
+    /// его нарочно, чтобы читать логи.
+    /// </summary>
+    public void ShutdownBackend() => _backendLauncher.StopIfOurs();
 
     private async Task CheckHealthAsync()
     {
