@@ -123,6 +123,41 @@ public partial class LogsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Показывать ли кнопку Telegram: пока адрес не задан, её нет.</summary>
+    public bool HasTelegram => SupportLinks.HasTelegram;
+
+    /// <summary>
+    /// Открыть чат поддержки в Telegram и папку с отчётом рядом.
+    ///
+    /// Файл отправляет сам человек: программа не может приложить его к
+    /// сообщению за него, а зашивать в неё ключ доступа к боту нельзя — его
+    /// вытащит любой, кто откроет файл программы. Зато папка открывается
+    /// сразу, и архив остаётся перетащить в чат.
+    /// </summary>
+    [RelayCommand]
+    private void ReportInTelegram()
+    {
+        if (!SupportLinks.HasTelegram)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = SupportLinks.Telegram, UseShellExecute = true });
+
+            if (!string.IsNullOrWhiteSpace(ReportFolder))
+            {
+                Process.Start(new ProcessStartInfo { FileName = ReportFolder, UseShellExecute = true });
+                ToastService.Info("Перетащите архив из открывшейся папки в чат");
+            }
+        }
+        catch (Exception e)
+        {
+            ToastService.Error($"Не удалось открыть Telegram: {e.Message}");
+        }
+    }
+
     /// <summary>
     /// Открыть страницу создания обращения на GitHub.
     ///

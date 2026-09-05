@@ -57,6 +57,12 @@
                     <Button Content="Сообщить на GitHub" Command="{Binding ReportOnGitHubCommand}"
                             Classes="soft" Padding="14,9"
                             ToolTip.Tip="Откроется страница обращения — приложите к ней собранный архив" />
+                    <!-- Кнопка появляется, только когда адрес чата задан: вести
+                         человека по нерабочей ссылке хуже, чем не показывать её. -->
+                    <Button Content="Написать в Telegram" Command="{Binding ReportInTelegramCommand}"
+                            IsVisible="{Binding HasTelegram}"
+                            Classes="soft" Padding="14,9"
+                            ToolTip.Tip="Откроется чат и папка с архивом — перетащите файл в чат" />
                     <TextBlock Text="{Binding Status}" VerticalAlignment="Center" FontSize="12"
                                Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
                 </StackPanel>
