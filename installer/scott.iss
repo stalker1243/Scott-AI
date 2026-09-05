@@ -42,6 +42,12 @@ WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
 
+; Место под то, что докачается при первом запуске: сборка torch под видеокарту
+; (~4 ГБ) плюс модели речи (~1.5 ГБ). Без этой поправки установщик обещал бы
+; 230 МБ — столько занимает сама программа, — и человек с почти полным диском
+; узнал бы правду уже посреди загрузки.
+ExtraDiskSpaceRequired=5368709120
+
 ; Ставим без прав администратора, в папку пользователя. Программа пишет рядом
 ; с собой — логи, кэш речи, настройки backend, — и в Program Files это
 ; упиралось бы в права. Заодно человеку не нужно объяснять запрос UAC.
@@ -59,15 +65,23 @@ MinVersion=10.0
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Создать ярлык на рабочем столе"; GroupDescription: "Ярлыки:"
-Name: "autostart"; Description: "Запускать Scott при входе в Windows"; GroupDescription: "Автозапуск:"; Flags: unchecked
+; Ярлыки — раздельными галочками, включая меню «Пуск». Раньше он создавался
+; всегда, без спроса: человек, которому нужен только ярлык на столе, всё равно
+; получал запись в меню.
+Name: "startmenuicon"; Description: "В меню «Пуск»"; GroupDescription: "Ярлыки:"
+Name: "desktopicon"; Description: "На рабочем столе"; GroupDescription: "Ярлыки:"
+
+; Автозапуск снят по умолчанию намеренно: Scott поднимает распознавание речи и
+; занимает видеокарту, и решать, нужно ли это при каждом входе в Windows,
+; должен человек, а не установщик.
+Name: "autostart"; Description: "Запускать Scott при входе в Windows"; GroupDescription: "Дополнительно:"; Flags: unchecked
 
 [Files]
 Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\launcher\{#AppExe}"
-Name: "{group}\Удалить {#AppName}"; Filename: "{uninstallexe}"
+Name: "{group}\{#AppName}"; Filename: "{app}\launcher\{#AppExe}"; Tasks: startmenuicon
+Name: "{group}\Удалить {#AppName}"; Filename: "{uninstallexe}"; Tasks: startmenuicon
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\launcher\{#AppExe}"; Tasks: desktopicon
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\launcher\{#AppExe}"; Tasks: autostart
 
