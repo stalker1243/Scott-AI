@@ -568,6 +568,15 @@ YOUTUBE_FILLER_WORDS = {
     'включи', 'включить', 'открой', 'открыть', 'запусти', 'запустить',
     'поищи', 'искать', 'поиск', 'видео', 'ролик', 'про', 'на', 'в', 'из', 'и',
 }
+# Слова, которыми человек уточняет «просто открой сайт»: после их вырезания
+# запрос оказывается пустым, и Scott открывает главную вместо поиска. В логе
+# была фраза «открой youtube в главное меню» — Scott искал на YouTube «главное
+# меню».
+SITE_WORDS = {
+    'главную', 'главная', 'главное', 'меню', 'сайт', 'сайты', 'страницу',
+    'страница', 'приложение', 'просто', 'мне', 'пожалуйста',
+}
+
 GITHUB_FILLER_WORDS = {
     'скотт', 'scott', 'гитхаб', 'гитхабе', 'github', 'зайди', 'зайти',
     'открой', 'открыть', 'найди', 'найти', 'выбери', 'выбрать', 'поищи',
@@ -725,16 +734,23 @@ class ScottAI:
             # is_question()/command_parser (уже не раз ловили баги на
             # пересечении их словарей синонимов) неверно всё переклассифицируют.
             if any(w in lower_text for w in ('ютуб', 'youtube')):
-                query = self._extract_web_query(text, YOUTUBE_FILLER_WORDS)
+                query = self._extract_web_query(text, YOUTUBE_FILLER_WORDS | SITE_WORDS)
                 with timing_stage("веб.youtube"):
-                    result = web_integrations.search_youtube_video(query)
+                    # Искать нечего — значит человек просил открыть сам сайт.
+                    if not query:
+                        result = web_integrations.open_service_home("youtube")
+                    else:
+                        result = web_integrations.search_youtube_video(query)
                 print(f"🎬 YouTube: {result['message']}")
                 return {"type": "youtube_search", "response": result["message"], "quiet_mode": quiet_mode}
 
             if any(w in lower_text for w in ('гитхаб', 'github')):
-                query = self._extract_web_query(text, GITHUB_FILLER_WORDS)
+                query = self._extract_web_query(text, GITHUB_FILLER_WORDS | SITE_WORDS)
                 with timing_stage("веб.github"):
-                    result = web_integrations.search_github_repo(query)
+                    if not query:
+                        result = web_integrations.open_service_home("github")
+                    else:
+                        result = web_integrations.search_github_repo(query)
                 print(f"🐙 GitHub: {result['message']}")
                 return {"type": "github_search", "response": result["message"], "quiet_mode": quiet_mode}
 
@@ -1056,6 +1072,16 @@ class ScottAI:
         # ============= ОТКРЫТЬ ПРИЛОЖЕНИЕ =============
         if cmd_type == 'open_app':
             result = executor.execute('open_app', name=param)
+
+            # Приложения не нашлось — возможно, речь о сайте. Порядок именно
+            # такой: установленная программа всегда важнее веб-версии, а вот
+            # «открой гугл» до этого места доходило с отказом «не нашёл
+            # установленное приложение «гугл»».
+            if "❌" in result:
+                site = web_integrations.open_site(param)
+                if site:
+                    return site["message"]
+
             if "✅" in result:
                 # Название открытого приложения обязательно называется вслух.
                 # Раньше ответом было безликое «Выполнено успешно», и когда

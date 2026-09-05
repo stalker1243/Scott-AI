@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import webbrowser
 from typing import Dict, Optional
 from urllib.parse import quote_plus
@@ -18,6 +19,94 @@ except ImportError:
 
 def _no_requests_error() -> Dict:
     return {"success": False, "message": "Библиотека requests не установлена — веб-интеграции недоступны"}
+
+
+# Главные страницы сервисов. Просьба «открой ютуб» — это просьба открыть сайт,
+# а не искать на нём: раньше Scott отвечал «Не понял, что искать на YouTube»,
+# потому что упоминание сервиса всегда означало поиск.
+SERVICE_HOMES = {
+    "youtube": ("https://www.youtube.com", "YouTube"),
+    "github": ("https://github.com", "GitHub"),
+}
+
+
+# Сайты, которые человек просит открыть по имени. Без этого списка «открой
+# гугл» уходило искать установленную программу с названием «гугл» и,
+# разумеется, не находило: Scott умел открывать приложения и искать внутри
+# YouTube, но не умел просто открыть сайт.
+#
+# Приложение всегда важнее: если Discord или Steam установлены, откроется
+# программа, а до этого списка дело не дойдёт — он запасной путь.
+KNOWN_SITES = {
+    "гугл": "https://www.google.com",
+    "google": "https://www.google.com",
+    "ютуб": "https://www.youtube.com",
+    "youtube": "https://www.youtube.com",
+    "гитхаб": "https://github.com",
+    "github": "https://github.com",
+    "вк": "https://vk.com",
+    "вконтакте": "https://vk.com",
+    "vk": "https://vk.com",
+    "яндекс": "https://ya.ru",
+    "yandex": "https://ya.ru",
+    "википедия": "https://ru.wikipedia.org",
+    "вики": "https://ru.wikipedia.org",
+    "wikipedia": "https://ru.wikipedia.org",
+    "твич": "https://www.twitch.tv",
+    "twitch": "https://www.twitch.tv",
+    "реддит": "https://www.reddit.com",
+    "reddit": "https://www.reddit.com",
+    "почта": "https://mail.google.com",
+    "гмейл": "https://mail.google.com",
+    "gmail": "https://mail.google.com",
+    "чатгпт": "https://chatgpt.com",
+    "chatgpt": "https://chatgpt.com",
+    "нетфликс": "https://www.netflix.com",
+    "netflix": "https://www.netflix.com",
+    "стим": "https://store.steampowered.com",
+    "steam": "https://store.steampowered.com",
+    "дискорд": "https://discord.com/app",
+    "discord": "https://discord.com/app",
+    "телеграм": "https://web.telegram.org",
+    "telegram": "https://web.telegram.org",
+}
+
+# Что похоже на адрес сайта: «example.com», «ya.ru», «github.io».
+DOMAIN = re.compile(r"^[a-z0-9-]+(?:\.[a-z0-9-]+)+$", re.IGNORECASE)
+
+
+def open_site(name: str) -> Optional[Dict]:
+    """
+    Открыть сайт по названию или адресу.
+
+    Возвращает None, если название ни на что не похоже, — вызывающий код тогда
+    честно скажет, что не нашёл, вместо того чтобы открывать наугад.
+    """
+    cleaned = name.strip().strip(" .,!?:;—-").lower()
+    cleaned = re.sub(r"^(сайт|сайты|веб-сайт|страницу|страница)\s+", "", cleaned)
+    if not cleaned:
+        return None
+
+    url = KNOWN_SITES.get(cleaned)
+    if not url and DOMAIN.match(cleaned):
+        url = f"https://{cleaned}"
+    if not url:
+        return None
+
+    webbrowser.open(url)
+    return {"success": True, "message": f"Открываю {cleaned}", "url": url, "via": "site"}
+
+
+def open_service_home(service: str) -> Dict:
+    """Открыть главную страницу сервиса."""
+    url, title = SERVICE_HOMES[service]
+    webbrowser.open(url)
+    return {
+        "success": True,
+        "message": f"Открываю {title}",
+        "url": url,
+        "via": "home",
+    }
 
 
 def _open_youtube_results(query: str, reason: str = "") -> Dict:
