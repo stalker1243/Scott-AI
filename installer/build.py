@@ -155,7 +155,10 @@ def build_launcher(dest: Path) -> None:
 
 def copy_extras(dest: Path) -> None:
     """Файлы, которые пользователь должен увидеть рядом с программой."""
-    for name in (".env.example", "README.md"):
+    # VERSION.json обязателен: по нему программа понимает, какая версия
+    # установлена. Без него она считает свою версию нулевой и предлагает
+    # обновиться на ту, что уже стоит.
+    for name in (".env.example", "README.md", "VERSION.json"):
         source = ROOT / name
         if source.exists():
             shutil.copy2(source, dest / name)

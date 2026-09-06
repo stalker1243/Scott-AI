@@ -4,6 +4,8 @@
              xmlns:conv="using:Avalonia.Data.Converters"
              x:DataType="vm:HomeViewModel"
              x:Class="ScottAI.Avalonia.Views.HomeView">
+    <!-- Прокрутка: на невысоком окне карточки и кнопки уезжали за край. -->
+    <ScrollViewer>
     <StackPanel Margin="40" Spacing="24">
         <StackPanel Spacing="8">
             <TextBlock Text="Добро пожаловать" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
@@ -57,4 +59,5 @@
             </TextBlock>
         </StackPanel>
     </StackPanel>
+    </ScrollViewer>
 </UserControl>

@@ -224,6 +224,17 @@ def check(force: bool = False, repo: str = REPO) -> UpdateInfo:
     if error:
         return UpdateInfo(current_version=version, checked_at=time.time(), error=error)
 
+    # Своя версия неизвестна — предлагать обновление нельзя: любая чужая
+    # покажется новее, и человек получит предложение поставить то, что у него
+    # уже стоит. Так и случилось, когда VERSION.json не попал в дистрибутив.
+    if version in ("", "0.0.0"):
+        return UpdateInfo(
+            current_version=version,
+            latest_version=str((release or {}).get("tag_name") or "").lstrip("vV"),
+            checked_at=time.time(),
+            error="не удалось определить установленную версию (нет VERSION.json)",
+        )
+
     tag = str((release or {}).get("tag_name") or "")
     asset = _pick_installer((release or {}).get("assets") or [])
 

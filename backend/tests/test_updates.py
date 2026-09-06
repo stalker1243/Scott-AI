@@ -198,3 +198,19 @@ def test_cache_respects_new_current_version(upd, no_cache, monkeypatch):
     # Человек поставил обновление — кэш прежний, но предлагать больше нечего.
     monkeypatch.setattr(upd, "current_version", lambda: "9.9.9")
     assert upd.check().update_available is False
+
+def test_unknown_own_version_offers_nothing(upd, no_cache, monkeypatch):
+    """
+    Пока своя версия неизвестна, обновление не предлагается.
+
+    Найдено живым пользователем: VERSION.json не попал в дистрибутив, программа
+    считала свою версию нулевой — и предложила поставить ту самую версию,
+    которая у человека уже стояла.
+    """
+    monkeypatch.setattr(upd, "current_version", lambda: "0.0.0")
+    monkeypatch.setattr(upd, "fetch_latest_release", lambda repo=None: (_release("v1.0.2"), ""))
+
+    info = upd.check(force=True)
+
+    assert info.update_available is False
+    assert "VERSION.json" in info.error

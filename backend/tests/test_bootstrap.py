@@ -405,3 +405,18 @@ def test_data_dir_created(tmp_path):
 
     # Повторный вызов не должен падать: backend перезапускают часто.
     main._ensure_data_dir(str(tmp_path))
+
+def test_version_file_goes_into_distribution():
+    """
+    Файл версии обязан попадать в дистрибутив.
+
+    Без него установленная программа считает свою версию нулевой и предлагает
+    обновиться на ту, что уже стоит, — этим и закончился выпуск 1.0.2.
+    """
+    import io
+    from pathlib import Path
+
+    build = Path(__file__).resolve().parent.parent.parent / "installer" / "build.py"
+    source = io.open(build, encoding="utf-8").read()
+
+    assert "VERSION.json" in source, "сборщик не копирует VERSION.json"

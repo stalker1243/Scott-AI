@@ -5,6 +5,10 @@
              xmlns:myconv="using:ScottAI.Avalonia.Converters"
              x:DataType="vm:ProfileViewModel"
              x:Class="ScottAI.Avalonia.Views.ProfileView">
+    <!-- Прокрутка обязательна: на невысоком окне нижняя часть страницы —
+         имя, «о себе» и кнопка «Сохранить» — оказывалась за краем и была
+         недоступна вовсе. -->
+    <ScrollViewer>
     <StackPanel Margin="40" Spacing="24" MaxWidth="560">
         <TextBlock Text="Профиль" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
 
@@ -89,4 +93,5 @@
                        IsVisible="{Binding SavedRecently}" />
         </StackPanel>
     </StackPanel>
+    </ScrollViewer>
 </UserControl>
