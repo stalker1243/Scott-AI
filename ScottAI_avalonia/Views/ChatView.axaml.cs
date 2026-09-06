@@ -1,4 +1,4 @@
-using Avalonia.Controls;
+﻿using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -13,6 +13,10 @@ public partial class ChatView : UserControl
     public ChatView()
     {
         InitializeComponent();
+
+        // Фокус в поле ввода сразу при открытии чата: иначе человек печатает
+        // «в никуда», а Enter не срабатывает — клавиши просто некуда девать.
+        AttachedToVisualTree += (_, _) => Input.Focus();
     }
 
     /// <summary>

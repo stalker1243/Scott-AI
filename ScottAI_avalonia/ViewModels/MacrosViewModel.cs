@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -34,6 +34,10 @@ public partial class MacrosViewModel : ViewModelBase
     {
         _client = client;
         _ = Refresh();
+
+        // Первый запрос уходит, пока backend ещё поднимается, — тогда список
+        // остаётся пустым. Повторяем, когда отвечать стало кому.
+        BackendReady.WhenReady(() => _ = Refresh());
         _ = RefreshStatus();
 
         _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };

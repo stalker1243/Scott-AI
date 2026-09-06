@@ -1,7 +1,7 @@
 {
   "app_name": "Scott AI",
-  "version": "1.0.6",
-  "build_number": 7,
+  "version": "1.0.7",
+  "build_number": 8,
   "release_date": "2026-09-06",
-  "notes": "Лаунчер снова запускается; появился журнал запуска."
+  "notes": "Ключ Groq, своя модель, Enter в чате, вкладки настроек."
 }

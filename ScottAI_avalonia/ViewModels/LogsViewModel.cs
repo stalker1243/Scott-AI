@@ -42,6 +42,10 @@ public partial class LogsViewModel : ViewModelBase
     {
         _client = client;
         _ = Refresh();
+
+        // Первый запрос уходит, пока backend ещё поднимается, — тогда список
+        // остаётся пустым. Повторяем, когда отвечать стало кому.
+        BackendReady.WhenReady(() => _ = Refresh());
     }
 
     [RelayCommand]

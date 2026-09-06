@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:models="using:ScottAI.Avalonia.Models"
@@ -92,6 +92,14 @@
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <mi:MaterialIcon Kind="PlusCircleOutline" Width="16" Height="16" />
                         <TextBlock Text="Новый чат" />
+                    </StackPanel>
+                </Button>
+                <!-- «Новый чат» очищает окно, а это — саму память Scott. -->
+                <Button Classes="soft" Command="{Binding ClearHistoryCommand}"
+                        ToolTip.Tip="Scott забудет разговор целиком">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <mi:MaterialIcon Kind="DeleteOutline" Width="16" Height="16" />
+                        <TextBlock Text="Удалить историю" />
                     </StackPanel>
                 </Button>
             </StackPanel>
@@ -224,9 +232,15 @@
             <Button Grid.Column="1" Classes="soft" Click="OnPickFileClick" Margin="0,0,8,0" Padding="10">
                 <mi:MaterialIcon Kind="FileOutline" Width="18" Height="18" />
             </Button>
-            <TextBox Grid.Column="2" Text="{Binding Draft}" PlaceholderText="Спросите Scott..."
+            <TextBox Grid.Column="2" Name="Input" Text="{Binding Draft}" PlaceholderText="Спросите Scott..."
                       Background="{DynamicResource BgElevated}" Foreground="{DynamicResource TextPrimary}"
-                      BorderBrush="{DynamicResource BorderColor}" CornerRadius="10" Padding="14,10" />
+                      BorderBrush="{DynamicResource BorderColor}" CornerRadius="10" Padding="14,10">
+                <!-- Enter отправляет: привычка есть у всех, а раньше работала
+                     только кнопка. -->
+                <TextBox.KeyBindings>
+                    <KeyBinding Gesture="Enter" Command="{Binding SendCommand}" />
+                </TextBox.KeyBindings>
+            </TextBox>
             <Button Grid.Column="3" Content="Отправить" Command="{Binding SendCommand}"
                     IsEnabled="{Binding !Sending}"
                     Background="{DynamicResource Accent}" Foreground="White"

@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -23,6 +23,10 @@ public partial class SystemViewModel : ViewModelBase
     {
         _client = client;
         _ = Refresh();
+
+        // Первый запрос уходит, пока backend ещё поднимается, — тогда список
+        // остаётся пустым. Повторяем, когда отвечать стало кому.
+        BackendReady.WhenReady(() => _ = Refresh());
     }
 
     [RelayCommand]

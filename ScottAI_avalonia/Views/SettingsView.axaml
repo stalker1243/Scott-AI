@@ -11,252 +11,289 @@
         <StackPanel Margin="32" Spacing="24" MaxWidth="640">
             <TextBlock Text="Настройки" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
 
-            <StackPanel Spacing="10">
-                <TextBlock Text="Стиль" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <Button Content="Classic" Command="{Binding SetStyleClassicCommand}" Classes="tab"
-                            Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=classic}" />
-                    <Button Content="Glass" Command="{Binding SetStyleGlassCommand}" Classes="tab"
-                            Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=glass}" />
-                    <Button Content="Terminal Pro" Command="{Binding SetStyleTerminalCommand}" Classes="tab"
-                            Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=terminal}" />
+
+            <!-- Разделы вместо простыни. Раньше до модели ИИ приходилось
+                 прокручивать мимо стилей, тем и голосов, читая по дороге всё
+                 подряд. -->
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Оформление" Classes="tab" Command="{Binding SetSettingsTabCommand}" CommandParameter="look"
+                        Classes.tabactive="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=look}" />
+                <Button Content="Голос" Classes="tab" Command="{Binding SetSettingsTabCommand}" CommandParameter="voice"
+                        Classes.tabactive="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=voice}" />
+                <Button Content="Модель ИИ" Classes="tab" Command="{Binding SetSettingsTabCommand}" CommandParameter="ai"
+                        Classes.tabactive="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=ai}" />
+                <Button Content="Прочее" Classes="tab" Command="{Binding SetSettingsTabCommand}" CommandParameter="other"
+                        Classes.tabactive="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=other}" />
+            </StackPanel>
+
+            <!-- Оформление -->
+            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=look}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Стиль" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button Content="Classic" Command="{Binding SetStyleClassicCommand}" Classes="tab"
+                                Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=classic}" />
+                        <Button Content="Glass" Command="{Binding SetStyleGlassCommand}" Classes="tab"
+                                Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=glass}" />
+                        <Button Content="Terminal Pro" Command="{Binding SetStyleTerminalCommand}" Classes="tab"
+                                Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=terminal}" />
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
 
-            <StackPanel Spacing="10" IsVisible="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=classic}">
-                <TextBlock Text="Тема" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <Button Content="Тёмная" Command="{Binding SetDarkCommand}" Classes="soft"
-                            Classes.tabactive="{Binding IsDark}" />
-                    <Button Content="Светлая" Command="{Binding SetLightCommand}" Classes="soft"
-                            Classes.tabactive="{Binding !IsDark}" />
+                <StackPanel Spacing="10" IsVisible="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=classic}">
+                    <TextBlock Text="Тема" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button Content="Тёмная" Command="{Binding SetDarkCommand}" Classes="soft"
+                                Classes.tabactive="{Binding IsDark}" />
+                        <Button Content="Светлая" Command="{Binding SetLightCommand}" Classes="soft"
+                                Classes.tabactive="{Binding !IsDark}" />
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
 
-            <StackPanel Spacing="10" IsVisible="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=glass}">
-                <TextBlock Text="Прозрачность окна" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <TextBlock Text="Настоящий блюр рабочего стола под окном — двигайте, чтобы подобрать баланс между читаемостью и прозрачностью."
-                           FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
-                <Grid ColumnDefinitions="*,Auto">
-                    <Slider Grid.Column="0" Minimum="15" Maximum="100" Value="{Binding GlassOpacity}" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="{Binding GlassOpacity, StringFormat={}{0:0}%}" Width="48"
-                               HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimary}" />
-                </Grid>
-            </StackPanel>
-
-            <StackPanel Spacing="10">
-                <TextBlock Text="Акцентный цвет" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <ItemsControl ItemsSource="{Binding AccentSwatches}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" Spacing="10" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:AccentSwatch">
-                            <Button Width="36" Height="36" CornerRadius="18" Padding="0" Classes="swatch"
-                                    Classes.selected="{Binding IsSelected}"
-                                    Background="{Binding Hex, Converter={x:Static myconv:HexToBrushConverter.Instance}}"
-                                    Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).SetAccentCommand}"
-                                    CommandParameter="{Binding}">
-                            </Button>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-
-            <StackPanel Spacing="10">
-                <TextBlock Text="Иконка приложения" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           Text="Меняется значок в трее, заголовке окна и логотип слева. Тёмная лучше видна на тёмной панели задач, светлая — на светлой. Значок самого файла программы остаётся прежним: он вшит при сборке." />
-                <StackPanel Orientation="Horizontal" Spacing="12">
-                    <Button Classes="iconpick" AutomationProperties.Name="Тёмная иконка" Command="{Binding SetIconCommand}" CommandParameter="dark"
-                            Classes.tabactive="{Binding IconVariant, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=dark}">
-                        <StackPanel Spacing="6">
-                            <Image Source="/Assets/scott-logo.png" Width="56" Height="56" />
-                            <TextBlock Text="Тёмная" FontSize="12" HorizontalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button Classes="iconpick" AutomationProperties.Name="Светлая иконка" Command="{Binding SetIconCommand}" CommandParameter="light"
-                            Classes.tabactive="{Binding IconVariant, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=light}">
-                        <StackPanel Spacing="6">
-                            <Image Source="/Assets/scott-logo-light.png" Width="56" Height="56" />
-                            <TextBlock Text="Светлая" FontSize="12" HorizontalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
+                <StackPanel Spacing="10" IsVisible="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=glass}">
+                    <TextBlock Text="Прозрачность окна" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="Настоящий блюр рабочего стола под окном — двигайте, чтобы подобрать баланс между читаемостью и прозрачностью."
+                               FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Slider Grid.Column="0" Minimum="15" Maximum="100" Value="{Binding GlassOpacity}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding GlassOpacity, StringFormat={}{0:0}%}" Width="48"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimary}" />
+                    </Grid>
                 </StackPanel>
-            </StackPanel>
 
-            <StackPanel Spacing="10">
-                <TextBlock Text="Начать заново" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           Text="Настройки хранятся отдельно от программы и переживают переустановку — поэтому после установки заново Scott выглядит так же, как раньше, и помнит ваше имя. Эта кнопка очищает имя, «о себе», аватар и оформление." />
-                <Button Content="Сбросить настройки" Classes="soft" HorizontalAlignment="Left"
-                        Command="{Binding ResetSettingsCommand}" />
-            </StackPanel>
-
-            <StackPanel Spacing="10">
-                <TextBlock Text="Работа в фоне" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <CheckBox IsChecked="{Binding RunInBackground}"
-                          Content="Продолжать слушать после закрытия окна" />
-                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           Text="Окно спрячется в область уведомлений — Scott останется в трее и будет слышать обращение по имени. Выйти совсем можно через меню его значка." />
-            </StackPanel>
-
-            <StackPanel Spacing="10">
-                <TextBlock Text="Устройство для речи" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           Text="На видеокарте Scott распознаёт фразу примерно за секунду, на процессоре — за четыре с половиной. Автоматика берёт видеокарту, когда она доступна; переключайте вручную, если видеокарта занята или барахлит драйвер." />
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <Button Content="Авто" Command="{Binding SetDeviceAutoCommand}" Classes="tab"
-                            Classes.tabactive="{Binding DeviceIsAuto}"
-                            IsEnabled="{Binding !DeviceBusy}" />
-                    <Button Content="Видеокарта" Command="{Binding SetDeviceGpuCommand}" Classes="tab"
-                            Classes.tabactive="{Binding DeviceIsGpu}"
-                            IsEnabled="{Binding CudaAvailable}" />
-                    <Button Content="Процессор" Command="{Binding SetDeviceCpuCommand}" Classes="tab"
-                            Classes.tabactive="{Binding DeviceIsCpu}"
-                            IsEnabled="{Binding !DeviceBusy}" />
-                </StackPanel>
-                <TextBlock FontSize="12" Foreground="{DynamicResource TextMuted}">
-                    <Run Text="Сейчас работает:" />
-                    <Run Text="{Binding DeviceInUse}" FontWeight="SemiBold" />
-                </TextBlock>
-                <TextBlock FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           IsVisible="{Binding !CudaAvailable}"
-                           TextWrapping="Wrap"
-                           Text="Видеокарта недоступна: либо её нет, либо torch установлен в сборке для процессора." />
-                <TextBlock FontSize="12" Foreground="{DynamicResource Danger}" TextWrapping="Wrap"
-                           IsVisible="{Binding DeviceLockedByEnv}">
-                    <Run Text="Устройство задано в .env переменной" />
-                    <Run Text="{Binding DeviceEnvVar}" FontWeight="SemiBold" />
-                    <Run Text="— уберите её, чтобы переключать отсюда." />
-                </TextBlock>
-                <TextBlock Text="{Binding DeviceStatus}" FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           IsVisible="{Binding DeviceStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
-            </StackPanel>
-
-            <StackPanel Spacing="10">
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="Голос Scott" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Content="Обновить" Command="{Binding LoadVoicesCommand}" Classes="soft" />
-                </Grid>
-                <TextBlock Text="Голоса с пометкой «офлайн» синтезируются локально на видеокарте — быстро и без интернета. «Облако» — голоса Microsoft, звучат иначе, но требуют сети."
-                           FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
-
-                <Grid ColumnDefinitions="*,Auto">
-                    <ComboBox Grid.Column="0" ItemsSource="{Binding Voices}" SelectedItem="{Binding SelectedVoice}"
-                              HorizontalAlignment="Stretch" IsEnabled="{Binding !VoiceBusy}">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="models:VoiceOption">
-                                <TextBlock Text="{Binding Display}" />
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Акцентный цвет" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <ItemsControl ItemsSource="{Binding AccentSwatches}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="10" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AccentSwatch">
+                                <Button Width="36" Height="36" CornerRadius="18" Padding="0" Classes="swatch"
+                                        Classes.selected="{Binding IsSelected}"
+                                        Background="{Binding Hex, Converter={x:Static myconv:HexToBrushConverter.Instance}}"
+                                        Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).SetAccentCommand}"
+                                        CommandParameter="{Binding}">
+                                </Button>
                             </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <Button Grid.Column="1" Classes="soft" Margin="8,0,0,0"
-                            Command="{Binding PreviewVoiceCommand}" IsEnabled="{Binding !VoiceBusy}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <mi:MaterialIcon Kind="VolumeHigh" Width="16" Height="16" />
-                            <TextBlock Text="Прослушать" />
-                        </StackPanel>
-                    </Button>
-                </Grid>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
 
-                <Border Background="{DynamicResource Danger}" Opacity="0.15" CornerRadius="8" Padding="10,6"
-                        IsVisible="{Binding VoiceStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
-                    <TextBlock Text="{Binding VoiceStatus}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
-                </Border>
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Иконка приложения" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               Text="Меняется значок в трее, заголовке окна и логотип слева. Тёмная лучше видна на тёмной панели задач, светлая — на светлой. Значок самого файла программы остаётся прежним: он вшит при сборке." />
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Classes="iconpick" AutomationProperties.Name="Тёмная иконка" Command="{Binding SetIconCommand}" CommandParameter="dark"
+                                Classes.tabactive="{Binding IconVariant, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=dark}">
+                            <StackPanel Spacing="6">
+                                <Image Source="/Assets/scott-logo.png" Width="56" Height="56" />
+                                <TextBlock Text="Тёмная" FontSize="12" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button Classes="iconpick" AutomationProperties.Name="Светлая иконка" Command="{Binding SetIconCommand}" CommandParameter="light"
+                                Classes.tabactive="{Binding IconVariant, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=light}">
+                            <StackPanel Spacing="6">
+                                <Image Source="/Assets/scott-logo-light.png" Width="56" Height="56" />
+                                <TextBlock Text="Светлая" FontSize="12" HorizontalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+
             </StackPanel>
 
-            <StackPanel Spacing="10">
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="Модель ИИ" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Content="Обновить" Command="{Binding LoadAiProvidersCommand}" Classes="soft" />
-                </Grid>
-                <TextBlock Text="{Binding ActiveProvider, StringFormat='Сейчас отвечает: {0}'}" FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           IsVisible="{Binding ActiveProvider, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+            <!-- Голос -->
+            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=voice}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Устройство для речи" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               Text="На видеокарте Scott распознаёт фразу примерно за секунду, на процессоре — за четыре с половиной. Автоматика берёт видеокарту, когда она доступна; переключайте вручную, если видеокарта занята или барахлит драйвер." />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button Content="Авто" Command="{Binding SetDeviceAutoCommand}" Classes="tab"
+                                Classes.tabactive="{Binding DeviceIsAuto}"
+                                IsEnabled="{Binding !DeviceBusy}" />
+                        <Button Content="Видеокарта" Command="{Binding SetDeviceGpuCommand}" Classes="tab"
+                                Classes.tabactive="{Binding DeviceIsGpu}"
+                                IsEnabled="{Binding CudaAvailable}" />
+                        <Button Content="Процессор" Command="{Binding SetDeviceCpuCommand}" Classes="tab"
+                                Classes.tabactive="{Binding DeviceIsCpu}"
+                                IsEnabled="{Binding !DeviceBusy}" />
+                    </StackPanel>
+                    <TextBlock FontSize="12" Foreground="{DynamicResource TextMuted}">
+                        <Run Text="Сейчас работает:" />
+                        <Run Text="{Binding DeviceInUse}" FontWeight="SemiBold" />
+                    </TextBlock>
+                    <TextBlock FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               IsVisible="{Binding !CudaAvailable}"
+                               TextWrapping="Wrap"
+                               Text="Видеокарта недоступна: либо её нет, либо torch установлен в сборке для процессора." />
+                    <TextBlock FontSize="12" Foreground="{DynamicResource Danger}" TextWrapping="Wrap"
+                               IsVisible="{Binding DeviceLockedByEnv}">
+                        <Run Text="Устройство задано в .env переменной" />
+                        <Run Text="{Binding DeviceEnvVar}" FontWeight="SemiBold" />
+                        <Run Text="— уберите её, чтобы переключать отсюда." />
+                    </TextBlock>
+                    <TextBlock Text="{Binding DeviceStatus}" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               IsVisible="{Binding DeviceStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+                </StackPanel>
 
-                <Border Background="{DynamicResource Danger}" Opacity="0.15" CornerRadius="8" Padding="10,6"
-                        IsVisible="{Binding AiError, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
-                    <TextBlock Text="{Binding AiError}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
-                </Border>
-                <Border Background="{DynamicResource Success}" Opacity="0.15" CornerRadius="8" Padding="10,6"
-                        IsVisible="{Binding AiStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
-                    <TextBlock Text="{Binding AiStatus}" Foreground="{DynamicResource Success}" TextWrapping="Wrap" />
-                </Border>
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="Голос Scott" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="Обновить" Command="{Binding LoadVoicesCommand}" Classes="soft" />
+                    </Grid>
+                    <TextBlock Text="Голоса с пометкой «офлайн» синтезируются локально на видеокарте — быстро и без интернета. «Облако» — голоса Microsoft, звучат иначе, но требуют сети."
+                               FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
 
-                <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
-                        CornerRadius="12" Padding="16">
-                    <StackPanel Spacing="10">
-                        <ItemsControl ItemsSource="{Binding Providers}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="8" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="models:AiProvider">
-                                    <Button Content="{Binding Id}" Classes="tab"
-                                            Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).SetSelectedProviderCommand}"
-                                            CommandParameter="{Binding}" />
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-
-                        <TextBlock Text="{Binding SelectedProvider.Note}" FontSize="12" Foreground="{DynamicResource TextMuted}" />
-
-                        <ComboBox ItemsSource="{Binding SelectedProvider.Models}" SelectedValue="{Binding SelectedModel}"
-                                  SelectedValueBinding="{Binding Id}" HorizontalAlignment="Stretch">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <ComboBox Grid.Column="0" ItemsSource="{Binding Voices}" SelectedItem="{Binding SelectedVoice}"
+                                  HorizontalAlignment="Stretch" IsEnabled="{Binding !VoiceBusy}">
                             <ComboBox.ItemTemplate>
-                                <DataTemplate x:DataType="models:AiModelOption">
-                                    <TextBlock Text="{Binding Id}" />
+                                <DataTemplate x:DataType="models:VoiceOption">
+                                    <TextBlock Text="{Binding Display}" />
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>
+                        <Button Grid.Column="1" Classes="soft" Margin="8,0,0,0"
+                                Command="{Binding PreviewVoiceCommand}" IsEnabled="{Binding !VoiceBusy}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <mi:MaterialIcon Kind="VolumeHigh" Width="16" Height="16" />
+                                <TextBlock Text="Прослушать" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
 
-                        <TextBox Text="{Binding ApiKeyInput}" PlaceholderText="Свой API-ключ (необязательно, если уже настроен)" PasswordChar="•" />
-
-                        <Button Content="Применить" Command="{Binding ApplyAiCommand}" Classes="accent" HorizontalAlignment="Right" />
-                    </StackPanel>
-                </Border>
-            </StackPanel>
-
-            <StackPanel Spacing="10">
-                <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Grid.Column="0" Text="Версионирование" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Content="Обновить" Command="{Binding LoadVersionsCommand}" Classes="soft" />
-                </Grid>
-                <TextBlock Text="Scott автоматически сохраняет версию при каждом создании или изменении команды, правила, макроса или шаблона."
-                           FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
-                <Panel>
-                <ItemsControl Name="VersionedItemsList" ItemsSource="{Binding VersionedItems}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="models:VersionItem">
-                            <Border Classes="card" Margin="0,4" Background="{DynamicResource BgSurface}"
-                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="10" Padding="14,10">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding ItemId}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
-                                    <TextBlock Foreground="{DynamicResource TextMuted}" FontSize="12">
-                                        <Run Text="{Binding ItemType}" /><Run Text=" · версий: " /><Run Text="{Binding VersionsCount}" />
-                                    </TextBlock>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-
-                <StackPanel IsVisible="{Binding VersionedItems.Count, Converter={x:Static myconv:IsZeroConverter.Instance}}"
-                            HorizontalAlignment="Center" Spacing="8" Margin="0,20">
-                    <mi:MaterialIcon Kind="ClockOutline" Width="30" Height="30" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
-                    <TextBlock Text="Версий пока нет — появятся сами, как только вы что-то создадите или измените."
-                               FontSize="12" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="320" />
+                    <Border Background="{DynamicResource Danger}" Opacity="0.15" CornerRadius="8" Padding="10,6"
+                            IsVisible="{Binding VoiceStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                        <TextBlock Text="{Binding VoiceStatus}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
+                    </Border>
                 </StackPanel>
-                </Panel>
+
             </StackPanel>
 
-            <StackPanel Spacing="4">
-                <TextBlock Text="Backend" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <TextBlock Text="http://127.0.0.1:8000" FontSize="12" Foreground="{DynamicResource TextMuted}" />
+            <!-- Модель ИИ -->
+            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=ai}">
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="Модель ИИ" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="Обновить" Command="{Binding LoadAiProvidersCommand}" Classes="soft" />
+                    </Grid>
+                    <TextBlock Text="{Binding ActiveProvider, StringFormat='Сейчас отвечает: {0}'}" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               IsVisible="{Binding ActiveProvider, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+
+                    <Border Background="{DynamicResource Danger}" Opacity="0.15" CornerRadius="8" Padding="10,6"
+                            IsVisible="{Binding AiError, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                        <TextBlock Text="{Binding AiError}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
+                    </Border>
+                    <Border Background="{DynamicResource Success}" Opacity="0.15" CornerRadius="8" Padding="10,6"
+                            IsVisible="{Binding AiStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                        <TextBlock Text="{Binding AiStatus}" Foreground="{DynamicResource Success}" TextWrapping="Wrap" />
+                    </Border>
+
+                    <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                            CornerRadius="12" Padding="16">
+                        <StackPanel Spacing="10">
+                            <ItemsControl ItemsSource="{Binding Providers}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="8" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:AiProvider">
+                                        <Button Content="{Binding Id}" Classes="tab"
+                                                Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).SetSelectedProviderCommand}"
+                                                CommandParameter="{Binding}" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="{Binding SelectedProvider.Note}" FontSize="12" Foreground="{DynamicResource TextMuted}" />
+
+                            <ComboBox ItemsSource="{Binding SelectedProvider.Models}" SelectedValue="{Binding SelectedModel}"
+                                      SelectedValueBinding="{Binding Id}" HorizontalAlignment="Stretch">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="models:AiModelOption">
+                                        <TextBlock Text="{Binding Id}" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+
+                            <!-- Своя модель. Список подсказывает известные, но новые
+                                 выходят чаще, чем обновляется Scott, — и человек не
+                                 должен ждать выпуска, чтобы попробовать свежую. -->
+                            <CheckBox IsChecked="{Binding UseCustomModel}" Content="Указать модель вручную" />
+                            <TextBox Text="{Binding CustomModel}" IsVisible="{Binding UseCustomModel}"
+                                     PlaceholderText="Например: llama-3.3-70b-versatile" />
+
+                            <TextBox Text="{Binding ApiKeyInput}" PlaceholderText="Свой API-ключ (необязательно, если уже настроен)" PasswordChar="•" />
+
+                            <Button Content="Применить" Command="{Binding ApplyAiCommand}" Classes="accent" HorizontalAlignment="Right" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+            </StackPanel>
+
+            <!-- Прочее -->
+            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=other}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Начать заново" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               Text="Настройки хранятся отдельно от программы и переживают переустановку — поэтому после установки заново Scott выглядит так же, как раньше, и помнит ваше имя. Эта кнопка очищает имя, «о себе», аватар и оформление." />
+                    <Button Content="Сбросить настройки" Classes="soft" HorizontalAlignment="Left"
+                            Command="{Binding ResetSettingsCommand}" />
+                </StackPanel>
+
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Работа в фоне" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <CheckBox IsChecked="{Binding RunInBackground}"
+                              Content="Продолжать слушать после закрытия окна" />
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               Text="Окно спрячется в область уведомлений — Scott останется в трее и будет слышать обращение по имени. Выйти совсем можно через меню его значка." />
+                </StackPanel>
+
+                <StackPanel Spacing="10">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="Версионирование" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="Обновить" Command="{Binding LoadVersionsCommand}" Classes="soft" />
+                    </Grid>
+                    <TextBlock Text="Scott автоматически сохраняет версию при каждом создании или изменении команды, правила, макроса или шаблона."
+                               FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
+                    <Panel>
+                    <ItemsControl Name="VersionedItemsList" ItemsSource="{Binding VersionedItems}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:VersionItem">
+                                <Border Classes="card" Margin="0,4" Background="{DynamicResource BgSurface}"
+                                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="10" Padding="14,10">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding ItemId}" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" />
+                                        <TextBlock Foreground="{DynamicResource TextMuted}" FontSize="12">
+                                            <Run Text="{Binding ItemType}" /><Run Text=" · версий: " /><Run Text="{Binding VersionsCount}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <StackPanel IsVisible="{Binding VersionedItems.Count, Converter={x:Static myconv:IsZeroConverter.Instance}}"
+                                HorizontalAlignment="Center" Spacing="8" Margin="0,20">
+                        <mi:MaterialIcon Kind="ClockOutline" Width="30" Height="30" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                        <TextBlock Text="Версий пока нет — появятся сами, как только вы что-то создадите или измените."
+                                   FontSize="12" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="320" />
+                    </StackPanel>
+                    </Panel>
+                </StackPanel>
+
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Backend" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="http://127.0.0.1:8000" FontSize="12" Foreground="{DynamicResource TextMuted}" />
+                </StackPanel>
             </StackPanel>
         </StackPanel>
     </ScrollViewer>

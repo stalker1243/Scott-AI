@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -84,6 +84,38 @@ public partial class ChatViewModel : ViewModelBase
         Messages.Clear();
         RemoveAttachment();
         Draft = "";
+    }
+
+    /// <summary>
+    /// Забыть разговор целиком — и на экране, и в памяти Scott.
+    ///
+    /// «Новый чат» очищает только окно: ассистент продолжает помнить прежнюю
+    /// беседу, потому что память живёт на стороне backend и переживает даже
+    /// перезапуск. Здесь стирается и она.
+    /// </summary>
+    [RelayCommand]
+    private async Task ClearHistory()
+    {
+        var confirmed = await DialogService.ConfirmAsync(
+            "Удалить историю разговоров?",
+            "Scott забудет всё, о чём вы говорили: и переписку в этом окне, и то, " +
+            "что он держал в памяти. Отменить это будет нельзя.",
+            "Удалить");
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        Messages.Clear();
+        PromptHistory.Clear();
+        RemoveAttachment();
+        Draft = "";
+
+        var forgotten = await _client.ClearAiMemoryAsync();
+        ToastService.Success(forgotten
+            ? "История удалена — Scott забыл разговор"
+            : "Окно очищено, но память Scott стереть не вышло: backend не ответил");
     }
 
     [RelayCommand]

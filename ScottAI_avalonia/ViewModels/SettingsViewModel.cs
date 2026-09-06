@@ -22,6 +22,13 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty]
     private string _currentStyle = SettingsStore.Current.Style; // "classic" | "glass" | "terminal"
 
+    /// <summary>Открытый раздел настроек: "look" | "voice" | "ai" | "other".</summary>
+    [ObservableProperty]
+    private string _settingsTab = "look";
+
+    [RelayCommand]
+    private void SetSettingsTab(string tab) => SettingsTab = tab;
+
     public ObservableCollection<AccentSwatch> AccentSwatches { get; } = new(
         new[] { "#3B82F6", "#22C55E", "#A855F7", "#F59E0B", "#EF4444", "#00FFF2" }.Select(h => new AccentSwatch(h)));
 
@@ -58,6 +65,13 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private AiProvider? _selectedProvider;
     [ObservableProperty] private string? _selectedModel;
     [ObservableProperty] private string _apiKeyInput = "";
+
+    /// <summary>Вводить название модели руками вместо выбора из списка.</summary>
+    [ObservableProperty] private bool _useCustomModel;
+
+    /// <summary>Название модели, введённое вручную. Новые модели выходят чаще,
+    /// чем обновляется Scott, и ждать выпуска ради свежей — глупо.</summary>
+    [ObservableProperty] private string _customModel = "";
     [ObservableProperty] private string? _activeProvider;
     [ObservableProperty] private string _activeModel = "";
     [ObservableProperty] private bool _aiApplying;
@@ -141,6 +155,16 @@ public partial class SettingsViewModel : ViewModelBase
         _ = LoadVersions();
         _ = LoadVoices();
         _ = LoadDeviceSettings();
+
+        // То же, что и на других страницах: при запуске backend ещё не готов,
+        // и списки провайдеров, голосов и устройств приходили пустыми.
+        BackendReady.WhenReady(() =>
+        {
+            _ = LoadAiProviders();
+            _ = LoadVersions();
+            _ = LoadVoices();
+            _ = LoadDeviceSettings();
+        });
     }
 
     [RelayCommand]
@@ -353,12 +377,20 @@ public partial class SettingsViewModel : ViewModelBase
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(SelectedModel))
+        // Введённая руками модель важнее выбранной в списке: человек указал её
+        // намеренно.
+        var model = UseCustomModel && !string.IsNullOrWhiteSpace(CustomModel)
+            ? CustomModel.Trim()
+            : SelectedModel;
+
+        if (string.IsNullOrWhiteSpace(model))
         {
             // Модель почти всегда можно взять сама собой: у провайдера есть
             // список, и первая в нём — разумный выбор по умолчанию.
-            SelectedModel = SelectedProvider.Models.FirstOrDefault()?.Id;
+            model = SelectedProvider.Models.FirstOrDefault()?.Id;
         }
+
+        SelectedModel = model;
 
         if (string.IsNullOrWhiteSpace(SelectedModel))
         {

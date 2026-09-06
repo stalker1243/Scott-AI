@@ -314,6 +314,10 @@ class IntelligentAnswerer:
         try:
             if provider == "Groq":
                 if not GROQ_AVAILABLE:
+                    self.last_connect_error = (
+                        "библиотека groq не установлена — обновите Scott "
+                        "или выполните: pip install groq"
+                    )
                     return False
                 self.client = Groq(api_key=api_key)
                 self.enabled = True
@@ -323,6 +327,7 @@ class IntelligentAnswerer:
                 self._test_connection_groq()
             elif provider == "DeepSeek":
                 if not REQUESTS_AVAILABLE:
+                    self.last_connect_error = "библиотека requests не установлена"
                     return False
                 self.client = {"api_key": api_key, "base_url": "https://api.deepseek.com"}
                 self.enabled = True
@@ -331,6 +336,7 @@ class IntelligentAnswerer:
                 print(f"✅ DeepSeek API подключен (модель: {self.model})")
             elif provider == "OpenAI":
                 if not OPENAI_AVAILABLE:
+                    self.last_connect_error = "библиотека openai не установлена"
                     return False
                 import openai as openai_client
                 if httpx is None:

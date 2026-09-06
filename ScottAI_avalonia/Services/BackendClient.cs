@@ -394,6 +394,20 @@ public class BackendClient
     /// Сборка читает и переписывает несколько файлов, поэтому таймаут здесь
     /// больше общего: на разросшемся логе это занимает заметное время.
     /// </summary>
+    /// <summary>Попросить Scott забыть разговоры. Возвращает, получилось ли.</summary>
+    public async Task<bool> ClearAiMemoryAsync()
+    {
+        try
+        {
+            var res = await _http.PostAsync("/ai/clear-memory", null);
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public async Task<ReportResult?> BuildReportAsync(string? note)
     {
         try
