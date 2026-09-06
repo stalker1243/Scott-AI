@@ -214,3 +214,29 @@ def test_unknown_own_version_offers_nothing(upd, no_cache, monkeypatch):
 
     assert info.update_available is False
     assert "VERSION.json" in info.error
+
+def test_linux_gets_archive_not_exe(upd, monkeypatch):
+    """
+    На Linux предлагается архив, а не установщик Windows.
+
+    Раньше выбирался только .exe — человеку на Linux предлагали скачать
+    программу, которую он всё равно не запустит.
+    """
+    monkeypatch.setattr(upd.sys, "platform", "linux")
+
+    assets = [
+        {"name": "ScottAI-1.0.7-setup.exe"},
+        {"name": "ScottAI-1.0.7-linux-x64.tar.gz"},
+    ]
+    assert upd._pick_installer(assets)["name"].endswith(".tar.gz")
+
+
+def test_windows_still_gets_exe(upd, monkeypatch):
+    """Пара к тесту выше: на Windows по-прежнему установщик."""
+    monkeypatch.setattr(upd.sys, "platform", "win32")
+
+    assets = [
+        {"name": "ScottAI-1.0.7-linux-x64.tar.gz"},
+        {"name": "ScottAI-1.0.7-setup.exe"},
+    ]
+    assert upd._pick_installer(assets)["name"].endswith(".exe")

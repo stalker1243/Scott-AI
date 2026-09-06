@@ -1,0 +1,8 @@
+# Скрипты для Linux обязаны хранить окончания строк LF. С CRLF система выдаёт
+# «bad interpreter: No such file or directory» — на Windows это не заметно, а
+# на Linux скрипт просто не запускается.
+*.sh text eol=lf
+*.desktop text eol=lf
+
+# Остальное — как принято в репозитории: в рабочей копии CRLF, в истории LF.
+* text=auto

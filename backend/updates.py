@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -150,17 +151,23 @@ def _pick_installer(assets: List[Dict]) -> Optional[Dict]:
     релиз положили только исходники, обновление всё равно покажется — просто
     со ссылкой на страницу выпуска.
     """
+    # Расширение зависит от системы: на Windows — установщик .exe, на Linux —
+    # архив. Раньше выбирался только .exe, и человеку на Linux предлагали
+    # скачать программу, которую он всё равно не запустит.
+    wanted = ".exe" if sys.platform == "win32" else ".tar.gz"
+
     def suitable(asset: Dict) -> bool:
         name = (asset.get("name") or "").lower()
-        # arm64 отсеивается: сборка лаунчера и встроенный Python — x64, и
-        # предлагать человеку установщик под другую архитектуру нельзя.
-        # Проверено на живом релизе PowerToys, где arm64-файл лежит первым.
-        return name.endswith(".exe") and "arm64" not in name
+        # arm64 отсеивается: сборки под x64, и предлагать человеку файл под
+        # другую архитектуру нельзя. Проверено на живом релизе PowerToys, где
+        # arm64-файл лежит в списке первым.
+        return name.endswith(wanted) and "arm64" not in name
 
     candidates = [asset for asset in assets if suitable(asset)]
 
     for asset in candidates:
-        if "setup" in (asset.get("name") or "").lower():
+        name = (asset.get("name") or "").lower()
+        if "setup" in name or "linux" in name:
             return asset
 
     return candidates[0] if candidates else None
