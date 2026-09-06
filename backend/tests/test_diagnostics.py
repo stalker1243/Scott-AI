@@ -236,3 +236,16 @@ def test_debug_noise_ignored(tmp_path, monkeypatch):
     )
 
     assert errors == []
+
+def test_launcher_log_collected():
+    """
+    Журнал лаунчера попадает в отчёт.
+
+    Именно в нём видно падения при запуске — случаи, когда человек нажимает
+    ярлык и не происходит ничего. Без этого файла причина такого молчания в
+    отчёт не попадала вовсе.
+    """
+    import diagnostics
+
+    assert "launcher.log" in diagnostics.LOG_FILES
+    assert "ScottAI" in str(diagnostics.LOG_FILES["launcher.log"])

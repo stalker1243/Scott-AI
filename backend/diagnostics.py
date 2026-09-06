@@ -29,7 +29,13 @@ PROJECT_DIR = BACKEND_DIR.parent
 
 # Файлы, которые имеет смысл прикладывать к отчёту. Пути относительные —
 # так же они выглядят и внутри архива.
+# Журнал лаунчера лежит в папке пользователя, а не рядом с программой: она
+# может быть установлена туда, где записывать нельзя. Именно в нём видно
+# падения при запуске — те самые случаи, когда «нажимаю ярлык, и ничего».
+LAUNCHER_LOG = Path(os.path.expanduser("~")) / "AppData" / "Local" / "ScottAI" / "logs" / "launcher.log"
+
 LOG_FILES = {
+    "launcher.log": LAUNCHER_LOG,
     "backend_errors.log": PROJECT_DIR / "backend_errors.log",
     "dangerous_actions.log": BACKEND_DIR / "logs" / "dangerous_actions.log",
     "secure_exec.log": BACKEND_DIR / "logs" / "secure_exec.log",

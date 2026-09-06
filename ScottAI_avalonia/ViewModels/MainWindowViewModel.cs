@@ -42,7 +42,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     /// <summary>Логотип в сайдбаре — та же иконка, что у окна и в трее.</summary>
     [ObservableProperty]
-    private global::Avalonia.Media.Imaging.Bitmap _logo = AppIconService.LoadLogo();
+    private global::Avalonia.Media.Imaging.Bitmap? _logo = AppIconService.LoadLogo();
 
     [ObservableProperty]
     private bool _dialogVisible;

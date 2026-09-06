@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Controls;
@@ -24,12 +24,17 @@ public static class AppIconService
     public const string Dark = "dark";
     public const string Light = "light";
 
+    // Имя сборки берётся на месте, а не пишется строкой: программу однажды
+    // переименовали (ScottAI.Avalonia → ScottAI), и зашитые адреса ресурсов
+    // перестали существовать. Лаунчер после этого не запускался вовсе —
+    // молча, потому что падал ещё до появления окна.
+    private static readonly string Root =
+        $"avares://{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}/Assets";
+
     private static readonly Dictionary<string, (string Icon, string Logo)> Variants = new()
     {
-        [Dark] = ("avares://ScottAI.Avalonia/Assets/scott.ico",
-                  "avares://ScottAI.Avalonia/Assets/scott-logo.png"),
-        [Light] = ("avares://ScottAI.Avalonia/Assets/scott-light.ico",
-                   "avares://ScottAI.Avalonia/Assets/scott-logo-light.png"),
+        [Dark] = ($"{Root}/scott.ico", $"{Root}/scott-logo.png"),
+        [Light] = ($"{Root}/scott-light.ico", $"{Root}/scott-logo-light.png"),
     };
 
     public static string Current { get; private set; } = Dark;
@@ -41,16 +46,35 @@ public static class AppIconService
 
     /// <summary>Логотип для интерфейса. Загружается заново на каждый вызов: картинка
     /// маленькая, а держать её в поле — значит рисковать обращением к освобождённой.</summary>
-    public static Bitmap LoadLogo(string? variant = null)
+    public static Bitmap? LoadLogo(string? variant = null)
     {
         var key = IsKnown(variant) ? variant! : Current;
-        return new Bitmap(AssetLoader.Open(new Uri(Variants[key].Logo)));
+        try
+        {
+            return new Bitmap(AssetLoader.Open(new Uri(Variants[key].Logo)));
+        }
+        catch (Exception e)
+        {
+            // Без логотипа программа некрасива, но работает. Раньше здесь
+            // вылетало исключение прямо при создании главного окна, и человек
+            // видел ровно ничего: ярлык нажат, окна нет.
+            LauncherLog.WriteError($"не удалось загрузить логотип ({Variants[key].Logo})", e);
+            return null;
+        }
     }
 
-    public static WindowIcon LoadWindowIcon(string? variant = null)
+    public static WindowIcon? LoadWindowIcon(string? variant = null)
     {
         var key = IsKnown(variant) ? variant! : Current;
-        return new WindowIcon(AssetLoader.Open(new Uri(Variants[key].Icon)));
+        try
+        {
+            return new WindowIcon(AssetLoader.Open(new Uri(Variants[key].Icon)));
+        }
+        catch (Exception e)
+        {
+            LauncherLog.WriteError($"не удалось загрузить иконку ({Variants[key].Icon})", e);
+            return null;
+        }
     }
 
     /// <summary>
@@ -67,6 +91,11 @@ public static class AppIconService
         try
         {
             var icon = LoadWindowIcon(Current);
+            if (icon is null)
+            {
+                IconChanged?.Invoke(Current);
+                return;
+            }
 
             if (Application.Current?.ApplicationLifetime
                 is global::Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
