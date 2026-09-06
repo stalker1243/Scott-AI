@@ -22,7 +22,7 @@
 
 #define AppName "Scott AI"
 #define AppPublisher "Scott AI"
-#define AppExe "ScottAI.Avalonia.exe"
+#define AppExe "ScottAI.exe"
 
 [Setup]
 AppId={{8F3C5A21-6B4D-4E7A-9C12-5D8E3F1A7B60}
@@ -54,6 +54,12 @@ ExtraDiskSpaceRequired=5368709120
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
+; Закрывать программы, которые держат наши файлы. Само по себе это не
+; помогает против backend (у него нет окна), поэтому есть ещё и PrepareToInstall
+; ниже — но с этим флагом Windows хотя бы корректно закроет само окно лаунчера.
+CloseApplications=force
+RestartApplications=no
+
 ; Встроенный Python и .NET-сборка лаунчера — 64-битные.
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -75,6 +81,13 @@ Name: "desktopicon"; Description: "На рабочем столе"; GroupDescrip
 ; занимает видеокарту, и решать, нужно ли это при каждом входе в Windows,
 ; должен человек, а не установщик.
 Name: "autostart"; Description: "Запускать Scott при входе в Windows"; GroupDescription: "Дополнительно:"; Flags: unchecked
+
+[InstallDelete]
+; Лаунчер раньше назывался ScottAI.Avalonia.exe. При обновлении поверх Inno
+; Setup оставил бы старый файл рядом с новым — в папке лежали бы две программы,
+; и ярлык из прошлой установки вёл бы на старую.
+Type: files; Name: "{app}\launcher\ScottAI.Avalonia.exe"
+Type: files; Name: "{app}\launcher\ScottAI.Avalonia.pdb"
 
 [Files]
 Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -108,6 +121,46 @@ Type: filesandordirs; Name: "{app}\reports"
 russian.WelcomeLabel2=Будет установлен [name/ver].%n%nПри первом запуске Scott докачает библиотеки для распознавания речи и модели — от 1 до 4 ГБ в зависимости от того, есть ли в компьютере видеокарта NVIDIA. Понадобится интернет.
 
 [Code]
+// Закрыть работающий Scott перед обновлением.
+//
+// Штатный механизм Windows (RestartManager) справляется с окном лаунчера, но
+// не с backend: это python.exe без окна, и закрывать его некому. Из-за этого
+// обновление поверх упиралось в «не удалось автоматически закрыть все
+// приложения».
+//
+// Python гасится не любой, а только запущенный из папки программы — иначе
+// установщик убил бы чужие процессы, к Scott отношения не имеющие.
+procedure StopRunningScott;
+var
+  ResultCode: Integer;
+  Script: String;
+begin
+  // Двойных кавычек в команде нет намеренно: она сама передаётся в кавычках,
+  // и вложенные разорвали бы её. Поэтому вместо -Filter используется
+  // Where-Object с одинарными кавычками.
+  Script :=
+    'Get-Process -Name ''ScottAI'',''ScottAI.Avalonia'' -ErrorAction SilentlyContinue | ' +
+    'Stop-Process -Force -ErrorAction SilentlyContinue; ' +
+    'Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ' +
+    'Where-Object { $_.Name -eq ''python.exe'' -and $_.ExecutablePath -like ''' +
+    ExpandConstant('{app}') + '\*'' } | ' +
+    'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }';
+
+  Exec('powershell.exe',
+       '-NoProfile -NonInteractive -WindowStyle Hidden -Command "' + Script + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Секунда на то, чтобы система освободила файлы: сразу после Stop-Process
+  // они ещё могут быть заняты.
+  Sleep(1200);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopRunningScott();
+  Result := '';
+end;
+
 // Модели распознавания и синтеза речи весят около полутора гигабайт и лежат
 // в общем кэше PyTorch (%USERPROFILE%\.cache), а не в папке программы. Их
 // могут использовать другие программы на том же PyTorch, поэтому удаление —

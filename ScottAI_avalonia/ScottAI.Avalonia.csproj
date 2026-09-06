@@ -2,6 +2,11 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- Имя файла программы. Пространство имён остаётся прежним, а вот в
+         проводнике, диспетчере задач и списке «приложения, использующие
+         файлы» человек должен видеть просто ScottAI, а не название
+         UI-библиотеки, которой он не выбирал. -->
+    <AssemblyName>ScottAI</AssemblyName>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Иконка самого .exe — в проводнике, на панели задач и в списке
