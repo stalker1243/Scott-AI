@@ -41,6 +41,21 @@ except ImportError:
 # у DeepSeek список стабилен и мал). Для Groq список получаем НЕ отсюда, а
 # живым запросом (см. list_groq_models) — однажды уже ловили баг с тем, что
 # захардкоженная модель Groq оказалась снята с поддержки (llama-3.3-70b-versatile).
+# Модели Groq на случай, когда ключа ещё нет. Живой список запрашивается у
+# самого Groq, но для этого нужен ключ — а выбрать модель человек должен ДО
+# того, как ключ применён. Здесь общедоступные модели бесплатного тарифа.
+# Порядок важен: первая строка — то, что подставится человеку по умолчанию,
+# поэтому здесь стоят модели, реально доступные на бесплатном тарифе. Список
+# сверен с ответом Groq: названия вроде llama-3.3-70b, которых нет у обычного
+# аккаунта, сюда попадать не должны — иначе первая же попытка упрётся в
+# «модель недоступна».
+GROQ_FALLBACK_MODELS = [
+    {"id": "openai/gpt-oss-120b", "note": "Крупная модель, хорошо отвечает по-русски"},
+    {"id": "openai/gpt-oss-20b", "note": "Та же линейка, легче и быстрее"},
+    {"id": "groq/compound-mini", "note": "Быстрая, для простых вопросов"},
+    {"id": "qwen/qwen3.8-27b", "note": "Альтернатива, если первые заняты лимитом"},
+]
+
 STATIC_PROVIDER_MODELS = {
     "OpenAI": [
         {"id": "gpt-4o", "note": "Лучшее качество и мультимодальность, дороже"},
@@ -73,6 +88,46 @@ def list_groq_models(api_key: str) -> List[Dict]:
     except Exception as e:
         print(f"⚠️ Не удалось получить список моделей Groq: {e}")
         return []
+
+
+def _looks_like_bad_key(reason: str) -> bool:
+    """Похоже ли, что провайдер отверг именно ключ, а не модель."""
+    text = (reason or "").lower()
+    return any(marker in text for marker in (
+        "invalid api key", "invalid_api_key", "unauthorized", "401",
+        "authentication", "no auth credentials",
+    ))
+
+
+def explain_connect_error(provider: str, model: str, reason: str) -> str:
+    """
+    Перевести отказ провайдера на человеческий язык.
+
+    Человеку в Настройках нужно знать, что делать дальше: перепроверить ключ,
+    включить VPN или выбрать другую модель. Сырое «Connection error» из
+    библиотеки на этот вопрос не отвечает.
+    """
+    text = (reason or "").lower()
+
+    if _looks_like_bad_key(reason):
+        return (f"{provider} не принял ключ. Проверьте, что скопировали его целиком "
+                "и без пробелов, и что он не отозван в личном кабинете")
+
+    if any(marker in text for marker in ("connection", "timed out", "timeout",
+                                         "name or service", "getaddrinfo", "ssl")):
+        return (f"Не удалось связаться с {provider}. Проверьте интернет; "
+                "в некоторых странах доступ к этому сервису закрыт и нужен VPN")
+
+    if any(marker in text for marker in ("model", "does not exist", "not found", "404")):
+        return (f"Модель «{model}» недоступна этому ключу — выберите другую в списке")
+
+    if "rate limit" in text or "429" in text:
+        return f"{provider} временно ограничил запросы — попробуйте через минуту"
+
+    if reason:
+        return f"{provider} ответил: {reason[:200]}"
+
+    return f"Не удалось подключиться к {provider} (модель «{model}») с этим ключом"
 
 
 class ConversationMemory:
@@ -186,6 +241,10 @@ class IntelligentAnswerer:
             print("⚠️ Ни Groq, DeepSeek ни OpenAI не доступны!")
             print("   Используем fallback ответы для базовых вопросов")
 
+        # Последняя причина неудачного подключения — её показывают человеку в
+        # Настройках вместо общей фразы «не удалось подключиться».
+        self.last_connect_error = ""
+
         # Память разговоров
         # Уменьшено с 20 до 6: аккаунт Groq ограничен 8000 TPM (tokens per minute),
         # и с полной историей запросы регулярно упирались в 413 Request too large.
@@ -207,14 +266,28 @@ class IntelligentAnswerer:
 Тебя зовут Scott AI, ты персональный ИИ-ассистент."""
     
     def _test_connection_groq(self):
-        """Проверить подключение к Groq API"""
+        """
+        Проверить, что работает и ключ, и выбранная модель.
+
+        Одного списка моделей мало: он подтверждает только ключ, и человек с
+        опечаткой в названии модели видел «готово», а потом каждый вопрос
+        падал. Поэтому следом идёт самый маленький возможный запрос к самой
+        модели — один токен.
+        """
         try:
             print("🧪 Тестирование Groq API...")
-            # Простой тест - получить список моделей
-            models = self.client.models.list()
+            self.client.models.list()
+            self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": "ok"}],
+                max_tokens=1,
+            )
             print(f"✅ Groq API работает!")
         except Exception as e:
             print(f"⚠️ Ошибка тестирования Groq: {e}")
+            # Причину запоминаем: она нужна человеку в Настройках, а не только
+            # в консоли, которой он не видит.
+            self.last_connect_error = str(e)
             self.enabled = False
     
     def _test_connection_openai(self):
@@ -235,6 +308,9 @@ class IntelligentAnswerer:
         тремя копипастами кода в __init__."""
         if not api_key:
             return False
+
+        self.last_connect_error = ""
+
         try:
             if provider == "Groq":
                 if not GROQ_AVAILABLE:
@@ -273,6 +349,7 @@ class IntelligentAnswerer:
             return self.enabled
         except Exception as e:
             print(f"⚠️ Ошибка подключения {provider}: {e}")
+            self.last_connect_error = str(e)
             self.client = None
             self.api_provider = None
             self.enabled = False
@@ -311,9 +388,29 @@ class IntelligentAnswerer:
 
         previous = (self.api_provider, self.model, self.client, self.enabled)
         if not self._connect_provider(provider, model, resolved_key):
+            reason = self.last_connect_error
+
+            # Ключ может быть верным, а модель — недоступной этому аккаунту.
+            # Спрашиваем у провайдера, что ему доступно, и пробуем первое из
+            # списка: человеку незачем угадывать названия моделей.
+            if provider == "Groq" and not _looks_like_bad_key(reason):
+                for candidate in list_groq_models(resolved_key):
+                    if candidate["id"] == model:
+                        continue
+                    if self._connect_provider(provider, candidate["id"], resolved_key):
+                        if api_key:
+                            self.custom_keys[provider] = api_key
+                        self._save_config(provider, candidate["id"], self.custom_keys.get(provider))
+                        return {
+                            "success": True,
+                            "provider": provider,
+                            "model": candidate["id"],
+                            "note": f"Модель «{model}» этому ключу недоступна — включил «{candidate['id']}»",
+                        }
+
             # Откатываемся к прежнему рабочему состоянию, а не остаёмся сломанными
             self.api_provider, self.model, self.client, self.enabled = previous
-            return {"success": False, "error": f"Не удалось подключиться к {provider} (модель «{model}») с этим ключом"}
+            return {"success": False, "error": explain_connect_error(provider, model, reason)}
 
         if api_key:
             self.custom_keys[provider] = api_key
@@ -329,7 +426,10 @@ class IntelligentAnswerer:
             "id": "Groq",
             "note": "Очень быстрые ответы, есть бесплатный тариф",
             "configured": bool(groq_key) and GROQ_AVAILABLE,
-            "models": list_groq_models(groq_key) if (groq_key and GROQ_AVAILABLE) else [],
+            # С ключом — живой список аккаунта, без ключа — запасной: иначе
+            # выбрать модель невозможно, а без модели не применить ключ.
+            "models": (list_groq_models(groq_key) or GROQ_FALLBACK_MODELS)
+            if (groq_key and GROQ_AVAILABLE) else GROQ_FALLBACK_MODELS,
         })
 
         provider_notes = {

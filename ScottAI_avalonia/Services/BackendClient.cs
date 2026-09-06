@@ -270,7 +270,17 @@ public class BackendClient
     {
         var res = await _http.PostAsJsonAsync("/ai/configure", new { provider, model, api_key = apiKey });
         var body = await res.Content.ReadFromJsonAsync<AiConfigureResponse>();
-        return (body?.Success ?? false, body?.Error ?? (body?.Success == true ? $"Активна модель: {body.Provider}/{body.Model}" : $"HTTP {(int)res.StatusCode}"));
+        if (body?.Success == true)
+        {
+            // Подсказку о подмене модели показываем вместо обычного «активна
+            // модель»: человек выбрал одно, включилось другое, и он вправе об
+            // этом узнать сразу.
+            return (true, string.IsNullOrWhiteSpace(body.Note)
+                ? $"Активна модель: {body.Provider}/{body.Model}"
+                : body.Note!);
+        }
+
+        return (false, body?.Error ?? $"HTTP {(int)res.StatusCode}");
     }
 
     // ---------- Версионирование ----------
@@ -495,6 +505,10 @@ public class AiConfigureResponse
     [JsonPropertyName("provider")] public string? Provider { get; set; }
     [JsonPropertyName("model")] public string? Model { get; set; }
     [JsonPropertyName("error")] public string? Error { get; set; }
+
+    /// <summary>Пояснение, когда backend сам подобрал другую модель: выбранная
+    /// оказалась недоступна этому ключу.</summary>
+    [JsonPropertyName("note")] public string? Note { get; set; }
 }
 
 public class VoicesResponse
