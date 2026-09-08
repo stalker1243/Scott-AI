@@ -25,10 +25,25 @@ public partial class ChatViewModel : ViewModelBase
     [ObservableProperty]
     private bool _showHistory;
 
-    /// <summary>Тихий режим (по умолчанию включён, как autoSpeak=false в Tauri-версии) — Scott выполняет
-    /// действие молча, без озвучивания ответа через локальные колонки backend.</summary>
+    /// <summary>
+    /// Зачитывать ли вслух ответы, полученные в переписке (по умолчанию — нет,
+    /// как autoSpeak=false в Tauri-версии).
+    ///
+    /// Не путать с общим молчанием: то отключает голос Scott везде, включая
+    /// ответы на голосовые команды, и живёт в настройках звука.
+    /// </summary>
     [ObservableProperty]
     private bool _quietMode = true;
+
+    /// <summary>
+    /// Включено ли общее молчание.
+    ///
+    /// Пока оно включено, выбор в чате ничего не решает: голос отбрасывается
+    /// в проигрывателе, что бы чат ни просил. Кнопка должна об этом сказать, а
+    /// не обещать озвучку, которой не будет.
+    /// </summary>
+    [ObservableProperty]
+    private bool _globallyMuted;
 
     [ObservableProperty]
     private string? _attachedImageName;

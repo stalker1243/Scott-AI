@@ -333,8 +333,25 @@ public class BackendLauncher
             });
 
             if (probe is null) return false;
+
+            // Вычитать обязательно, и до ожидания. Потоки перенаправлены, а
+            // труба вмещает четыре килобайта: наполнив её, процесс встанет на
+            // записи и не завершится вовсе — проба вернула бы «Python не
+            // найден» для стоящего на месте интерпретатора.
+            var output = probe.StandardOutput.ReadToEndAsync();
+            var errors = probe.StandardError.ReadToEndAsync();
+
             probe.WaitForExit(4000);
-            return probe.HasExited && probe.ExitCode == 0;
+            if (!probe.HasExited)
+            {
+                // Не завершился за четыре секунды — этот кандидат нам не
+                // подходит, но и висеть он оставаться не должен.
+                try { probe.Kill(entireProcessTree: true); } catch { }
+                return false;
+            }
+
+            Task.WaitAll(new Task[] { output, errors }, 1000);
+            return probe.ExitCode == 0;
         }
         catch
         {

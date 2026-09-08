@@ -82,7 +82,9 @@
                         <TextBlock Text="История" />
                     </StackPanel>
                 </Button>
-                <Button Classes="soft" Classes.tabactive="{Binding QuietMode}" Command="{Binding ToggleQuietModeCommand}">
+                <Button Classes="soft" Classes.tabactive="{Binding QuietMode}" Command="{Binding ToggleQuietModeCommand}"
+                        IsEnabled="{Binding !GloballyMuted}"
+                        ToolTip.Tip="{Binding GloballyMuted, Converter={x:Static conv:ChatVoiceTipConverter.Instance}}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <mi:MaterialIcon Kind="{Binding QuietMode, Converter={x:Static conv:ChatVoiceIconConverter.Instance}}" Width="16" Height="16" />
                         <TextBlock Text="{Binding QuietMode, Converter={x:Static conv:ChatVoiceLabelConverter.Instance}}" />

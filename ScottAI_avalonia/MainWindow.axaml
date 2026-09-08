@@ -591,6 +591,13 @@
             <Setter Property="Padding" Value="12,9" />
             <Setter Property="CaretBrush" Value="{DynamicResource TextPrimary}" />
             <Setter Property="SelectionBrush" Value="{DynamicResource Accent}" />
+            <!-- Рамка разгорается плавно: резкая смена цвета на наведении
+                 читается как мигание, особенно когда курсор проходит мимо. -->
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.18" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="TextBox:focus /template/ Border#PART_BorderElement">
             <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
@@ -606,6 +613,12 @@
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="8" />
             <Setter Property="Padding" Value="12,9" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.18" />
+                    <BrushTransition Property="Background" Duration="0:0:0.18" />
+                </Transitions>
+            </Setter>
         </Style>
         <Style Selector="ComboBox /template/ Border#Background">
             <Setter Property="Background" Value="{DynamicResource BgElevated}" />
@@ -768,26 +781,12 @@
             <Setter Property="RenderTransform" Value="scale(1.25)" />
         </Style>
 
-        <!-- ==================== Поля и списки ==================== -->
+        <!-- ==================== Флажки и переключатели ==================== -->
 
-        <!-- Рамка разгорается плавно. Резкая смена цвета на наведении читается
-             как мигание, особенно когда курсор проходит мимо. -->
-        <Style Selector="ComboBox">
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="BorderBrush" Duration="0:0:0.18" />
-                    <BrushTransition Property="Background" Duration="0:0:0.18" />
-                </Transitions>
-            </Setter>
-        </Style>
-
-        <Style Selector="TextBox">
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="BorderBrush" Duration="0:0:0.18" />
-                </Transitions>
-            </Setter>
-        </Style>
+        <!-- Переходы для полей и списков стоят выше, вместе с остальным их
+             описанием: повторный Setter одного свойства в Avalonia заменяет
+             первый, а не дополняет, и разнесённые блоки рано или поздно
+             отменяют друг друга. Так уже случилось с кнопками сайдбара. -->
 
         <!-- Флажки и переключатели: то же короткое движение, что и у кнопок.
              Без него они выглядят чужими среди остального интерфейса. -->

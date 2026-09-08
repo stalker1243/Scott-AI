@@ -106,6 +106,7 @@ public partial class MainWindowViewModel : ViewModelBase
             // соответствие кнопку, не отправляя то же самое второй раз.
             _quietLoading = true;
             QuietMode = SettingsPage.QuietMode;
+            Chat.GloballyMuted = SettingsPage.QuietMode;
             _quietLoading = false;
         };
         _currentPage = Home;
@@ -222,6 +223,11 @@ public partial class MainWindowViewModel : ViewModelBase
         // Настройки открыты на той же странице, что и переключатель в шапке, —
         // и они не должны показывать противоположное.
         SettingsPage.QuietMode = value;
+
+        // У чата свой выбор — зачитывать ли ответы в переписке. Пока Scott
+        // молчит совсем, этот выбор ничего не решает, и кнопка должна об этом
+        // сказать, а не обещать озвучку, которой не будет.
+        Chat.GloballyMuted = value;
     }
 
     /// <summary>
@@ -241,6 +247,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _quietLoading = true;
             QuietMode = state.Settings.Quiet;
             SettingsPage.QuietMode = state.Settings.Quiet;
+            Chat.GloballyMuted = state.Settings.Quiet;
         }
         catch
         {
