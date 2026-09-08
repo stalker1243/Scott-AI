@@ -131,7 +131,7 @@
 
             <ScrollViewer Grid.Column="1" Name="Scroller">
                 <StackPanel>
-                    <ItemsControl ItemsSource="{Binding Messages}">
+                    <ItemsControl Name="MessagesList" ItemsSource="{Binding Messages}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="models:ChatMessage">
                                 <Border Margin="0,4" Padding="14,10" CornerRadius="12"

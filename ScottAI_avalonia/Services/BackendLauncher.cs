@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -97,7 +98,12 @@ public class BackendLauncher
 
         // Вывод обязательно вычитывается, иначе буфер канала переполнится и
         // backend встанет намертво где-то в середине запуска.
+        // Оба потока, а не только вывод. stderr тоже перенаправлен, и труба
+        // вмещает всего четыре килобайта: одна трассировка — и backend
+        // блокируется на записи, вставая целиком. Снаружи это выглядит как
+        // «Scott перестал отвечать», без единой подсказки о причине.
         _ = Task.Run(() => DrainOutput(_process));
+        _ = Task.Run(() => DrainErrors(_process));
 
         Status = "запускаю Scott…";
         return await WaitUntilReadyAsync(client);
@@ -169,6 +175,47 @@ public class BackendLauncher
         {
             // Процесс закрылся — читать больше нечего.
         }
+    }
+
+    /// <summary>
+    /// Вычитать поток ошибок backend и запомнить последние строки.
+    ///
+    /// Читать обязательно, даже если бы они были не нужны: непрочитанная труба
+    /// заполняется и вешает backend на записи. А строки нужны — это
+    /// единственное место, где видно, на чём он споткнулся. Когда версия 1.0.5
+    /// не запускалась вовсе, понять причину было решительно нечем.
+    /// </summary>
+    private static void DrainErrors(Process process)
+    {
+        try
+        {
+            while (!process.StandardError.EndOfStream)
+            {
+                var line = process.StandardError.ReadLine();
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                lock (_errorLock)
+                {
+                    _recentErrors.Enqueue(line);
+                    // Держим только хвост: полный вывод занял бы память, а
+                    // интересны всегда последние строки перед остановкой.
+                    while (_recentErrors.Count > 40) _recentErrors.Dequeue();
+                }
+            }
+        }
+        catch
+        {
+            // Процесс закрылся — читать больше нечего.
+        }
+    }
+
+    private static readonly Queue<string> _recentErrors = new();
+    private static readonly object _errorLock = new();
+
+    /// <summary>Последние строки ошибок backend — для журнала и вкладки «Логи».</summary>
+    public static string[] RecentErrors()
+    {
+        lock (_errorLock) return _recentErrors.ToArray();
     }
 
     /// <summary>

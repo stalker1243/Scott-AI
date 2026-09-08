@@ -19,4 +19,19 @@ public static class ItemsStagger
             }
         };
     }
+
+    /// <summary>
+    /// То же, но без нарастающей задержки: каждый элемент появляется сразу.
+    ///
+    /// Для списков, куда элементы добавляются по ходу дела, — прежде всего для
+    /// чата. Лесенка хороша при открытии страницы, но новую реплику она
+    /// заставила бы ждать тем дольше, чем длиннее разговор.
+    /// </summary>
+    public static void AttachInstant(ItemsControl items)
+    {
+        items.ContainerPrepared += (_, e) =>
+        {
+            if (e.Container is Control control) _ = UiAnimations.RevealNow(control);
+        };
+    }
 }
