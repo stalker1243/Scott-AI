@@ -35,6 +35,9 @@ jobs:
           # не важна — важно, что код запускается.
           pip install --index-url https://download.pytorch.org/whl/cpu torch
           pip install -r requirements.txt
+          # Сам pytest лежит отдельно от рабочих зависимостей: людям,
+          # которые просто пользуются Scott, он не нужен.
+          pip install -r requirements-test.txt
 
       - name: Тесты
         working-directory: backend

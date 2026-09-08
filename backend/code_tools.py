@@ -220,6 +220,15 @@ def _tool_env(tool: str) -> Dict[str, str]:
     будто сборка провалилась без причины.
     """
     env = dict(os.environ)
+
+    # Вывод дочерней программы мы читаем как UTF-8, а Python на русской Windows
+    # пишет в пайп в кодировке консоли (cp1251). Из-за этого «привет из питона»
+    # возвращался человеку как «?????? ?? ??????» — код отработал верно, а
+    # показать результат было нечем. Просим дочерний Python писать в UTF-8;
+    # прочим программам эти переменные безразличны.
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+
     location = shutil.which(tool)
     if location:
         folder = str(Path(location).parent)
