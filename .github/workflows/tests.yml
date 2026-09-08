@@ -1,0 +1,68 @@
+name: Проверки
+
+# Гоняем на каждое изменение в main и на каждый запрос на слияние. До этого
+# тесты запускались только вручную на машине разработчика: поломка, внесённая
+# в одной сессии, могла дожить до выпуска и уехать к людям — так уже случалось
+# с переименованием, после которого программа перестала запускаться.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Тесты backend
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Зависимости
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          # Сборка torch для процессора: на сервере видеокарты нет, а версия с
+          # CUDA весит четыре гигабайта против двухсот мегабайт. Скорость здесь
+          # не важна — важно, что код запускается.
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -r requirements.txt
+
+      - name: Тесты
+        working-directory: backend
+        env:
+          PYTHONIOENCODING: utf-8
+          # Прогрев занимает видеокарту и минуты времени, а на сервере
+          # бессмыслен: моделей там всё равно нет.
+          WARMUP_MODELS: "0"
+        run: python -m pytest -m "not integration" -q
+
+  launcher:
+    name: Сборка лаунчера
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Сборка под Windows
+        working-directory: ScottAI_avalonia
+        run: dotnet build -c Release --nologo
+
+      - name: Сборка под Linux
+        working-directory: ScottAI_avalonia
+        # Кросс-компиляция проверяется отдельно: Linux-выпуск собирается
+        # отсюда же, и ломается она незаметно — на Windows ничего не меняется.
+        run: dotnet publish -c Release -r linux-x64 --self-contained true -o ../artifacts-linux --nologo
