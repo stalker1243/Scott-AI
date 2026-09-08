@@ -312,14 +312,21 @@ def _warmup_whisper_sync() -> None:
     )
 
 
-async def _watch_parent() -> None:
+def _watch_parent() -> None:
     """
     Завершиться, если тот, кто нас запустил, исчез.
 
     Лаунчер гасит backend при выходе, но только когда закрывается штатно.
     Стоит завершить его через диспетчер задач — и backend остаётся сиротой:
     держит порт 8000 и занимает видеокарту, а пользователь считает, что вышел
-    из программы. Проверено на живом запуске, так и происходило.
+    из программы.
+
+    Работает в отдельном потоке, и это не мелочь. Раньше сторож был задачей в
+    цикле событий — и не срабатывал ни разу. Вывод backend уходит в трубу,
+    которую вычитывает лаунчер; не стало лаунчера — некому вычитывать, труба
+    заполняется за пару десятков сообщений, и очередной `print` блокируется
+    навсегда. Вместе с ним встаёт весь цикл, а вместе с циклом — и сторож.
+    Поток же продолжает считать секунды, что бы ни случилось с остальными.
 
     PID родителя приходит в переменной окружения: при обычном запуске из
     терминала её нет, и слежка не включается — иначе backend завершался бы,
@@ -338,12 +345,18 @@ async def _watch_parent() -> None:
         return
 
     while True:
-        await asyncio.sleep(5)
+        time.sleep(5)
         if not psutil.pid_exists(parent_pid):
-            print("👋 Лаунчер закрылся — останавливаюсь, чтобы не висеть без дела")
-            # Мягкая остановка невозможна: uvicorn держит цикл, а сигналы на
-            # Windows приходят не туда. Завершаем процесс явно.
+            # Ничего не печатаем: писать в ту самую трубу, из-за которой всё и
+            # встало, значит не завершиться вовсе. Мягкая остановка тоже
+            # невозможна — uvicorn держит цикл, а сигналы на Windows приходят
+            # не туда.
             os._exit(0)
+
+
+def _start_parent_watch() -> None:
+    """Запустить сторожа отдельным потоком — демоном, чтобы не мешал выходу."""
+    threading.Thread(target=_watch_parent, name="parent-watch", daemon=True).start()
 
 
 async def _warmup_models() -> None:
@@ -406,7 +419,7 @@ async def lifespan(app: FastAPI):
     _set_main_loop(asyncio.get_running_loop())
 
     warmup_task = asyncio.create_task(_warmup_models()) if WARMUP_MODELS else None
-    asyncio.create_task(_watch_parent())
+    _start_parent_watch()
 
     yield  # Приложение работает здесь
 
@@ -536,6 +549,16 @@ try:
     app.include_router(listen_router)
 except ImportError as e:
     print(f"⚠️ Endpoints прослушивания не подключены: {e}")
+
+# Звук: микрофон, динамики, громкость и тихий режим.
+try:
+    try:
+        from .audio_endpoints import router as audio_router
+    except ImportError:
+        from audio_endpoints import router as audio_router
+    app.include_router(audio_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints звука не подключены: {e}")
 
 # Напоминания и отложенные дела.
 try:
@@ -1907,8 +1930,14 @@ async def ask_question(request: Dict):
 
 
 @app.post("/speak")
-async def speak_text(text: str = Form("")):
-    """Озвучить текст голосом Scott"""
+async def speak_text(text: str = Form(""), force: bool = Form(False)):
+    """
+    Озвучить текст голосом Scott.
+
+    `force` нужен единственному месту — прослушиванию голоса в настройках:
+    человек нажал «Прослушать» и ждёт звука прямо сейчас, даже если включён
+    тихий режим. Молчание в ответ на нажатие он примет за поломку.
+    """
     text = text.strip()
     
     if not text:
@@ -1922,7 +1951,7 @@ async def speak_text(text: str = Form("")):
             # "offline" каждый раз, когда Scott что-то озвучивал. Тот же приём, что уже
             # применён для Whisper в /speech_to_text и для psutil в /metrics.
             with timing_stage("02.синтез_речи.speak"):
-                await asyncio.to_thread(scott_voice.speak, text)
+                await asyncio.to_thread(scott_voice.speak, text, None, force)
             print(f"🔊 Озвучено: {text[:50]}...")
             return {"success": True, "message": "✅ Текст озвучен"}
         else:

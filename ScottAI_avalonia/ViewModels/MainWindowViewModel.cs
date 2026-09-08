@@ -59,6 +59,20 @@ public partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     private bool _dialogDanger = true;
 
+    /// <summary>
+    /// Молчит ли Scott. Переключатель стоит в шапке, а не только в настройках:
+    /// просьба замолчать возникает внезапно — начался звонок, проснулся
+    /// человек рядом, — и искать её в разделах некогда.
+    /// </summary>
+    [ObservableProperty]
+    private bool _quietMode;
+
+    /// <summary>
+    /// Пока состояние читается с backend, обратно его слать не нужно: иначе
+    /// чтение выглядело бы как нажатие переключателя.
+    /// </summary>
+    private bool _quietLoading;
+
     public ObservableCollection<ToastMessage> Toasts { get; } = new();
 
     public HomeViewModel Home { get; }
@@ -79,6 +93,21 @@ public partial class MainWindowViewModel : ViewModelBase
         AutomationPage = new AutomationViewModel(_client);
         AnalyticsPage = new AnalyticsViewModel(_client);
         SettingsPage = new SettingsViewModel(_client);
+
+        // Тихий режим переключается из двух мест — кнопкой в шапке и на
+        // странице настроек. Связь нужна в обе стороны, иначе переключатель и
+        // кнопка показывают разное, и человек не понимает, чему верить.
+        SettingsPage.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(SettingsViewModel.QuietMode)) return;
+            if (QuietMode == SettingsPage.QuietMode) return;
+
+            // Настройки уже сообщили backend сами — здесь только приводим в
+            // соответствие кнопку, не отправляя то же самое второй раз.
+            _quietLoading = true;
+            QuietMode = SettingsPage.QuietMode;
+            _quietLoading = false;
+        };
         _currentPage = Home;
 
         ThemeService.StyleApplied += style => IsClassicStyle = style == AppStyle.Classic;
@@ -140,6 +169,7 @@ public partial class MainWindowViewModel : ViewModelBase
         if (success)
         {
             BackendReady.Signal();
+            _ = LoadQuietModeAsync();
         }
 
         // Обновления проверяются последними и молча: если backend не поднялся
@@ -178,6 +208,49 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [RelayCommand]
     private void DismissToast(ToastMessage toast) => Toasts.Remove(toast);
+
+    /// <summary>Замолчать или заговорить снова — одним нажатием из шапки.</summary>
+    [RelayCommand]
+    private void ToggleQuiet() => QuietMode = !QuietMode;
+
+    partial void OnQuietModeChanged(bool value)
+    {
+        if (_quietLoading) return;
+
+        _ = _client.SetQuietAsync(value);
+
+        // Настройки открыты на той же странице, что и переключатель в шапке, —
+        // и они не должны показывать противоположное.
+        SettingsPage.QuietMode = value;
+    }
+
+    /// <summary>
+    /// Узнать у backend, включён ли тихий режим.
+    ///
+    /// Настройка переживает перезапуск, поэтому окно обязано открыться в том
+    /// же состоянии, в каком его закрыли: иначе человек, выключивший звук
+    /// вечером, утром получит говорящего Scott.
+    /// </summary>
+    private async Task LoadQuietModeAsync()
+    {
+        try
+        {
+            var state = await _client.GetAudioAsync();
+            if (state is null) return;
+
+            _quietLoading = true;
+            QuietMode = state.Settings.Quiet;
+            SettingsPage.QuietMode = state.Settings.Quiet;
+        }
+        catch
+        {
+            // Не отвечает backend — оставляем переключатель как есть.
+        }
+        finally
+        {
+            _quietLoading = false;
+        }
+    }
 
     [RelayCommand]
     private void NavigateHome()

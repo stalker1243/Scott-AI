@@ -16,6 +16,7 @@ GET /api/version/installers
 GET /api/version/requirements
 GET /api/version/status
 GET /api/version/update-check
+GET /audio/settings
 GET /code/instructions
 GET /code/tools
 GET /context/current
@@ -67,6 +68,8 @@ POST /ai/toggle
 POST /analytics/export
 POST /api/version/update-settings
 POST /ask
+POST /audio/quiet
+POST /audio/settings
 POST /chat
 POST /code/build
 POST /code/run

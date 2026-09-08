@@ -70,6 +70,45 @@ public class BackendClient
         return (body?.Voices ?? new List<VoiceOption>(), body?.Current ?? "");
     }
 
+    /// <summary>Настройки звука вместе со списком микрофонов и динамиков.</summary>
+    public async Task<AudioSettingsResponse?> GetAudioAsync()
+    {
+        return await _http.GetFromJsonAsync<AudioSettingsResponse>("/audio/settings");
+    }
+
+    /// <summary>
+    /// Изменить настройки звука. Присылается только то, что поменялось.
+    ///
+    /// Backend сам перезапустит прослушивание, если сменили микрофон: поток к
+    /// устройству уже открыт, и на лету его не переключить.
+    /// </summary>
+    public async Task<AudioSettingsResponse?> SetAudioAsync(object changes)
+    {
+        var res = await _http.PostAsJsonAsync("/audio/settings", changes);
+        return await res.Content.ReadFromJsonAsync<AudioSettingsResponse>();
+    }
+
+    /// <summary>
+    /// Включить или выключить тихий режим.
+    ///
+    /// Отдельно от общих настроек: это кнопка «помолчи», её дёргают чаще
+    /// всего, и она обрывает фразу, которую Scott начал говорить.
+    /// </summary>
+    public async Task<bool> SetQuietAsync(bool quiet)
+    {
+        try
+        {
+            var res = await _http.PostAsJsonAsync("/audio/quiet", new { quiet });
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            // Тихий режим — не то, ради чего стоит показывать ошибку поверх
+            // всего: переключатель просто вернётся в прежнее положение.
+            return false;
+        }
+    }
+
     /// <summary>Переключить голос Scott — действует сразу, без перезапуска backend.</summary>
     public async Task<(bool Success, string Message)> SelectVoiceAsync(string voiceId)
     {
@@ -83,11 +122,17 @@ public class BackendClient
     /// колонки той же машины (edge-tts/pyttsx3 внутри ScottVoice), поэтому здесь не
     /// нужен отдельный аудио-плеер или получение байтов обратно.
     /// </summary>
-    public async Task SpeakAsync(string text)
+    public async Task SpeakAsync(string text, bool force = false)
     {
         try
         {
-            using var content = new FormUrlEncodedContent(new Dictionary<string, string> { ["text"] = text });
+            using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["text"] = text,
+                // Прослушивание голоса в настройках звучит и в тихом режиме:
+                // человек нажал кнопку и ждёт звука именно сейчас.
+                ["force"] = force ? "true" : "false",
+            });
             await _http.PostAsync("/speak", content);
         }
         catch

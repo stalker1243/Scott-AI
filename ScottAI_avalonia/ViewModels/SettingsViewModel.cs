@@ -155,6 +155,7 @@ public partial class SettingsViewModel : ViewModelBase
         _ = LoadVersions();
         _ = LoadVoices();
         _ = LoadDeviceSettings();
+        _ = LoadAudioSettings();
 
         // То же, что и на других страницах: при запуске backend ещё не готов,
         // и списки провайдеров, голосов и устройств приходили пустыми.
@@ -164,6 +165,7 @@ public partial class SettingsViewModel : ViewModelBase
             _ = LoadVersions();
             _ = LoadVoices();
             _ = LoadDeviceSettings();
+            _ = LoadAudioSettings();
         });
     }
 
@@ -499,7 +501,9 @@ public partial class SettingsViewModel : ViewModelBase
         {
             // Сначала переключаем голос, иначе backend озвучит предыдущим.
             await _client.SelectVoiceAsync(SelectedVoice.Id);
-            await _client.SpeakAsync("Скотт на связи. Все системы работают в штатном режиме.");
+            // force: прослушивание звучит и в тихом режиме — человек нажал
+            // кнопку и ждёт голос именно сейчас.
+            await _client.SpeakAsync("Скотт на связи. Все системы работают в штатном режиме.", force: true);
         }
         catch (System.Exception ex)
         {
@@ -530,5 +534,167 @@ public partial class SettingsViewModel : ViewModelBase
         {
             VersionsLoading = false;
         }
+    }
+
+    // ==================== Звук: устройства, громкость, тихий режим ====================
+
+    /// <summary>Микрофоны в системе. Первым элементом всегда «как в системе».</summary>
+    public ObservableCollection<AudioDevice> InputDevices { get; } = new();
+
+    /// <summary>Динамики и наушники в системе.</summary>
+    public ObservableCollection<AudioDevice> OutputDevices { get; } = new();
+
+    [ObservableProperty]
+    private AudioDevice? _selectedInputDevice;
+
+    [ObservableProperty]
+    private AudioDevice? _selectedOutputDevice;
+
+    [ObservableProperty]
+    private double _speechVolume = 100;
+
+    [ObservableProperty]
+    private bool _quietMode;
+
+    /// <summary>Есть ли на машине звуковая подсистема вообще.</summary>
+    [ObservableProperty]
+    private bool _audioAvailable = true;
+
+    [ObservableProperty]
+    private string? _audioStatus;
+
+    /// <summary>
+    /// Пока идёт загрузка, изменения полей не отправляются обратно.
+    ///
+    /// Без этого заполнение списков само выглядело бы как выбор пользователя, и
+    /// Scott сохранял бы то, чего никто не выбирал.
+    /// </summary>
+    private bool _audioLoading;
+
+    /// <summary>
+    /// Отложенная запись громкости.
+    ///
+    /// Ползунок шлёт событие на каждый пиксель движения, а каждое сохранение —
+    /// это запись файла на диск. Ждём, пока человек остановится.
+    /// </summary>
+    private System.Threading.CancellationTokenSource? _volumeDelay;
+
+    private async Task LoadAudioSettings()
+    {
+        _audioLoading = true;
+        try
+        {
+            var state = await _client.GetAudioAsync();
+            if (state is null)
+            {
+                AudioStatus = "backend не отвечает — настройки звука недоступны";
+                return;
+            }
+
+            AudioAvailable = state.Available;
+            AudioStatus = state.Available
+                ? null
+                : "Звуковая подсистема недоступна: Scott не сможет ни говорить, ни слышать.";
+
+            FillDevices(InputDevices, state.Devices.Input);
+            FillDevices(OutputDevices, state.Devices.Output);
+
+            SelectedInputDevice = FindDevice(InputDevices, state.Settings.InputDevice);
+            SelectedOutputDevice = FindDevice(OutputDevices, state.Settings.OutputDevice);
+            SpeechVolume = state.Settings.Volume;
+            QuietMode = state.Settings.Quiet;
+        }
+        catch (System.Exception ex)
+        {
+            AudioStatus = $"Не удалось прочитать настройки звука: {ex.Message}";
+        }
+        finally
+        {
+            _audioLoading = false;
+        }
+    }
+
+    /// <summary>Заполнить список, поставив первым выбор «как в системе».</summary>
+    private static void FillDevices(ObservableCollection<AudioDevice> target, System.Collections.Generic.List<AudioDevice> found)
+    {
+        target.Clear();
+        target.Add(new AudioDevice { Name = "" });
+        foreach (var device in found) target.Add(device);
+    }
+
+    /// <summary>
+    /// Найти сохранённое устройство по имени.
+    ///
+    /// Если его больше нет — наушники отключили, — возвращаемся к системному, а
+    /// не оставляем список без выбора: пустая строка выглядела бы поломкой.
+    /// </summary>
+    private static AudioDevice? FindDevice(ObservableCollection<AudioDevice> devices, string name)
+    {
+        return devices.FirstOrDefault(d => d.Name == name) ?? devices.FirstOrDefault();
+    }
+
+    partial void OnSelectedInputDeviceChanged(AudioDevice? value)
+    {
+        if (_audioLoading || value is null) return;
+        _ = PushAudio(new { input_device = value.Name });
+    }
+
+    partial void OnSelectedOutputDeviceChanged(AudioDevice? value)
+    {
+        if (_audioLoading || value is null) return;
+        _ = PushAudio(new { output_device = value.Name });
+    }
+
+    partial void OnSpeechVolumeChanged(double value)
+    {
+        if (_audioLoading) return;
+        _ = PushVolumeSoon((int)System.Math.Round(value));
+    }
+
+    partial void OnQuietModeChanged(bool value)
+    {
+        if (_audioLoading) return;
+        _ = _client.SetQuietAsync(value);
+    }
+
+    private async Task PushVolumeSoon(int volume)
+    {
+        _volumeDelay?.Cancel();
+        var delay = new System.Threading.CancellationTokenSource();
+        _volumeDelay = delay;
+
+        try
+        {
+            await Task.Delay(400, delay.Token);
+        }
+        catch (System.OperationCanceledException)
+        {
+            // Ползунок поехал дальше — сохранит следующее событие.
+            return;
+        }
+
+        await PushAudio(new { volume });
+    }
+
+    private async Task PushAudio(object changes)
+    {
+        try
+        {
+            var state = await _client.SetAudioAsync(changes);
+            AudioStatus = state?.Success == true ? null : "Не удалось сохранить настройку звука";
+        }
+        catch (System.Exception ex)
+        {
+            AudioStatus = $"Не удалось сохранить: {ex.Message}";
+        }
+    }
+
+    /// <summary>Кнопка «Прослушать» рядом с громкостью — чтобы подобрать её на слух.</summary>
+    [RelayCommand]
+    private async Task TestVolume()
+    {
+        // force: иначе в тихом режиме кнопка молчала бы, и человек решил бы,
+        // что сломана именно она.
+        await _client.SpeakAsync("Так меня будет слышно.", force: true);
     }
 }

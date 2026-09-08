@@ -31,6 +31,42 @@ except ImportError:  # pragma: no cover - зависит от окружения
     PLAYBACK_AVAILABLE = False
 
 
+def _audio_settings():
+    """
+    Настройки звука, если модуль доступен.
+
+    Ввозится внутри функций, а не сверху файла: проигрыватель должен работать и
+    там, где настроек нет вовсе, — например, в тестах, которые проверяют саму
+    очередь и ничего не знают про хранилище.
+    """
+    try:
+        try:
+            from . import audio_settings
+        except ImportError:
+            import audio_settings
+        return audio_settings
+    except Exception:
+        return None
+
+
+def _muted() -> bool:
+    """Просил ли человек молчать."""
+    settings = _audio_settings()
+    return bool(settings.is_quiet()) if settings else False
+
+
+def _volume() -> float:
+    """Множитель громкости: 1.0 — как синтезировано."""
+    settings = _audio_settings()
+    return settings.get_volume() if settings else 1.0
+
+
+def _output_device():
+    """Номер устройства вывода или None — тогда играем в системное."""
+    settings = _audio_settings()
+    return settings.get_output_device() if settings else None
+
+
 class SpeechPlayer:
     """Очередь воспроизведения: одна фраза за раз, с возможностью оборвать."""
 
@@ -47,9 +83,18 @@ class SpeechPlayer:
 
     # ------------------------------------------------------------------
 
-    def play(self, path: str) -> None:
-        """Поставить файл в очередь. Возвращается сразу, не дожидаясь звука."""
+    def play(self, path: str, force: bool = False) -> None:
+        """
+        Поставить файл в очередь. Возвращается сразу, не дожидаясь звука.
+
+        `force` пропускает тихий режим — им пользуется только прослушивание
+        голоса в настройках: человек нажал кнопку «Прослушать» и ждёт звука
+        именно сейчас, что бы ни стояло в общих настройках.
+        """
         if not PLAYBACK_AVAILABLE or not path:
+            return
+
+        if _muted() and not force:
             return
 
         with self._lock:
@@ -58,7 +103,7 @@ class SpeechPlayer:
 
         self._queue.put((path, generation, None))
 
-    def play_and_wait(self, path: str, timeout: float = 120.0) -> None:
+    def play_and_wait(self, path: str, timeout: float = 120.0, force: bool = False) -> None:
         """
         Поставить в очередь и дождаться, пока фраза отзвучит.
 
@@ -67,6 +112,12 @@ class SpeechPlayer:
         и примет свой ответ за команду.
         """
         if not PLAYBACK_AVAILABLE or not path:
+            return
+
+        # В тихом режиме возвращаемся сразу. Ждать нечего, и это важно: на
+        # ожидании речи слушатель держит микрофон приостановленным, и молчание
+        # с ожиданием обернулось бы глухотой на пустом месте.
+        if _muted() and not force:
             return
 
         done = threading.Event()
@@ -157,8 +208,15 @@ class SpeechPlayer:
             info = np.iinfo(data.dtype)
             data = data.astype(np.float32) / max(abs(info.min), info.max)
 
+        # Громкость — простое умножение волны. Синтезатор отдаёт готовый звук
+        # и своей регулировки не имеет, а системный микшер к нему не применить:
+        # там громкость общая на всё приложение, включая звуки самой ОС.
+        volume = _volume()
+        if volume < 0.999:
+            data = data * volume
+
         self._playing = True
-        sd.play(data, rate)
+        sd.play(data, rate, device=_output_device())
         sd.wait()
 
 

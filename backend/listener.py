@@ -144,13 +144,21 @@ class VoiceListener:
         if not HAS_SOUNDDEVICE:
             return {"success": False, "message": "Библиотека sounddevice не установлена — записывать звук нечем"}
 
+        # Микрофон берётся из настроек при каждом запуске, а не запоминается
+        # раз и навсегда: гарнитуру втыкают и вынимают, и номер устройства в
+        # системе от этого меняется. В настройках хранится имя, а номер по нему
+        # ищется здесь и сейчас.
+        device = self.config.device
+        if device is None:
+            device = _preferred_input_device()
+
         try:
             self._stream = sd.InputStream(
                 samplerate=SAMPLE_RATE,
                 channels=1,
                 dtype="float32",
                 blocksize=BLOCK_SIZE,
-                device=self.config.device,
+                device=device,
                 callback=self._on_audio,
             )
             self._stream.start()
@@ -424,6 +432,22 @@ class VoiceListener:
         except Exception as e:
             self.stats.last_error = f"Команда не выполнена: {e}"
             print(f"⚠️ {self.stats.last_error}")
+
+
+def _preferred_input_device() -> Optional[int]:
+    """
+    Микрофон, выбранный человеком в настройках, — или None, если выбран
+    системный. Настроек может не быть вовсе (например, в тестах), и это не
+    повод не слушать.
+    """
+    try:
+        try:
+            from . import audio_settings
+        except ImportError:
+            import audio_settings
+        return audio_settings.get_input_device()
+    except Exception:
+        return None
 
 
 def list_input_devices() -> List[dict]:

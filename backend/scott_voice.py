@@ -190,21 +190,33 @@ class ScottVoice:
             except Exception as e:
                 print(f"❌ Ошибка в TTS worker thread: {e}")
     
-    def speak(self, text: str, save_file: str = None) -> str:
+    def speak(self, text: str, save_file: str = None, force: bool = False) -> str:
         """
         Говорит текст голосом Scott
-        
+
         Args:
             text: Текст для озвучивания
             save_file: Путь для сохранения аудио (опционально)
-            
+            force: говорить даже в тихом режиме — только для прослушивания
+                голоса в настройках
+
         Returns:
             Путь к аудио файлу
         """
         try:
+            # В тихом режиме не синтезируем вовсе. Проигрыватель отбросил бы
+            # готовый файл и сам, но синтез занимает секунды работы видеокарты
+            # ради звука, который никто не услышит.
+            try:
+                from audio_settings import is_quiet
+            except ImportError:
+                from .audio_settings import is_quiet
+            if is_quiet() and not force:
+                return None
+
             audio_file = self.speak_to_file(text)
             if audio_file:
-                self.play_audio(audio_file)
+                self.play_audio(audio_file, force=force)
             return audio_file
         except Exception as e:
             print(f"❌ Ошибка синтеза речи: {e}")
@@ -392,12 +404,15 @@ class ScottVoice:
             traceback.print_exc()
             return None
     
-    def play_audio(self, audio_file: str):
+    def play_audio(self, audio_file: str, force: bool = False):
         """
         Воспроизвести аудио файл
-        
+
         Args:
             audio_file: Путь к аудио файлу
+            force: играть даже в тихом режиме. Нужно единственному месту —
+                кнопке «Прослушать» в настройках голоса: там человек просит
+                звук прямо сейчас и ждёт его.
         """
         try:
             if audio_file.endswith('.mp3'):
@@ -418,7 +433,17 @@ class ScottVoice:
                 from .speech_player import get_player, PLAYBACK_AVAILABLE
 
             if PLAYBACK_AVAILABLE:
-                get_player().play_and_wait(audio_file)
+                get_player().play_and_wait(audio_file, force=force)
+                return
+
+            # Тихий режим соблюдается и на запасном пути: иначе на машине
+            # без sounddevice просьба помолчать просто не работала бы, а
+            # понять почему человек бы не смог.
+            try:
+                from audio_settings import is_quiet
+            except ImportError:
+                from .audio_settings import is_quiet
+            if is_quiet() and not force:
                 return
 
             # Запасной путь для машин без sounddevice: как раньше, через

@@ -27,7 +27,7 @@
             </StackPanel>
 
             <!-- Оформление -->
-            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=look}">
+            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=look}" Name="LookSection">
                 <StackPanel Spacing="10">
                     <TextBlock Text="Стиль" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
                     <StackPanel Orientation="Horizontal" Spacing="10">
@@ -107,9 +107,9 @@
             </StackPanel>
 
             <!-- Голос -->
-            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=voice}">
+            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=voice}" Name="VoiceSection">
                 <StackPanel Spacing="10">
-                    <TextBlock Text="Устройство для речи" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="Где распознавать речь" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
                     <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
                                Text="На видеокарте Scott распознаёт фразу примерно за секунду, на процессоре — за четыре с половиной. Автоматика берёт видеокарту, когда она доступна; переключайте вручную, если видеокарта занята или барахлит драйвер." />
                     <StackPanel Orientation="Horizontal" Spacing="10">
@@ -139,6 +139,81 @@
                     </TextBlock>
                     <TextBlock Text="{Binding DeviceStatus}" FontSize="12" Foreground="{DynamicResource TextMuted}"
                                IsVisible="{Binding DeviceStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+                </StackPanel>
+
+                <!-- Звук: куда говорить, откуда слушать, как громко и молчать ли.
+                     Всё это раньше решала система, а замолчать Scott не умел
+                     вовсе — единственным способом было выключить backend. -->
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Тихий режим" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <Border Classes="card quiet" Background="{DynamicResource BgSurface}"
+                            BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                            CornerRadius="12" Padding="16,12">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+                            <!-- Фон задаётся стилем, а не здесь: локальное
+                                 значение в Avalonia сильнее любого правила, и
+                                 из-за него кружок не краснел при включении. -->
+                            <Border Grid.Column="0" Width="38" Height="38" CornerRadius="19"
+                                    VerticalAlignment="Center" Classes="quieticon"
+                                    Classes.on="{Binding QuietMode}">
+                                <mi:MaterialIcon Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                 Kind="{Binding QuietMode, Converter={x:Static myconv:QuietIconConverter.Instance}}"
+                                                 Foreground="{DynamicResource TextSecondary}" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock Text="Scott молчит" Foreground="{DynamicResource TextPrimary}" FontWeight="SemiBold" />
+                                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                                           Text="Слышит, понимает и выполняет команды — но не произносит ответы вслух. Пригодится ночью, на созвоне и когда рядом кто-то работает." />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="2" IsChecked="{Binding QuietMode}" VerticalAlignment="Center"
+                                          OnContent="" OffContent="" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Spacing="10" IsEnabled="{Binding !QuietMode}" Classes="fades">
+                    <TextBlock Text="Громкость голоса" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
+                        <mi:MaterialIcon Grid.Column="0" Kind="VolumeLow" Width="16" Height="16"
+                                         VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}" />
+                        <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding SpeechVolume}" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="{Binding SpeechVolume, StringFormat={}{0:0}%}" Width="44"
+                                   HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimary}" />
+                        <Button Grid.Column="3" Classes="soft" Command="{Binding TestVolumeCommand}" ToolTip.Tip="Проверить на слух">
+                            <mi:MaterialIcon Kind="Play" Width="16" Height="16" />
+                        </Button>
+                    </Grid>
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               Text="Это громкость самого голоса Scott, отдельно от системной. Выше ста процентов не бывает: звук от этого не станет громче, а начнёт хрипеть." />
+                </StackPanel>
+
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Куда говорить" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <ComboBox ItemsSource="{Binding OutputDevices}" SelectedItem="{Binding SelectedOutputDevice}"
+                              HorizontalAlignment="Stretch" IsEnabled="{Binding AudioAvailable}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="models:AudioDevice">
+                                <TextBlock Text="{Binding Display}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <TextBlock Text="Какой микрофон слушать" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,6,0,0" />
+                    <ComboBox ItemsSource="{Binding InputDevices}" SelectedItem="{Binding SelectedInputDevice}"
+                              HorizontalAlignment="Stretch" IsEnabled="{Binding AudioAvailable}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="models:AudioDevice">
+                                <TextBlock Text="{Binding Display}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               Text="Устройства запоминаются по названию, а не по номеру: воткнутая флешка со звуком или включённый телевизор меняют нумерацию в системе, и Scott заговорил бы не туда. Если выбранное устройство исчезло — он вернётся к системному, а не замолчит." />
+
+                    <Border Background="{DynamicResource Danger}" Opacity="0.15" CornerRadius="8" Padding="10,6"
+                            IsVisible="{Binding AudioStatus, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                        <TextBlock Text="{Binding AudioStatus}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
+                    </Border>
                 </StackPanel>
 
                 <StackPanel Spacing="10">
@@ -176,7 +251,7 @@
             </StackPanel>
 
             <!-- Модель ИИ -->
-            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=ai}">
+            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=ai}" Name="AiSection">
                 <StackPanel Spacing="10">
                     <Grid ColumnDefinitions="*,Auto">
                         <TextBlock Grid.Column="0" Text="Модель ИИ" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" />
@@ -240,7 +315,7 @@
             </StackPanel>
 
             <!-- Прочее -->
-            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=other}">
+            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=other}" Name="OtherSection">
                 <StackPanel Spacing="10">
                     <TextBlock Text="Начать заново" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
                     <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
