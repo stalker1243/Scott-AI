@@ -409,7 +409,21 @@ class ScottVoice:
                     sound.export(wav_file, format="wav")
                 audio_file = wav_file
             
-            # Воспроизвести через PowerShell
+            # Через общую очередь, а не напрямую: два ответа, попавшие сюда
+            # одновременно, раньше звучали разом — на слух получался набор
+            # слов, выпаленных сразу все. Очередь пропускает по одной фразе.
+            try:
+                from speech_player import get_player, PLAYBACK_AVAILABLE
+            except ImportError:
+                from .speech_player import get_player, PLAYBACK_AVAILABLE
+
+            if PLAYBACK_AVAILABLE:
+                get_player().play_and_wait(audio_file)
+                return
+
+            # Запасной путь для машин без sounddevice: как раньше, через
+            # PowerShell. Наложение здесь возможно, но лучше так, чем немой
+            # ассистент.
             ps_command = f'(New-Object Media.SoundPlayer "{audio_file}").PlaySync()'
             subprocess.run(["powershell", "-c", ps_command], check=False)
             

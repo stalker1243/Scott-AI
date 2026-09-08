@@ -1,7 +1,7 @@
 {
   "app_name": "Scott AI",
-  "version": "1.0.7",
-  "build_number": 8,
-  "release_date": "2026-09-06",
-  "notes": "Ключ Groq, своя модель, Enter в чате, вкладки настроек."
+  "version": "1.1.0",
+  "build_number": 9,
+  "release_date": "2026-09-08",
+  "notes": "Речь по очереди, ключ переживает перезапуск, закрытие программ, живая речь, читаемость Glass."
 }

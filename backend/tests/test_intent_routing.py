@@ -201,3 +201,28 @@ def test_questions_stay_questions(intent_engine, phrase):
     """
     intent = intent_engine.detect(phrase)
     assert not intent.is_command, f"«{phrase}» ошибочно принята за команду ({intent.intent_type})"
+
+# ==================== Живая речь вокруг команды ====================
+
+@pytest.mark.parametrize("phrase,expected", [
+    ("открой мне пожалуйста дискорд", "дискорд"),
+    ("слушай открой блокнот", "блокнот"),
+    ("можешь открыть телеграм", "телеграм"),
+    ("давай открой хром", "хром"),
+    ("короче открой ка блокнот", "блокнот"),
+])
+def test_polite_words_stripped(phrase, expected):
+    """
+    Вежливость и обращения не должны попадать в название программы.
+
+    Живая жалоба: человеку приходилось говорить неестественно сухо, иначе
+    «открой мне пожалуйста дискорд» уходило искать программу с названием
+    «мне дискорд» — и ничего не находило.
+    """
+    try:
+        from command_parser import CommandParser
+    except ImportError:
+        from backend.command_parser import CommandParser
+
+    parsed = CommandParser().parse(phrase)
+    assert parsed.main_param == expected, f"«{phrase}» -> {parsed.main_param!r}"

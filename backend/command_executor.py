@@ -226,26 +226,32 @@ class CommandExecutor:
         return f"❌ {result['error']}"
     
     def close_app(self, name: str) -> str:
-        """Закрыть приложение по названию"""
+        """
+        Закрыть приложение по названию.
+
+        Раньше имя процесса угадывалось из фразы почти как есть: «закрой
+        дискорд» превращалось в попытку убить `дискорд.exe`. А результат никто
+        не проверял — Scott отвечал «закрыл» в любом случае, даже когда
+        закрывать было нечего.
+
+        Теперь ищем среди РЕАЛЬНО запущенных программ — по имени файла, по
+        транслитерации и по заголовку окна, — и отвечаем по факту.
+        """
+        print(f"🛑 Закрываю приложение: {name}")
+
         try:
-            name_lower = name.lower().strip()
-            
-            # Получаем имя процесса
-            if name_lower in self.APP_MAP:
-                process_name = self.APP_MAP[name_lower].replace('.exe', '')
-            else:
-                process_name = name.split('.')[0]
-            
-            print(f"🛑 Закрываю приложение: {name}")
-            
-            if platform.system() == "Windows":
-                subprocess.run(f"taskkill /IM {process_name}.exe /F", shell=True)
-            else:
-                subprocess.run(["killall", process_name])
-            
-            return f"✅ Закрыл приложение: {name}"
-        except Exception as e:
-            return f"❌ Не смог закрыть {name}: {str(e)}"
+            from process_finder import close_running
+        except ImportError:
+            from .process_finder import close_running
+
+        result = close_running(name)
+
+        if result["success"]:
+            print(f"✅ {result['message']}")
+            return f"✅ {result['message']}"
+
+        print(f"❌ {result['message']}")
+        return f"❌ {result['message']}"
     
     # ============= ФАЙЛЫ =============
     

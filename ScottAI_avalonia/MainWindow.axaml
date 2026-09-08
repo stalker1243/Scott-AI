@@ -421,6 +421,45 @@
             </Style.Animations>
         </Style>
 
+        <!-- Микроанимации: интерфейс должен отзываться на прикосновение, а не
+             перещёлкиваться. Длительности намеренно короткие — 120–180 мс:
+             дольше начинает казаться, что программа думает. -->
+        <!-- Кнопки в сайдбаре: плавная подсветка вместо резкой смены цвета. -->
+        <Style Selector="Button.nav">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.18" />
+                </Transitions>
+            </Setter>
+        </Style>
+
+        <!-- Мягкие кнопки: лёгкий отклик на наведение и нажатие. -->
+        <Style Selector="Button.soft">
+            <Setter Property="RenderTransform" Value="scale(1.0)" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" />
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.soft:pointerover">
+            <Setter Property="RenderTransform" Value="scale(1.02)" />
+        </Style>
+        <Style Selector="Button.soft:pressed">
+            <Setter Property="RenderTransform" Value="scale(0.97)" />
+        </Style>
+
+        <!-- Вкладки: подчёркивание переезжает плавно. -->
+        <Style Selector="Button.tab">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.18" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.18" />
+                </Transitions>
+            </Setter>
+        </Style>
+
         <Style Selector="Button.accent">
             <Setter Property="Background" Value="{DynamicResource Accent}" />
             <Setter Property="Foreground" Value="White" />

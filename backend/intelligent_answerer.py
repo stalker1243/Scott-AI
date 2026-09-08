@@ -213,6 +213,10 @@ class IntelligentAnswerer:
         # Ключи, явно введённые пользователем через Настройки (в приоритете над .env)
         self.custom_keys: Dict[str, str] = {}
 
+        # Сохранённая настройка, которую пока не удалось применить: к ней
+        # возвращаемся при первом обращении, а не забываем до перезапуска.
+        self.pending_config: Optional[Dict] = None
+
         connected = False
         saved = self._load_saved_config()
         if saved and saved.get("provider") and saved.get("model"):
@@ -223,7 +227,14 @@ class IntelligentAnswerer:
             if connected:
                 print(f"✅ Восстановлена сохранённая конфигурация ИИ: {saved['provider']} / {saved['model']}")
             else:
-                print(f"⚠️ Не удалось восстановить сохранённую конфигурацию ИИ ({saved['provider']}), пробую .env по умолчанию")
+                # Не выбрасываем настройку из головы: backend стартует вместе с
+                # загрузкой моделей, часто сразу после включения компьютера,
+                # когда сеть ещё не поднялась. Одна неудачная попытка не повод
+                # заставлять человека вводить ключ заново — попробуем ещё раз
+                # при первом же вопросе.
+                self.pending_config = saved
+                print(f"⚠️ Пока не удалось подключиться к {saved['provider']} — "
+                      "повторю при первом обращении")
 
         # Приоритет по умолчанию (если нет сохранённой конфигурации или она не сработала):
         # Groq → DeepSeek → OpenAI
@@ -453,6 +464,28 @@ class IntelligentAnswerer:
 
         return providers
 
+    def retry_pending_connection(self) -> bool:
+        """
+        Ещё раз применить настройку, которая не сработала при старте.
+
+        Вызывается перед ответом: к этому времени сеть обычно уже поднялась.
+        Возвращает True, если подключиться удалось.
+        """
+        if self.enabled or not self.pending_config:
+            return False
+
+        saved = self.pending_config
+        key = self.custom_keys.get(saved["provider"]) or self.env_keys.get(saved["provider"])
+        if not key:
+            return False
+
+        if self._connect_provider(saved["provider"], saved["model"], key):
+            print(f"✅ Подключение к {saved['provider']} восстановлено со второй попытки")
+            self.pending_config = None
+            return True
+
+        return False
+
     def answer(self, text: str, use_memory: bool = True) -> Tuple[str, bool]:
         """
         Получить ответ от ИИ (Groq или OpenAI)
@@ -464,6 +497,10 @@ class IntelligentAnswerer:
         Returns:
             (ответ, успех)
         """
+        # Настройка могла не примениться при старте — сеть тогда ещё не
+        # поднялась. Пробуем снова, прежде чем сказать «ИИ недоступен».
+        self.retry_pending_connection()
+
         if not self.enabled or not self.client:
             return "❌ ИИ-ассистент недоступен. Используйте fallback ответы", False
         

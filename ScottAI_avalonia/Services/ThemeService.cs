@@ -71,10 +71,14 @@ public static class ThemeService
         ["BgTopbar"] = Color.Parse("#0A1020"),
         ["BgSurface"] = Color.Parse("#141D30"),
         ["BgElevated"] = Color.Parse("#1D2A45"),
+        // Текст в Glass светлее, чем в остальных стилях, и это не прихоть:
+        // фон здесь полупрозрачный, сквозь него виден рабочий стол — часто
+        // светлый. Прежний серый (#94A3B8) на светлых обоях сливался с фоном
+        // до полной нечитаемости.
         ["TextPrimary"] = Color.Parse("#FFFFFF"),
-        ["TextSecondary"] = Color.Parse("#CBD5E1"),
-        ["TextMuted"] = Color.Parse("#94A3B8"),
-        ["BorderColor"] = Color.FromArgb(60, 255, 255, 255),
+        ["TextSecondary"] = Color.Parse("#E8EDF5"),
+        ["TextMuted"] = Color.Parse("#C7D2E0"),
+        ["BorderColor"] = Color.FromArgb(90, 255, 255, 255),
     };
 
     private static readonly Dictionary<string, Color> Terminal = new()
@@ -188,7 +192,12 @@ public static class ThemeService
     {
         var resources = Application.Current!.Resources;
         var windowAlpha = (byte)Math.Round(GlassOpacityPercent / 100.0 * 255);
-        var surfaceAlpha = (byte)Math.Min(255, windowAlpha + 35);
+
+        // Карточки и панели заметно плотнее самого окна. Прозрачность нужна
+        // фону — ради размытия рабочего стола, — а текст должен лежать на
+        // чём-то, иначе читать его приходится на просвет.
+        var surfaceAlpha = (byte)Math.Min(255, windowAlpha + 80);
+        var panelAlpha = (byte)Math.Min(255, windowAlpha + 45);
 
         void SetBg(string key, byte alpha)
         {
@@ -203,8 +212,9 @@ public static class ThemeService
         resources["BgOpaque"] = new SolidColorBrush(Glass["BgWindow"]);
 
         SetBg("BgWindow", windowAlpha);
-        SetBg("BgSidebar", windowAlpha);
-        SetBg("BgTopbar", windowAlpha);
+        // Боковая панель и шапка держат подписи кнопок — им нужна плотность.
+        SetBg("BgSidebar", panelAlpha);
+        SetBg("BgTopbar", panelAlpha);
         SetBg("BgSurface", surfaceAlpha);
         SetBg("BgElevated", surfaceAlpha);
     }

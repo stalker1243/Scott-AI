@@ -383,6 +383,17 @@ class VoiceListener:
                 self.stats.recent.append(text)
                 del self.stats.recent[:-20]
 
+            # Человек заговорил снова — значит прошлый ответ ему больше не
+            # нужен. Обрываем всё, что ещё звучит и ждёт очереди: иначе
+            # ответы копятся, и Scott выпаливает их подряд, один поверх
+            # другого.
+            try:
+                from speech_player import get_player
+            except ImportError:
+                from .speech_player import get_player
+
+            get_player().stop()
+
             self._dispatch(text)
 
     def _dispatch(self, text: str) -> None:

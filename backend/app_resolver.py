@@ -485,6 +485,20 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
             return ResolvedApp(matched_name=best_key, target=startapps[best_key], kind="appid", source="startapps")
         return ResolvedApp(matched_name=best_key, target=shortcuts[best_key], kind="path", source="shortcut")
 
+    # Последняя попытка: искать по отдельным словам.
+    #
+    # В живой речи к названию липнет всё подряд — «открой мне на секунду
+    # дискорд». Стоп-слова снимают привычную вежливость, но всего не
+    # предусмотреть, а название программы почти всегда стоит последним.
+    words = normalized.split()
+    if len(words) > 1:
+        for word in reversed(words):
+            if len(word) < 3:
+                continue
+            found = resolve_app(word)
+            if found:
+                return found
+
     return None
 
 
