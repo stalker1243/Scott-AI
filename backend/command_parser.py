@@ -20,6 +20,16 @@ class ParsedCommand:
         return f"ParsedCommand(type={self.command_type}, param={self.main_param}, conf={self.confidence:.2f})"
 
 
+def _has_word(text: str, word: str) -> bool:
+    """
+    Есть ли слово в тексте целиком, а не куском другого слова.
+
+    Простое вхождение подводит на приставках: «включи» находится внутри
+    «ВЫключи», и просьба выключить музыку превращалась в просьбу её включить.
+    """
+    return re.search(r"(?<![^\W\d_])" + re.escape(word) + r"(?![^\W\d_])", text) is not None
+
+
 class CommandParser:
     """Умный парсер команд с поддержкой естественного языка"""
     
@@ -155,6 +165,23 @@ class CommandParser:
         'короче', 'значит', 'типа', 'вот', 'просто', 'там', 'тут',
     }
     
+    # Глаголы запуска. Держим отдельным списком, а не среди синонимов, потому
+    # что запуск проверяется раньше остальных типов.
+    OPEN_APP_VERBS = [
+        'открой', 'откройте', 'открыть',
+        'запусти', 'запустите', 'запустить',
+        'включи', 'включить',
+        'open', 'launch', 'start', 'run', 'exec',
+    ]
+
+    # Названия, по которым сразу понятно, что речь о программе.
+    KNOWN_APP_NAMES = [
+        'notepad', 'chrome', 'code', 'vscode', 'cmd', 'powershell', 'paint',
+        'word', 'excel', 'telegram', 'discord', 'spotify', 'browser',
+        'блокнот', 'проводник', 'калькулятор', 'браузер', 'хром', 'ворд',
+        'эксель', 'телеграм', 'дискорд', 'спотифай', 'паинт',
+    ]
+
     def __init__(self):
         print("✅ Парсер команд инициализирован")
     
@@ -186,24 +213,25 @@ class CommandParser:
         max_score = 0
         best_command = 'unknown'  # Default; search должен быть явным
         
-        # ПРИОРИТЕТ: проверяем open_app ЭТО ПЕРВЫМ (выше других)
-        # потому что это очень важная команда
-        open_app_keywords = ['открой', 'запусти', 'включи', 'запустите', 'откройте',
-                             'открыть', 'запустить', 'включить',
-                             'open', 'launch', 'start', 'run', 'exec']
-        open_app_score = sum(2 if keyword in text else 0 for keyword in open_app_keywords)
-        if any(word in text for word in [
-            'notepad', 'chrome', 'code', 'vscode', 'cmd', 'powershell', 'paint', 'word', 'excel',
-            'telegram', 'discord', 'spotify', 'browser',
-            'блокнот', 'проводник', 'калькулятор', 'браузер', 'хром', 'ворд', 'эксель',
-            'телеграм', 'дискорд', 'спотифай', 'паинт', 'вс код', 'студио код',
-        ]):
-            open_app_score += 3
-        
+        # Запуск программы проверяется отдельно от прочих типов: слов-глаголов
+        # для него много, и по общей формуле он проигрывал бы там, где должен
+        # выигрывать. Но очки обязаны быть в той же шкале, что у остальных, —
+        # от нуля до единицы. Раньше они были сырыми (за глагол 2, за знакомую
+        # программу +3), и open_app побеждал ВСЕГДА, стоило человеку назвать
+        # программу: «закрой дискорд» разбиралось как запуск дискорда.
+        open_app_score = 0.0
+
+        if any(_has_word(text, keyword) for keyword in self.OPEN_APP_VERBS):
+            open_app_score = 0.9
+
+            # Знакомое название рядом с глаголом снимает последние сомнения.
+            if any(_has_word(text, name) for name in self.KNOWN_APP_NAMES):
+                open_app_score = 1.0
+
         if open_app_score > 0:
             max_score = open_app_score
             best_command = 'open_app'
-        
+
         # Проверяем каждый тип команды
         for command_type, synonyms in self.COMMAND_SYNONYMS.items():
             if command_type == 'open_app':
@@ -226,7 +254,14 @@ class CommandParser:
                 if confidence > max_score:
                     max_score = confidence
                     best_command = command_type
-        
+
+        # Название программы без единого глагола — это всё-таки просьба её
+        # открыть: на «дискорд» человек ждёт запуска, а не вопроса к ИИ. Но
+        # решается это в последнюю очередь, когда ни один тип не подошёл, а не
+        # вперёд всех остальных.
+        if best_command == 'unknown' and any(_has_word(text, name) for name in self.KNOWN_APP_NAMES):
+            return 'open_app', 0.5
+
         return best_command, max_score
     
     def _extract_parameter(self, text: str, command_type: str) -> str:
