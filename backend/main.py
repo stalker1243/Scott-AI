@@ -1361,6 +1361,49 @@ def _listener_transcribe(audio) -> str:
     return (result.get("text") or "").strip()
 
 
+# Через сколько секунд молчания Scott подаёт голос. Меньше — и короткая
+# реплика будет вклиниваться в быстрые ответы; больше — человек успеет решить,
+# что его не услышали.
+THINKING_CUE_AFTER_SECONDS = 2.5
+
+# Варианты нарочно короткие: это не ответ, а знак «слышу, работаю».
+THINKING_CUES = ("Секунду", "Минуту", "Сейчас посмотрю")
+
+_thinking_cue_index = 0
+
+
+async def _say_thinking() -> None:
+    """
+    Сказать «секунду», пока готовится настоящий ответ.
+
+    Ошибки здесь глотаются молча: не смогли подать голос — не беда, главный
+    ответ всё равно прозвучит.
+    """
+    global _thinking_cue_index
+
+    voice = scott_runtime.scott_voice
+    if voice is None:
+        return
+
+    cue = THINKING_CUES[_thinking_cue_index % len(THINKING_CUES)]
+    _thinking_cue_index += 1
+
+    listening = scott_runtime.listener
+    if listening is not None:
+        listening.suspend()
+
+    try:
+        path = await asyncio.to_thread(voice.speak_to_file, cue)
+        if path:
+            await asyncio.to_thread(voice.play_audio, path)
+    except Exception as e:
+        print(f"⚠️ Не удалось произнести «{cue}»: {e}")
+    finally:
+        if listening is not None:
+            await asyncio.sleep(0.3)
+            listening.resume()
+
+
 def _listener_handle(text: str) -> None:
     """
     Выполнить услышанную команду и озвучить ответ.
@@ -1374,7 +1417,16 @@ def _listener_handle(text: str) -> None:
         return
 
     async def run() -> None:
-        result = await scott_ai.process_command(text)
+        # Ответ ИИ иногда идёт долго — замеры показывают до двадцати девяти
+        # секунд в худших случаях. Столько молчать нельзя: человек решит, что
+        # его не услышали, и повторит вопрос, а потом ещё раз.
+        thinking = asyncio.create_task(scott_ai.process_command(text))
+        finished, _ = await asyncio.wait({thinking}, timeout=THINKING_CUE_AFTER_SECONDS)
+
+        if not finished:
+            await _say_thinking()
+
+        result = await thinking
         response = result.get("response", "")
         if not response:
             return

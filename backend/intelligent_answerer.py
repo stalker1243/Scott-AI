@@ -5,6 +5,8 @@
 
 import os
 import json
+import re
+import time
 from datetime import datetime
 from typing import Optional, List, Dict, Tuple
 from pathlib import Path
@@ -55,6 +57,19 @@ GROQ_FALLBACK_MODELS = [
     {"id": "groq/compound-mini", "note": "Быстрая, для простых вопросов"},
     {"id": "qwen/qwen3.8-27b", "note": "Альтернатива, если первые заняты лимитом"},
 ]
+
+# Сколько ждать ответа модели. Дольше ждать бессмысленно: человек, задавший
+# вопрос голосом, к этому времени уже решил, что его не услышали. Замеры до
+# ограничения: среднее 7.3 с, худшие пять процентов — 29 с.
+REQUEST_TIMEOUT_SECONDS = 25
+
+# Сколько раз пробовать. Вторая попытка нужна ради лимита запросов: у
+# бесплатного тарифа Groq он невелик, а отказ по нему — дело секунды.
+MAX_ATTEMPTS = 2
+
+# Пауза перед повтором, если сервис не назвал свою.
+RETRY_PAUSE_SECONDS = 1.5
+
 
 STATIC_PROVIDER_MODELS = {
     "OpenAI": [
@@ -434,6 +449,51 @@ class IntelligentAnswerer:
         self._save_config(provider, model, self.custom_keys.get(provider))
         return {"success": True, "provider": provider, "model": model}
 
+    def _ask_with_retry(self, call, provider: str):
+        """
+        Выполнить запрос к модели, пережив отказ по лимиту.
+
+        Повторяется только то, что имеет смысл повторять: превышение лимита
+        запросов и обрыв связи. Неверный ключ или несуществующая модель со
+        второй попытки не исправятся — по ним отвечаем сразу.
+
+        Паузу между попытками сервис часто называет сам, в заголовке
+        `retry-after`; если нет — берём свою.
+        """
+        last_error = None
+
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                return call()
+            except Exception as e:
+                last_error = e
+                text = str(e).lower()
+
+                retryable = any(marker in text for marker in (
+                    "429", "rate limit", "too many requests",
+                    "timeout", "timed out", "connection",
+                    "502", "503", "504", "overloaded",
+                ))
+
+                if not retryable or attempt == MAX_ATTEMPTS:
+                    raise
+
+                pause = RETRY_PAUSE_SECONDS
+                match = re.search(r"retry[- ]after[\"':\s]+([\d.]+)", text)
+                if match:
+                    try:
+                        # Сервис знает лучше, сколько ждать, но ждать дольше
+                        # таймаута самого запроса бессмысленно.
+                        pause = min(float(match.group(1)), REQUEST_TIMEOUT_SECONDS)
+                    except ValueError:
+                        pass
+
+                print(f"⏳ {provider} занят, повторю через {pause:.1f} с "
+                      f"(попытка {attempt} из {MAX_ATTEMPTS})")
+                time.sleep(pause)
+
+        raise last_error  # pragma: no cover - до сюда не доходит
+
     def get_available_providers(self) -> List[Dict]:
         """Список провайдеров с их моделями и статусом — для выбора в Настройках."""
         providers = []
@@ -540,11 +600,15 @@ class IntelligentAnswerer:
             # Используем Groq если доступен
             elif self.api_provider == "Groq":
                 print(f"⚡ Groq API запрос ({self.model})...")
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens
+                response = self._ask_with_retry(
+                    lambda: self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        timeout=REQUEST_TIMEOUT_SECONDS,
+                    ),
+                    provider="Groq",
                 )
                 answer = response.choices[0].message.content.strip()
                 print(f"✅ Groq ответ получен ({len(answer)} символов)")
@@ -552,14 +616,18 @@ class IntelligentAnswerer:
             # Fallback на OpenAI
             elif self.api_provider == "OpenAI":
                 print(f"🤖 OpenAI API запрос ({self.model})...")
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    top_p=0.95,
-                    presence_penalty=0.0,
-                    frequency_penalty=0.0
+                response = self._ask_with_retry(
+                    lambda: self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        top_p=0.95,
+                        presence_penalty=0.0,
+                        frequency_penalty=0.0,
+                        timeout=REQUEST_TIMEOUT_SECONDS,
+                    ),
+                    provider="OpenAI",
                 )
                 answer = response.choices[0].message.content.strip()
                 print(f"✅ OpenAI ответ получен ({len(answer)} символов)")
