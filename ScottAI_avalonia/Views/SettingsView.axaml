@@ -188,7 +188,7 @@
                 </StackPanel>
 
                 <StackPanel Spacing="10">
-                    <TextBlock Text="Куда говорить" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="Динамики или наушники" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
                     <ComboBox ItemsSource="{Binding OutputDevices}" SelectedItem="{Binding SelectedOutputDevice}"
                               HorizontalAlignment="Stretch" IsEnabled="{Binding AudioAvailable}">
                         <ComboBox.ItemTemplate>
@@ -198,7 +198,7 @@
                         </ComboBox.ItemTemplate>
                     </ComboBox>
 
-                    <TextBlock Text="Какой микрофон слушать" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,6,0,0" />
+                    <TextBlock Text="Микрофон" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" Margin="0,6,0,0" />
                     <ComboBox ItemsSource="{Binding InputDevices}" SelectedItem="{Binding SelectedInputDevice}"
                               HorizontalAlignment="Stretch" IsEnabled="{Binding AudioAvailable}">
                         <ComboBox.ItemTemplate>

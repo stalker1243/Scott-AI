@@ -51,6 +51,26 @@ DEFAULTS: Dict = {
 MAX_VOLUME = 100
 
 
+# Через какую подсистему Windows разговаривать со звуком, по убыванию
+# предпочтения. Порядок не случаен:
+#
+# * DirectSound называет устройства полностью и сам пересчитывает частоту
+#   дискретизации. Последнее важнее, чем кажется: синтез отдаёт 24 или 48 кГц,
+#   а звуковая карта может стоять на 44.1 — WASAPI в общем режиме такое просто
+#   не примет и вернёт ошибку вместо звука.
+# * MME умеет то же самое, но обрезает имена до 31 знака: «Динамики (High
+#   Definition Audio» — так и остаётся, без закрывающей скобки.
+# * WASAPI строже к частоте, зато точнее всех; берём, если первых двух нет.
+#
+# На не-Windows список пуст, и берётся первая попавшаяся подсистема — там она,
+# как правило, одна (ALSA или CoreAudio).
+PREFERRED_HOST_APIS = (
+    "windows directsound",
+    "mme",
+    "windows wasapi",
+)
+
+
 def _load() -> Dict:
     settings = dict(DEFAULTS)
     try:
@@ -131,11 +151,22 @@ def _resolve_device(name: str, want_input: bool) -> Optional[int]:
 
     channels = "max_input_channels" if want_input else "max_output_channels"
     try:
-        for index, info in enumerate(sd.query_devices()):
-            if info.get(channels, 0) <= 0:
-                continue
-            if info.get("name", "") == name:
-                return index
+        devices = list(enumerate(sd.query_devices()))
+        chosen = _pick_host_api(sd.query_hostapis())
+        allowed = set(sd.query_hostapis()[chosen]["devices"]) if chosen is not None else None
+
+        # Сначала ищем в той подсистеме, из которой человеку и показывали
+        # список. Имена в разных подсистемах совпадают дословно, и без этого
+        # звук ушёл бы через ту, которую мы для себя не выбирали, — со своими
+        # правилами насчёт частоты дискретизации.
+        for only_chosen in (True, False):
+            for index, info in devices:
+                if info.get(channels, 0) <= 0:
+                    continue
+                if only_chosen and allowed is not None and index not in allowed:
+                    continue
+                if (info.get("name") or "").strip() == name:
+                    return index
     except Exception as e:
         print(f"⚠️ Не удалось найти устройство «{name}»: {e}")
 
@@ -171,85 +202,121 @@ def set_quiet(quiet: bool) -> Dict:
 
 def list_devices() -> Dict[str, List[Dict]]:
     """
-    Микрофоны и динамики, доступные в системе.
+    Микрофоны и динамики — по одному разу каждый.
 
-    Одно физическое устройство система часто показывает несколько раз — через
-    разные звуковые подсистемы (MME, WASAPI, DirectSound на Windows). Человеку
-    из этого списка выбирать тяжело, поэтому одинаковые имена схлопываются: имя
-    и есть то, чем мы устройство запоминаем.
+    Windows показывает одно и то же устройство через несколько звуковых
+    подсистем: на живой машине двенадцать строк вывода там, где физически три
+    устройства. Имена при этом совпадают целиком, так что отличить повторы по
+    строке невозможно — приходится выбирать одну подсистему и показывать только
+    её. Список получается ровно таким, какой человек видит в настройках Windows.
     """
     result: Dict[str, List[Dict]] = {"input": [], "output": []}
     if not HAS_SOUNDDEVICE:
         return result
 
     try:
-        default_in, default_out = sd.default.device
         devices = list(enumerate(sd.query_devices()))
+        apis = sd.query_hostapis()
+        default_in, default_out = sd.default.device
     except Exception as e:
         print(f"⚠️ Не удалось получить список звуковых устройств: {e}")
         return result
 
-    for kind, channels, default_index in (
-        ("input", "max_input_channels", default_in),
-        ("output", "max_output_channels", default_out),
-    ):
+    chosen = _pick_host_api(apis)
+    if chosen is None:
+        return result
+
+    # Имена устройств по умолчанию берём до отбора: сама система называет
+    # умолчанием устройство из своей подсистемы, а не из выбранной нами.
+    default_names = {
+        "input": _device_name(devices, default_in),
+        "output": _device_name(devices, default_out),
+    }
+
+    for kind, channels in (("input", "max_input_channels"), ("output", "max_output_channels")):
         found = []
-        seen = set()
-        for index, info in devices:
+        for index in apis[chosen]["devices"]:
+            info = dict(devices[index][1]) if index < len(devices) else {}
             if info.get(channels, 0) <= 0:
                 continue
 
-            name = info.get("name", "").strip()
-            if not name or name in seen:
+            name = (info.get("name") or "").strip()
+            if not name:
                 continue
-            seen.add(name)
 
             found.append({
                 "index": index,
                 "name": name,
                 "channels": info.get(channels, 0),
-                "default": index == default_index,
+                "default": _same_device(name, default_names[kind]),
             })
 
-        result[kind] = _drop_truncated(found)
+        result[kind] = _drop_service_entries(found, devices, apis, chosen)
 
     return result
 
 
-def _drop_truncated(devices: List[Dict]) -> List[Dict]:
+def _pick_host_api(apis) -> Optional[int]:
+    """Подсистема, через которую будем работать со звуком."""
+    by_name = {(api["name"] or "").strip().lower(): i for i, api in enumerate(apis)}
+
+    for wanted in PREFERRED_HOST_APIS:
+        if wanted in by_name:
+            return by_name[wanted]
+
+    # Ни одной знакомой: берём первую, где вообще есть устройства. Так работает
+    # Linux и macOS, где подсистема обычно одна.
+    for index, api in enumerate(apis):
+        if api["devices"]:
+            return index
+    return None
+
+
+def _device_name(devices, index) -> str:
+    """Имя устройства по номеру; пусто, если номера нет."""
+    if index is None or index < 0 or index >= len(devices):
+        return ""
+    return (devices[index][1].get("name") or "").strip()
+
+
+def _same_device(name: str, other: str) -> bool:
     """
-    Убрать обрезанные повторы одного и того же устройства.
+    Одно ли это устройство.
 
-    Старая звуковая подсистема Windows (MME) обрезает имя до 31 знака, и рядом
-    с «Динамики (High Definition Audio Device)» в списке стоит «Динамики (High
-    Definition Audio». Для человека это один и тот же пункт дважды, причём
-    выбрать он норовит первый — обрезанный.
-
-    Отбрасываем то, что является началом другого имени. Полное имя
-    предпочтительнее не только на вид: по нему устройство и запоминается, а
-    обрезанное могло бы совпасть не с тем.
+    Сравниваем с запасом: MME обрезает имена до 31 знака, и «Динамики (High
+    Definition Audio» — то же самое, что «Динамики (High Definition Audio
+    Device)». Именно из MME обычно и приходит устройство по умолчанию.
     """
-    kept = []
-    for device in devices:
-        name = device["name"]
+    if not name or not other:
+        return False
+    return name == other or name.startswith(other) or other.startswith(name)
 
-        longer = next(
-            (other for other in devices
-             if other is not device
-             and other["name"] != name
-             and other["name"].startswith(name)),
-            None,
-        )
-        if longer is not None:
-            # Пометку «по умолчанию» нельзя терять вместе с обрезанной строкой:
-            # системным может значиться именно она.
-            if device["default"]:
-                longer["default"] = True
-            continue
 
-        kept.append(device)
+def _drop_service_entries(found: List[Dict], devices, apis, chosen: int) -> List[Dict]:
+    """
+    Убрать служебные записи подсистемы.
 
-    return kept
+    У MME и DirectSound первым в списке стоит не устройство, а перенаправитель:
+    «Переназначение звуковых устройств», «Первичный звуковой драйвер». Означают
+    они «то, что выбрано в системе» — то есть ровно то, что у нас и так стоит
+    первым пунктом, только менее понятными словами.
+
+    Узнаём их не по названию — оно переводится на язык системы и полагаться на
+    него нельзя, — а по тому, что настоящее устройство видно из нескольких
+    подсистем сразу, а перенаправитель существует только в своей.
+    """
+    elsewhere = [
+        (info.get("name") or "").strip()
+        for index, info in devices
+        if index not in apis[chosen]["devices"]
+    ]
+
+    kept = [d for d in found if any(_same_device(d["name"], other) for other in elsewhere)]
+
+    # Если так не осталось ничего — значит подсистема на этой машине
+    # единственная, и сравнивать было не с чем. Лучше показать всё, чем пустой
+    # список: человеку тогда вообще не из чего выбирать.
+    return kept or found
 
 
 def describe() -> Dict:

@@ -212,54 +212,117 @@ def test_preview_ignores_quiet_mode(audio, monkeypatch):
     player.play_and_wait("preview.wav", timeout=5.0, force=True)
     assert played == ["preview.wav"]
 
+
 # ==================== Список устройств ====================
+#
+# Живой список на машине разработчика — двенадцать строк вывода там, где
+# физически три устройства: встроенная звуковая, наушники и монитор по HDMI.
+# Windows показывает каждое через четыре подсистемы (MME, DirectSound, WASAPI,
+# WDM-KS) и добавляет к ним служебные записи вроде «Первичный звуковой
+# драйвер». Имена из разных подсистем совпадают дословно, поэтому отличить
+# повторы по строке нельзя — приходится выбирать одну подсистему целиком.
 
-def test_truncated_duplicates_are_dropped(audio):
+
+def test_directsound_preferred(audio):
     """
-    Одно устройство не должно стоять в списке дважды.
+    Из подсистем выбирается DirectSound.
 
-    Живой список на машине разработчика — двенадцать строк там, где физически
-    пять устройств: Windows показывает каждое через несколько звуковых
-    подсистем, и старейшая (MME) обрезает имя до 31 знака. Человек видит два
-    одинаковых пункта и выбирает, как правило, первый — обрезанный.
+    Не по вкусу: она называет устройства полностью и сама пересчитывает частоту
+    дискретизации. Последнее решает — синтез отдаёт 24 кГц, а карта обычно
+    стоит на 44.1, и WASAPI в общем режиме такое просто не примет.
+    """
+    apis = [
+        {"name": "MME", "devices": [0, 1]},
+        {"name": "Windows DirectSound", "devices": [2, 3]},
+        {"name": "Windows WASAPI", "devices": [4]},
+    ]
+    assert audio._pick_host_api(apis) == 1
+
+
+def test_falls_back_to_what_there_is(audio):
+    """
+    На Linux и macOS знакомых имён нет — берём первую подсистему с устройствами.
+
+    Пустой список означал бы, что выбирать не из чего вовсе, хотя звук есть.
+    """
+    apis = [
+        {"name": "ALSA", "devices": [0, 1]},
+        {"name": "JACK", "devices": []},
+    ]
+    assert audio._pick_host_api(apis) == 0
+
+
+def test_service_entries_dropped(audio):
+    """
+    Перенаправитель подсистемы — не устройство.
+
+    «Первичный звуковой драйвер» означает «то, что выбрано в системе» — ровно
+    то, что и так стоит первым пунктом, только менее понятными словами.
+    Отличаем его не по названию (оно переводится на язык системы), а по тому,
+    что настоящее устройство видно из нескольких подсистем сразу.
     """
     devices = [
-        {"index": 0, "name": "Динамики (High Definition Audio", "channels": 2, "default": False},
-        {"index": 5, "name": "Динамики (High Definition Audio Device)", "channels": 2, "default": False},
-        {"index": 7, "name": "Line Out (Wave Speaker)", "channels": 2, "default": False},
+        (0, {"name": "Динамики (High Definition Audio", "max_output_channels": 2}),
+        (1, {"name": "Первичный звуковой драйвер", "max_output_channels": 2}),
+        (2, {"name": "Динамики (High Definition Audio Device)", "max_output_channels": 2}),
+        (3, {"name": "Динамики (High Definition Audio Device)", "max_output_channels": 2}),
+    ]
+    apis = [
+        {"name": "MME", "devices": [0]},
+        {"name": "Windows DirectSound", "devices": [1, 2]},
+        {"name": "Windows WASAPI", "devices": [3]},
     ]
 
-    kept = [d["name"] for d in audio._drop_truncated(devices)]
-    assert kept == ["Динамики (High Definition Audio Device)", "Line Out (Wave Speaker)"]
-
-
-def test_default_mark_moves_to_full_name(audio):
-    """
-    Пометка «по умолчанию» не теряется вместе с обрезанной строкой.
-
-    Системным Windows называет как раз её — и, отбросив строку молча, мы
-    оставили бы список вовсе без отметки о том, что звучит сейчас.
-    """
-    devices = [
-        {"index": 0, "name": "Динамики (High Definition Audio", "channels": 2, "default": True},
-        {"index": 5, "name": "Динамики (High Definition Audio Device)", "channels": 2, "default": False},
+    found = [
+        {"index": 1, "name": "Первичный звуковой драйвер", "channels": 2, "default": False},
+        {"index": 2, "name": "Динамики (High Definition Audio Device)", "channels": 2, "default": False},
     ]
 
-    kept = audio._drop_truncated(devices)
-    assert len(kept) == 1
-    assert kept[0]["default"] is True
+    kept = [d["name"] for d in audio._drop_service_entries(found, devices, apis, 1)]
+    assert kept == ["Динамики (High Definition Audio Device)"]
 
 
-def test_different_devices_are_kept(audio):
+def test_single_subsystem_keeps_everything(audio):
     """
-    Пара к тестам выше: разные устройства схлопывать нельзя.
+    Пара к тесту выше: если подсистема одна, сравнивать не с чем.
 
-    Правило смотрит на начало строки, и легко было бы потерять настоящее
-    устройство с похожим именем.
+    Правило отбора тогда отбросило бы всё до единого, и человек остался бы без
+    выбора вовсе. Лучше показать лишнее, чем пустой список.
     """
-    devices = [
-        {"index": 0, "name": "Микрофон (Headphones)", "channels": 1, "default": False},
-        {"index": 1, "name": "Микрофон (Webcam)", "channels": 1, "default": False},
-    ]
+    devices = [(0, {"name": "Динамики", "max_output_channels": 2})]
+    apis = [{"name": "ALSA", "devices": [0]}]
+    found = [{"index": 0, "name": "Динамики", "channels": 2, "default": False}]
 
-    assert len(audio._drop_truncated(devices)) == 2
+    assert len(audio._drop_service_entries(found, devices, apis, 0)) == 1
+
+
+@pytest.mark.parametrize("name,other,expected", [
+    ("Динамики (High Definition Audio", "Динамики (High Definition Audio Device)", True),
+    ("Динамики (High Definition Audio Device)", "Динамики (High Definition Audio", True),
+    ("Микрофон (Headphones)", "Микрофон (Webcam)", False),
+    ("Динамики", "", False),
+])
+def test_truncated_names_match(audio, name, other, expected):
+    """
+    Обрезанное имя — то же устройство.
+
+    MME обрезает названия до 31 знака, и устройство по умолчанию система
+    называет как раз оттуда. Без сравнения с запасом пометка «по умолчанию» не
+    нашла бы себе места в списке.
+    """
+    assert audio._same_device(name, other) is expected
+
+
+def test_real_machine_has_no_duplicates(audio):
+    """
+    На настоящей машине список без повторов.
+
+    Проверка на живой звуковой подсистеме, а не на выдуманных данных: именно
+    здесь вылезли и одинаковые имена из разных подсистем, и служебные записи.
+    Там, где звука нет вовсе, проверять нечего.
+    """
+    devices = audio.list_devices()
+
+    for kind in ("input", "output"):
+        names = [d["name"] for d in devices[kind]]
+        assert len(names) == len(set(names)), f"повторы среди {kind}: {names}"
