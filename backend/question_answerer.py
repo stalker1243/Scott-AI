@@ -6,7 +6,7 @@
 import re
 from contextlib import nullcontext
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 import psutil
 import platform
@@ -76,12 +76,42 @@ class QuestionAnswerer:
         'что такое'
     ]
 
+    # Разговор ни о чём, на который есть готовый ответ.
+    #
+    # Шаблон обязан покрыть сообщение целиком — отсюда якорь в конце. Без него
+    # «как дела с моим отчётом» совпадало с «как дела» и получало «У меня всё
+    # отлично!» вместо ответа по существу.
+    #
+    # Обращение в шаблонах не упоминается: текст приходит сюда уже очищенным
+    # от него и от знаков препинания, так что «Скотт, как дела?» совпадает с
+    # первой же строкой.
     CONVERSATIONAL_QUESTION_PATTERNS = [
-        r'^(?:скотт\s+)?как\s+(дела|ты|ты себя|поживаешь|настроение)\b',
-        r'^(?:скотт\s+)?что\s+ты\s+(умеешь|можешь)\b',
-        r'^(?:скотт\s+)?кто\s+ты\b',
-        r'^(?:скотт\s+)?что\s+можешь\b',
+        r'^как\s+(дела|ты|поживаешь|настроение|жизнь|делишки|оно)$',
+        r'^как\s+твои\s+дела$',
+        r'^как\s+ты\s+(себя\s+чувствуешь|поживаешь)$',
+        r'^что\s+ты\s+(умеешь|можешь)$',
+        r'^что\s+можешь$',
+        r'^кто\s+ты$',
+        r'^кто\s+ты\s+такой$',
     ]
+
+    # Обращения и присловья, которые не считаются содержанием сообщения.
+    # «Привет, Скотт» — всё ещё просто приветствие, а не вопрос про Скотта.
+    ADDRESS_WORDS = {
+        'скотт', 'скот', 'scott', 'бот', 'ассистент', 'помощник',
+        'дружище', 'друг', 'слушай', 'слушайте', 'эй', 'ну', 'а',
+        'дорогой', 'уважаемый', 'мой',
+    }
+
+    # «Как дела» и родня — тоже разговор ни о чём, на который есть готовый
+    # ответ. Но только целиком: «как дела с отчётом» — уже вопрос.
+    SMALL_TALK = (
+        ('как', 'дела'),
+        ('как', 'ты'),
+        ('как', 'твои', 'дела'),
+        ('как', 'делишки'),
+        ('как', 'жизнь'),
+    )
 
     GREETING_RESPONSES = {
         'привет': 'Привет! Я Scott. Как дела? Чем я могу помочь?',
@@ -212,7 +242,7 @@ class QuestionAnswerer:
             return True
 
         # Проверяем разговорные вопросы вроде "как дела", "скотт как дела"
-        if any(re.search(pattern, text_lower) for pattern in self.CONVERSATIONAL_QUESTION_PATTERNS):
+        if self._is_small_talk(text_lower):
             print(f"   ✓ is_question: conversational phrase → True")
             return True
         
@@ -313,7 +343,7 @@ class QuestionAnswerer:
             except Exception as e:
                 print(f"⚠️ Ошибка при загрузке extended_responses: {e}")
 
-            if any(re.search(pattern, text_lower) for pattern in self.CONVERSATIONAL_QUESTION_PATTERNS):
+            if self._is_small_talk(text_lower):
                 base = 'У меня всё отлично! А у тебя?' if 'дела' in text_lower or 'как ты' in text_lower else 'Я готов помочь и ответить на твои вопросы.'
                 return base if verbosity == 'normal' else (base if verbosity == 'long' else base.split('.')[0] + '.')
             
@@ -551,26 +581,72 @@ class QuestionAnswerer:
         return any(phrase in text for phrase in self.INFO_PHRASES)
 
     def _get_greeting_response(self, text: str) -> Optional[str]:
-        """Вернуть дружелюбный ответ для приветствий и простого общения"""
-        normalized = text.strip().lower()
-        # Убрать пунктуацию для более гибкого совпадения
-        normalized_no_punct = re.sub(r'[!?.,:;]+$', '', normalized)
-        
-        for greeting, response in self.GREETING_RESPONSES.items():
-            # Проверка точного совпадения (с удалением пунктуации в конце)
-            if normalized_no_punct == greeting:
-                return response
-            # Проверка совпадения в начале (например "привет, Scott")
-            if (normalized.startswith(greeting + ' ') or 
-                normalized.startswith(greeting + ',') or
-                normalized_no_punct.startswith(greeting + ' ') or
-                normalized_no_punct.startswith(greeting + ',')):
-                return response
-        
-        if normalized.startswith('как дела') or normalized.startswith('как ты'):
+        """
+        Заготовленный ответ на приветствие — или None, если за приветствием
+        идёт настоящий вопрос.
+
+        Раньше сравнение шло по началу строки, и «Привет, Скотт! у тебя
+        появилась новая версия…» получало в ответ «Привет! Я Scott. Чем я могу
+        помочь?» — а всё написанное после первого слова пропадало. Люди почти
+        всегда здороваются прежде, чем спросить, так что правило срабатывало
+        не на исключениях, а на обычном разговоре.
+        """
+        words = self._words_without_addresses(text)
+        if not words:
+            return None
+
+        greeting, rest = self._split_greeting(words)
+
+        if greeting is not None:
+            # Одно приветствие и ничего больше — отвечаем заготовкой.
+            if not rest:
+                return self.GREETING_RESPONSES[greeting]
+            # Есть что сказать по существу: приветствие не наш случай, пусть
+            # вопросом займётся тот, кто умеет отвечать.
+            return None
+
+        if tuple(words) in self.SMALL_TALK:
             return 'У меня всё отлично! А у тебя?'
+
         return None
-    
+
+    def _is_small_talk(self, text: str) -> bool:
+        """
+        Разговор ни о чём — и ничего кроме него.
+
+        Проверяем по очищенному тексту: без обращений и знаков препинания
+        «Скотт, как дела?» и «как дела» — одно и то же.
+        """
+        cleaned = ' '.join(self._words_without_addresses(text))
+        if not cleaned:
+            return False
+        return any(re.match(pattern, cleaned) for pattern in self.CONVERSATIONAL_QUESTION_PATTERNS)
+
+    def _words_without_addresses(self, text: str) -> List[str]:
+        """
+        Слова сообщения без знаков препинания и без обращений.
+
+        Обращение выбрасывается, потому что оно ничего не сообщает: «привет
+        скотт» — то же самое приветствие, что и «привет».
+        """
+        cleaned = re.sub(r'[^\w\s]+', ' ', text.strip().lower(), flags=re.UNICODE)
+        return [w for w in cleaned.split() if w and w not in self.ADDRESS_WORDS]
+
+    def _split_greeting(self, words: List[str]):
+        """
+        Отделить приветствие от остального.
+
+        Возвращает пару: само приветствие (или None, если его нет) и слова,
+        оставшиеся после него. Приветствия бывают из двух слов — «добрый
+        день», — поэтому длинные проверяются первыми: иначе «добрый» осталось
+        бы висеть в остатке и сошло бы за содержание.
+        """
+        for greeting in sorted(self.GREETING_RESPONSES, key=lambda g: -len(g.split())):
+            parts = greeting.split()
+            if words[:len(parts)] == parts:
+                return greeting, words[len(parts):]
+        return None, words
+
     def _is_russian(self, text: str) -> bool:
         """Проверить русский язык"""
         return any('\u0400' <= char <= '\u04FF' for char in text)
