@@ -65,10 +65,30 @@ class FastIntentEngine:
         'open', 'launch', 'start', 'run', 'exec'
     ]
 
+    # Объект обязателен: что именно создать.
+    #
+    # Раньше здесь стояли голые «создай» и «создать», а объект добирался из
+    # остатка фразы — всё, где не встретилось слово «файл», считалось папкой.
+    # «Создай программу занятий для новичка» заводило на диске каталог с таким
+    # именем и рапортовало об успехе, хотя человек просил написать текст.
     CREATE_FILE_PHRASES = [
-        'создай файл', 'создай папку', 'создай директорию', 'создай', 'создать',
-        'make file', 'create file', 'create folder', 'mkdir'
+        'создай файл', 'создать файл', 'создай новый файл',
+        'создай папку', 'создать папку', 'создай новую папку',
+        'создай директорию', 'создать директорию',
+        'сделай папку', 'сделай файл',
+        'make file', 'create file', 'make folder', 'create folder',
+        'create directory', 'mkdir',
     ]
+
+    # Имя с расширением называет объект само: «создай отчёт.txt» — файл, и
+    # уточнять это словом «файл» человек не станет.
+    CREATE_NAMED_FILE = re.compile(
+        r'\b(?:создай|создать|сделай)\b[^.]*\b[\w-]+\.[a-zа-я0-9]{1,5}\b',
+        re.IGNORECASE | re.UNICODE,
+    )
+
+    # Слова, по которым просьба опознаётся как папка, а не файл.
+    FOLDER_WORDS = ('папк', 'директор', 'каталог', 'folder', 'directory', 'mkdir')
 
     # ВАЖНО про эти списки: они матчатся простым вхождением подстроки и проверяются
     # ДО того, как текст будет признан вопросом. Раньше здесь стояли голые
@@ -258,9 +278,12 @@ class FastIntentEngine:
 
         if self._matches_any(lower, self.OPEN_APP_PHRASES):
             return self._build_intent('open_app', lower)
-        if self._matches_any(lower, self.CREATE_FILE_PHRASES):
-            subtype = 'create_file' if 'файл' in lower or 'file' in lower else 'create_folder'
-            return self._build_intent(subtype, lower)
+        if self._matches_any(lower, self.CREATE_FILE_PHRASES) or self.CREATE_NAMED_FILE.search(lower):
+            # Папка — только когда о ней сказано прямо. По умолчанию файл: имя с
+            # расширением встречается чаще, а пустая папка вместо файла — потеря
+            # более обидная, чем наоборот.
+            is_folder = any(word in lower for word in self.FOLDER_WORDS)
+            return self._build_intent('create_folder' if is_folder else 'create_file', lower)
         if self._matches_any(lower, self.WEATHER_PHRASES):
             return self._build_intent('get_weather', lower)
         if self._matches_any(lower, self.NEWS_PHRASES):

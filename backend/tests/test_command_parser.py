@@ -133,3 +133,38 @@ def test_other_types_not_swallowed(parser, phrase, expected):
     ошибку общей, а не частной для закрытия программ.
     """
     assert parser.parse(phrase).command_type == expected
+
+
+# ==================== Создать — но что именно ====================
+
+@pytest.mark.parametrize("phrase,expected", [
+    ("создай папку отчёты", "create_folder"),
+    ("создай новую папку проекты", "create_folder"),
+    ("создать директорию архив", "create_folder"),
+    ("создай файл заметки", "create_file"),
+    ("создай новый файл дневник", "create_file"),
+])
+def test_create_needs_an_object(parser, phrase, expected):
+    """Сказано прямо, что создать, — создаём."""
+    assert parser.parse(phrase).command_type == expected
+
+
+@pytest.mark.parametrize("phrase", [
+    "создай программу занятий для новичка",
+    "создай список покупок",
+    "создай мне план тренировок",
+    "напиши письмо начальнику",
+])
+def test_create_without_object_is_not_a_file(parser, phrase):
+    """
+    Просьба что-то сочинить — не команда файловой системе.
+
+    Долг, висевший с давних пор: в списке стояли голые «создай», «создать» и
+    «напиши», а объект добирался из остатка фразы. «Создай программу занятий
+    для новичка» заводило пустой файл с таким именем и рапортовало об успехе —
+    вместо самой программы занятий. Худшее здесь не ошибка, а бодрое
+    «Всё сделано» поверх неё.
+    """
+    parsed = parser.parse(phrase)
+    assert parsed.command_type not in ("create_file", "create_folder"), \
+        f"«{phrase}» -> {parsed.command_type}"
