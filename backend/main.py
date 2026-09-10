@@ -65,6 +65,7 @@ load_dotenv()
 from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException, Form, Request, Depends
 from security import require_scott_token, check_rate_limit
 from timing import stage as timing_stage, snapshot as timing_snapshot, reset as timing_reset
+import understanding
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -612,34 +613,6 @@ voice_trigger = None
 TTS_WORKERS = 2
 tts_executor = ThreadPoolExecutor(max_workers=TTS_WORKERS)
 
-# Служебные слова, вырезаемые из фразы при извлечении поискового запроса для
-# веб-интеграций (см. ScottAI._extract_web_query) — то, что осталось после
-# вырезания, и есть то, что реально нужно искать.
-YOUTUBE_FILLER_WORDS = {
-    'скотт', 'scott', 'ютуб', 'ютубе', 'ютубу', 'youtube', 'найди', 'найти',
-    'включи', 'включить', 'открой', 'открыть', 'запусти', 'запустить',
-    'поищи', 'искать', 'поиск', 'видео', 'ролик', 'про', 'на', 'в', 'из', 'и',
-}
-# Слова, которыми человек уточняет «просто открой сайт»: после их вырезания
-# запрос оказывается пустым, и Scott открывает главную вместо поиска. В логе
-# была фраза «открой youtube в главное меню» — Scott искал на YouTube «главное
-# меню».
-SITE_WORDS = {
-    'главную', 'главная', 'главное', 'меню', 'сайт', 'сайты', 'страницу',
-    'страница', 'приложение', 'просто', 'мне', 'пожалуйста',
-    # Глаголы перехода. Лежат здесь, а не в списке каждого сервиса: «зайди на
-    # ютуб» означало поиск по слову «зайди», потому что у GitHub этот глагол
-    # был, а у YouTube забыли. Общее место — общая судьба.
-    'зайди', 'зайти', 'перейди', 'перейти', 'зайдём', 'давай', 'покажи',
-}
-
-GITHUB_FILLER_WORDS = {
-    'скотт', 'scott', 'гитхаб', 'гитхабе', 'github', 'зайди', 'зайти',
-    'открой', 'открыть', 'найди', 'найти', 'выбери', 'выбрать', 'поищи',
-    'поиск', 'репозиторий', 'репозиторию', 'репо', 'этот', 'эту', 'это',
-    'на', 'в', 'и',
-}
-
 
 class ScottAI:
     """Главный AI мозг Scott"""
@@ -752,18 +725,17 @@ class ScottAI:
 
     async def _process_command_impl(self, text: str, quiet_mode: bool = False, user_name: str = "User") -> Dict:
         """
-        Главный метод обработки команд
-        Парсит, выполняет и возвращает результат
+        Понять фразу и сделать то, о чём просили.
 
-        Приоритет обработки:
-        1. Память (быстрые ответы)
-        2. Вопросы (встроенная база + ИИ если включен)
-        3. Команды (парсинг и выполнение)
+        Решение о смысле принимает `understanding.understand()` — одно место
+        вместо трёх спорящих движков и полудюжины заплаток, мирившей их между
+        собой. Здесь остаётся исполнение: спросили — сделали.
         """
         print(f"\n👤 Пользователь ({user_name}): {text}")
 
         try:
-            # 1. Проверяем память (если есть прямой ответ)
+            # Память идёт первой: если на эту фразу уже отвечали, разбирать её
+            # заново незачем.
             with timing_stage("память.поиск"):
                 memory_result = knowledge_base.search_memory(text)
             if memory_result:
@@ -779,259 +751,58 @@ class ScottAI:
                         "quiet_mode": quiet_mode
                     }
 
-            lower_text = text.lower().strip()
-            with timing_stage("intent.быстрый"):
-                intent = fast_intent_engine.detect(text)
-            print(f"🔎 Быстрый intent: {intent}")
-
-            # Веб-интеграции (YouTube/GitHub) — проверяем ДО общей логики
-            # вопрос/команда: упоминание конкретного сервиса однозначно
-            # указывает на намерение, и не нужно рисковать тем, что
-            # is_question()/command_parser (уже не раз ловили баги на
-            # пересечении их словарей синонимов) неверно всё переклассифицируют.
-            if any(w in lower_text for w in ('ютуб', 'youtube')):
-                query = self._extract_web_query(text, YOUTUBE_FILLER_WORDS | SITE_WORDS)
-                with timing_stage("веб.youtube"):
-                    # Искать нечего — значит человек просил открыть сам сайт.
-                    if not query:
-                        result = web_integrations.open_service_home("youtube")
-                    else:
-                        result = web_integrations.search_youtube_video(query)
-                print(f"🎬 YouTube: {result['message']}")
-                return {"type": "youtube_search", "response": result["message"], "quiet_mode": quiet_mode}
-
-            if any(w in lower_text for w in ('гитхаб', 'github')):
-                query = self._extract_web_query(text, GITHUB_FILLER_WORDS | SITE_WORDS)
-                with timing_stage("веб.github"):
-                    if not query:
-                        result = web_integrations.open_service_home("github")
-                    else:
-                        result = web_integrations.search_github_repo(query)
-                print(f"🐙 GitHub: {result['message']}")
-                return {"type": "github_search", "response": result["message"], "quiet_mode": quiet_mode}
-
-            # fast_intent_engine уже надёжно распознаёт команды действия (open_app,
-            # create_file, powershell и т.д.) даже когда фраза оформлена как вопрос —
-            # "Можешь открыть блокнот?" — intent.is_command будет True. Раньше здесь
-            # использовался узкий список english-ключевых слов ('notepad', 'chrome', ...),
-            # который не покрывал русские названия ('блокнот', 'проводник') и любые
-            # команды кроме open_app — переключились на уже вычисленный intent.
-            # 2. Вопросы и неявные вопросы (пропускаем, если это явная команда действия)
-            if not intent.is_command and question_answerer.is_question(text):
-                with timing_stage("ответ.локальный"):
-                    answer = question_answerer.answer(text)
-                if answer:
-                    knowledge_base.add_conversation(text, answer)
-                    print(f"🤖 Scott: {answer}")
-                    return {
-                        "type": "question",
-                        "response": answer,
-                        "quiet_mode": quiet_mode
-                    }
-
-                if intelligent_answerer:
-                    print(f"🧠 Использую ИИ для ответа...")
-                    with timing_stage("ответ.llm"):
-                        ai_answer = intelligent_answerer.answer_question(text)
-                    if ai_answer:
-                        print(f"✨ Ответ от ИИ: {ai_answer[:100]}...")
-                        knowledge_base.add_conversation(text, ai_answer)
-                        return {
-                            "type": "ai_question",
-                            "response": ai_answer,
-                            "quiet_mode": quiet_mode,
-                            "ai_model": intelligent_answerer.model
-                        }
-
-                fallback_answer = "Извините, я не знаю ответ на этот вопрос. Попробуйте переформулировать или задайте другой вопрос."
-                print(f"❓ Fallback ответ: {fallback_answer}")
-                knowledge_base.add_conversation(text, fallback_answer)
-                return {
-                    "type": "question",
-                    "response": fallback_answer,
-                    "quiet_mode": quiet_mode
-                }
-
-            # 3. Парсим команду. Если fast_intent уже уверен, что это команда,
-            # сначала снимаем вежливую/вопросительную обёртку — command_parser
-            # заметно надёжнее на чистом императиве ("открой блокнот"), чем на
-            # "Скотт, можешь открыть блокнот?".
-            command_text = self._strip_command_wrapper(text) if intent.is_command else text
-            with timing_stage("команда.парсинг"):
-                parsed = command_parser.parse(command_text)
-            print(f"🔍 Распарсена команда ({'очищено: ' + command_text if command_text != text else 'как есть'}): {parsed}")
-
-            # fast_intent распознаёт управление громкостью и яркостью, а также
-            # запрос списка процессов — по регулярным выражениям с якорями.
-            # command_parser этих формулировок не знает и возвращает на «сделай
-            # громче» тип unknown, а решение о выполнении принимается именно по
-            # нему, поэтому команда молча превращалась в вопрос к LLM. Там, где
-            # парсер ничего не понял, а интент уверен, доверяем интенту: он для
-            # того и вычисляется раньше.
-            if parsed.command_type == 'unknown' and intent.intent_type in ('system_command', 'list_processes', 'open_folder', 'reminder', 'write_code', 'run_code'):
-                print(f"↪️ Парсер не понял фразу, беру тип из интента: {intent.intent_type}")
-                parsed.command_type = intent.intent_type
-                parsed.main_param = intent.main_param
-
-            # Отдельный случай: парсер уверенно считает «открой загрузки»
-            # запуском приложения, потому что видит глагол «открой». Интент же
-            # разобрался, что речь о папке — и он тут точнее.
-            if intent.intent_type == 'open_folder' and parsed.command_type in ('open_app', 'unknown'):
-                parsed.command_type = 'open_folder'
-                parsed.main_param = intent.main_param
-
-            # Напоминание сильнее любого разбора: во фразе «напомни через час
-            # открыть почту» парсер видит «открыть почту» и предлагает сделать
-            # это немедленно — то есть ровно не то, о чём просили.
-            if intent.intent_type == 'reminder':
-                parsed.command_type = 'reminder'
-                parsed.main_param = intent.main_param
-
-            # Просьба написать программу тоже сильнее разбора: во фразе
-            # «напиши программу на C» парсер видит «программу» и пытается
-            # что-то запустить.
-            if intent.intent_type == 'write_code':
-                parsed.command_type = 'write_code'
-                parsed.main_param = intent.main_param
-
-            if intent.intent_type == 'run_code':
-                parsed.command_type = 'run_code'
-                parsed.main_param = intent.main_param
-
-            explicit_action = any(
-                lower_text.startswith(prefix) for prefix in [
-                    'открой ', 'запусти ', 'открыть ', 'включи ', 'вкл ',
-                    'start ', 'launch ', 'run ', 'open ', 'open file ', 'открой файл '
-                ]
-            )
-            explicit_system = any(keyword in lower_text for keyword in [
-                'notepad', 'chrome', 'code', 'vscode', 'cmd', 'powershell', 'explorer',
-                'paint', 'word', 'excel', 'telegram', 'discord', 'spotify', 'browser'
-            ])
-            action_command_types = {
-                'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
-                'get_currency', 'get_weather', 'get_news', 'system_info', 'manage_window',
-                'file_operation', 'system_command', 'open_url',
-                'list_processes', 'open_folder', 'reminder', 'write_code', 'run_code'
-            }
-            # 'powershell' и 'run_script' здесь намеренно отсутствуют. /command
-            # не требует токена, и стоит появиться ветке выполнения для этих
-            # типов — произвольная команда оболочки станет доступна любому, кто
-            # дотянулся до порта. Выполнять их можно только через
-            # /extended/powershell и /internal/execute: там есть и Bearer-токен,
-            # и ограничитель частоты, и белый список.
-            SHELL_TYPES = {'powershell', 'run_script'}
-            explicit_search = any(
-                keyword in lower_text for keyword in ['найди', 'ищи', 'гугли', 'поиск', 'search', 'find', 'look for', 'google', 'поискать', 'гугль', 'яндекс']
-            )
-
-            if parsed.command_type == 'search' and not explicit_search and self._is_question_like(text, lower_text, intent):
-                print("❗ Переопределяю поиск как вопрос на основе вопросной формы текста")
-                with timing_stage("ответ.локальный"):
-                    answer = question_answerer.answer(text)
-                if answer:
-                    knowledge_base.add_conversation(text, answer)
-                    print(f"🤖 Scott: {answer}")
-                    return {
-                        "type": "question",
-                        "response": answer,
-                        "quiet_mode": quiet_mode
-                    }
-                if intelligent_answerer and intelligent_answerer.enabled:
-                    print(f"🧠 Использую ИИ для ответа на вопрос, который распознан как неявный")
-                    with timing_stage("ответ.llm"):
-                        ai_answer, success = intelligent_answerer.answer(text, use_memory=True)
-                    if success and ai_answer:
-                        knowledge_base.add_conversation(text, ai_answer)
-                        return {
-                            "type": "ai_question",
-                            "response": ai_answer,
-                            "quiet_mode": quiet_mode,
-                            "ai_model": intelligent_answerer.model
-                        }
-                fallback_answer = "Извините, я не знаю ответ на этот вопрос. Попробуйте переформулировать или задайте другой вопрос."
-                knowledge_base.add_conversation(text, fallback_answer)
-                return {
-                    "type": "question",
-                    "response": fallback_answer,
-                    "quiet_mode": quiet_mode
-                }
-
-            looks_like_search = parsed.command_type == 'search' and explicit_search
-            should_execute_action = (
-                parsed.command_type in action_command_types
-                or looks_like_search
-                or explicit_action
-                or explicit_system
-            )
-
-            if parsed.command_type in SHELL_TYPES:
-                refusal = (
-                    "Выполнять команды оболочки голосом я не буду — это делается "
-                    "через защищённый эндпоинт с токеном."
+            with timing_stage("разбор"):
+                decision = understanding.understand(
+                    text,
+                    intent_engine=fast_intent_engine,
+                    parser=command_parser,
+                    answerer=question_answerer,
                 )
-                print(f"🛡️ Отказ: попытка выполнить «{parsed.command_type}» через /command")
-                knowledge_base.add_conversation(text, refusal)
+            print(f"🔎 Решение: {decision.kind} — {decision.reason}")
+
+            # ---------------------------------------------------- сайты
+            if decision.kind == 'web':
+                with timing_stage(f"веб.{decision.service}"):
+                    if decision.query:
+                        searcher = {
+                            'youtube': web_integrations.search_youtube_video,
+                            'github': web_integrations.search_github_repo,
+                        }[decision.service]
+                        result = searcher(decision.query)
+                    else:
+                        # Искать нечего — значит человек просил открыть сам сайт.
+                        result = web_integrations.open_service_home(decision.service)
+                print(f"🌐 {decision.service}: {result['message']}")
                 return {
-                    "type": "refused",
-                    "response": refusal,
+                    "type": f"{decision.service}_search",
+                    "response": result["message"],
                     "quiet_mode": quiet_mode,
                 }
 
-            if should_execute_action:
-                with timing_stage("команда.выполнение"):
-                    response = await self._execute_parsed_command(parsed, text)
-                knowledge_base.add_conversation(text, response)
-                print(f"🤖 Scott: {response}")
+            # ---------------------------------------------------- отказ
+            if decision.kind == 'refused':
+                print(f"🛡️ Отказ: {decision.reason}")
+                knowledge_base.add_conversation(text, decision.message)
                 return {
-                    "type": "command",
-                    "command": parsed.command_type,
-                    "response": response,
-                    "confidence": getattr(parsed, 'confidence', None),
-                    "quiet_mode": quiet_mode
+                    "type": "refused",
+                    "response": decision.message,
+                    "quiet_mode": quiet_mode,
                 }
 
-            if question_answerer.is_question(text) or len(lower_text.split()) <= 5:
-                with timing_stage("ответ.локальный"):
-                    answer = question_answerer.answer(text)
-                if answer:
-                    knowledge_base.add_conversation(text, answer)
-                    print(f"🤖 Scott: {answer}")
-                    return {
-                        "type": "question",
-                        "response": answer,
-                        "quiet_mode": quiet_mode
-                    }
-                if intelligent_answerer and intelligent_answerer.enabled:
-                    print(f"🧠 Использую ИИ для ответа на короткий вопрос...")
-                    with timing_stage("ответ.llm"):
-                        ai_answer, success = intelligent_answerer.answer(text, use_memory=True)
-                    if success and ai_answer:
-                        knowledge_base.add_conversation(text, ai_answer)
-                        return {
-                            "type": "ai_question",
-                            "response": ai_answer,
-                            "quiet_mode": quiet_mode,
-                            "ai_model": intelligent_answerer.model
-                        }
-                fallback_answer = "Привет! Я Scott. Я могу ответить на вопросы, помочь с командами и поддержать обычный разговор."
-                knowledge_base.add_conversation(text, fallback_answer)
-                print(f"🤖 Scott: {fallback_answer}")
-                return {
-                    "type": "question",
-                    "response": fallback_answer,
-                    "quiet_mode": quiet_mode
-                }
+            # ---------------------------------------------------- вопрос
+            if decision.kind == 'question':
+                return await self._answer_as_question(text, quiet_mode, decision)
 
+            # ---------------------------------------------------- действие
             with timing_stage("команда.выполнение"):
-                response = await self._execute_parsed_command(parsed, text)
+                response = await self._execute_parsed_command(decision.parsed, text)
             knowledge_base.add_conversation(text, response)
             print(f"🤖 Scott: {response}")
             return {
                 "type": "command",
-                "command": parsed.command_type,
+                "command": decision.action,
                 "response": response,
-                "confidence": getattr(parsed, 'confidence', None),
+                "confidence": getattr(decision.parsed, 'confidence', None),
                 "quiet_mode": quiet_mode
             }
 
@@ -1044,69 +815,52 @@ class ScottAI:
                 "error": str(e)
             }
 
-    def _is_question_like(self, text: str, lower_text: str, intent: str) -> bool:
-        """Определить, следует ли интерпретировать фразу как вопрос."""
-        if text.strip().endswith('?'):
-            return True
-        if intent and intent.lower() == 'question':
-            return True
-        question_keywords = [
-            'что', 'где', 'когда', 'как', 'почему', 'зачем', 'сколько',
-            'чей', 'чья', 'чьё', 'кем', 'какой', 'какая', 'какое', 'какие',
-            'который', 'есть ли', 'можно ли', 'правда ли'
-        ]
-        for keyword in question_keywords:
-            if re.search(rf'\b{re.escape(keyword)}\b', lower_text):
-                return True
-        return False
-
-    def _strip_command_wrapper(self, text: str) -> str:
+    async def _answer_as_question(self, text: str, quiet_mode: bool, decision) -> Dict:
         """
-        Убрать вежливую/вопросительную обёртку вокруг явной команды
-        ("Скотт, можешь открыть блокнот?" → "открыть блокнот"), чтобы
-        command_parser видел чистый императив — без этого он не распознаёт
-        команду и уходит в LLM с ответом "у меня нет доступа к ОС".
+        Ответить на вопрос: сначала своими силами, потом с помощью ИИ.
+
+        Порядок такой ради скорости. Время, дату и загрузку памяти Scott знает
+        сам — ходить за этим в сеть значило бы ждать секунды вместо
+        миллисекунд и тратить лимит запросов на то, что и так известно.
         """
-        t = text.strip()
-        if t.endswith('?'):
-            t = t[:-1].strip()
+        with timing_stage("ответ.локальный"):
+            answer = question_answerer.answer(text)
+        if answer:
+            knowledge_base.add_conversation(text, answer)
+            print(f"🤖 Scott: {answer}")
+            return {
+                "type": "question",
+                "response": answer,
+                "quiet_mode": quiet_mode
+            }
 
-        name_prefixes = ('скотт,', 'скотт ', 'scott,', 'scott ')
-        lower_t = t.lower()
-        for name in name_prefixes:
-            if lower_t.startswith(name):
-                t = t[len(name):].strip()
-                lower_t = t.lower()
-                break
+        if intelligent_answerer:
+            print(f"🧠 Использую ИИ для ответа...")
+            with timing_stage("ответ.llm"):
+                ai_answer = intelligent_answerer.answer_question(text)
+            if ai_answer:
+                print(f"✨ Ответ от ИИ: {ai_answer[:100]}...")
+                knowledge_base.add_conversation(text, ai_answer)
+                return {
+                    "type": "ai_question",
+                    "response": ai_answer,
+                    "quiet_mode": quiet_mode,
+                    "ai_model": intelligent_answerer.model
+                }
 
-        wrappers = [
-            'не мог бы ты ', 'не могла бы ты ', 'не мог ли ты ',
-            'можешь ли ты ', 'можешь ты ', 'ты можешь ли ', 'ты можешь ',
-            'можешь ', 'пожалуйста, ', 'пожалуйста ',
-        ]
-        changed = True
-        while changed:
-            changed = False
-            for w in wrappers:
-                if lower_t.startswith(w):
-                    t = t[len(w):].strip()
-                    lower_t = t.lower()
-                    changed = True
-
-        return t or text.strip()
-
-    def _extract_web_query(self, text: str, filler_words: list) -> str:
-        """
-        Вырезать служебные слова (имя сервиса, глаголы-триггеры) из фразы,
-        оставив только то, что реально нужно искать — например, из
-        "Скотт, найди на ютубе видео про запуск ракеты" получить
-        "запуск ракеты". Тот же принцип, что и в command_parser._extract_parameter,
-        но локально для веб-интеграций, чтобы не трогать общий (и уже не раз
-        ломавшийся на пересечении категорий) словарь COMMAND_SYNONYMS.
-        """
-        words = self._strip_command_wrapper(text).split()
-        kept = [w for w in words if w.lower().strip('.,!?:;—-') not in filler_words]
-        return ' '.join(kept).strip()
+        # Даже отказ должен быть внятным: человеку нужно понять, что делать
+        # дальше, а не услышать «не знаю».
+        fallback = (
+            "Извините, я не знаю ответ на этот вопрос. "
+            "Попробуйте переформулировать или задайте другой вопрос."
+        )
+        print(f"❓ Ответа не нашлось: {decision.reason}")
+        knowledge_base.add_conversation(text, fallback)
+        return {
+            "type": "question",
+            "response": fallback,
+            "quiet_mode": quiet_mode
+        }
 
     async def _execute_parsed_command(self, parsed, original_text: str) -> str:
         """

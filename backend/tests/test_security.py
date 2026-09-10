@@ -58,7 +58,7 @@ def test_cors_is_not_wildcard(main_source):
 
 # ==================== Что нельзя выполнить голосом ====================
 
-def test_shell_types_not_executable_by_voice(main_source):
+def test_shell_types_not_executable_by_voice():
     """
     Команды оболочки не выполняются через /command.
 
@@ -66,17 +66,53 @@ def test_shell_types_not_executable_by_voice(main_source):
     «powershell» не существовало, спасала случайность — но появись она при
     очередной правке, произвольная команда стала бы доступна любому, кто
     дотянулся до порта.
-    """
-    match = re.search(r"action_command_types = \{(.*?)\}", main_source, re.S)
-    assert match, "не найден список исполняемых типов команд"
 
-    executable = match.group(1)
-    for forbidden in ("'powershell'", "'run_script'"):
-        assert forbidden not in executable, (
-            f"{forbidden} в списке исполняемых по /command — это удалённое выполнение команд"
+    Проверяется поведение, а не текст файла. Прежняя проверка искала список
+    исполняемых типов в main.py — и перестала что-либо охранять в тот день,
+    когда разбор фразы переехал в отдельный модуль: список нашёлся бы там,
+    а проверка искала здесь.
+    """
+    try:
+        import understanding
+    except ImportError:  # pragma: no cover — запуск из корня репозитория
+        from backend import understanding
+
+    for forbidden in ("powershell", "run_script"):
+        assert forbidden not in understanding.ACTION_COMMAND_TYPES, (
+            f"«{forbidden}» в списке исполняемых по /command — "
+            "это удалённое выполнение команд"
+        )
+        assert forbidden in understanding.SHELL_TYPES, (
+            f"«{forbidden}» выпал из списка запрещённых"
         )
 
-    assert "SHELL_TYPES" in main_source, "нет явного отказа для команд оболочки"
+
+def test_shell_request_is_refused_outright():
+    """
+    Пара к тесту выше: просьба выполнить оболочку получает отказ.
+
+    Проверка идёт через настоящий разбор — так же, как это происходит с живой
+    фразой человека.
+    """
+    try:
+        import understanding
+        from command_parser import CommandParser
+        from fast_intent import get_fast_intent_engine
+        from question_answerer import get_question_answerer
+    except ImportError:  # pragma: no cover
+        from backend import understanding
+        from backend.command_parser import CommandParser
+        from backend.fast_intent import get_fast_intent_engine
+        from backend.question_answerer import get_question_answerer
+
+    decision = understanding.understand(
+        "выполни powershell команду",
+        intent_engine=get_fast_intent_engine(),
+        parser=CommandParser(),
+        answerer=get_question_answerer(),
+    )
+
+    assert decision.kind == "refused", f"оболочка не отклонена: {decision.kind}"
 
 
 def test_dangerous_endpoints_still_guarded(app):
