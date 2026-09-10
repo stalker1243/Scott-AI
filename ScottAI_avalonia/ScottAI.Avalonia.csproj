@@ -22,6 +22,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Тестам видно внутреннее устройство: самое ценное здесь — поиск Python,
+         проверка обновлений и загрузка иконок, а всё это приватные подробности,
+         которые снаружи не вызвать. Каждая из них уже ломалась в живом
+         выпуске. -->
+    <InternalsVisibleTo Include="ScottAI.Avalonia.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />

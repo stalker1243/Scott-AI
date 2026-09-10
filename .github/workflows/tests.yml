@@ -64,6 +64,14 @@ jobs:
         working-directory: ScottAI_avalonia
         run: dotnet build -c Release --nologo
 
+      - name: Тесты лаунчера
+        working-directory: ScottAI_avalonia.Tests
+        # Проверяется то, что уже ломалось в живых выпусках: адреса иконок
+        # (из-за них 1.0.5 не запускалась вовсе), поиск Python и
+        # преобразователи значений. Окно для этого не нужно — Avalonia
+        # поднимается без него.
+        run: dotnet test --nologo -v q
+
       - name: Сборка под Linux
         working-directory: ScottAI_avalonia
         # Кросс-компиляция проверяется отдельно: Linux-выпуск собирается

@@ -268,7 +268,7 @@ public class BackendLauncher
     /// это версия: на машине обычно несколько Python, а backend рассчитан на
     /// 3.13, и без явного указания py возьмёт версию по умолчанию.
     /// </summary>
-    private static IEnumerable<(string File, string Prefix)> Candidates()
+    internal static IEnumerable<(string File, string Prefix)> Candidates()
     {
         // Встроенный Python из дистрибутива — первым. На чужой машине его
         // может не быть в PATH вовсе, а лаунчер отвечал «не нашёл Python»,
@@ -300,9 +300,11 @@ public class BackendLauncher
     /// Ищется вверх от папки программы, как и backend: лаунчер лежит в
     /// подпапке launcher, а runtime — рядом с ней.
     /// </summary>
-    private static string? FindBundledPython()
+    internal static string? FindBundledPython(string? startFrom = null)
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        // Откуда начинать поиск — обычно папка программы. Параметр нужен
+        // проверкам: подсунуть им настоящее дерево каталогов иначе нечем.
+        var dir = new DirectoryInfo(startFrom ?? AppContext.BaseDirectory);
 
         while (dir != null)
         {
@@ -318,7 +320,7 @@ public class BackendLauncher
         return null;
     }
 
-    private static bool Probe(string file, string args)
+    internal static bool Probe(string file, string args)
     {
         try
         {
