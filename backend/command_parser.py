@@ -4,6 +4,8 @@
 """
 
 import re
+
+import vocabulary
 from typing import Dict, Optional, Tuple, List
 from dataclasses import dataclass
 
@@ -20,36 +22,18 @@ class ParsedCommand:
         return f"ParsedCommand(type={self.command_type}, param={self.main_param}, conf={self.confidence:.2f})"
 
 
-def _has_word(text: str, word: str) -> bool:
-    """
-    Есть ли слово в тексте целиком, а не куском другого слова.
-
-    Простое вхождение подводит на приставках: «включи» находится внутри
-    «ВЫключи», и просьба выключить музыку превращалась в просьбу её включить.
-    """
-    return re.search(r"(?<![^\W\d_])" + re.escape(word) + r"(?![^\W\d_])", text) is not None
-
-
 class CommandParser:
     """Умный парсер команд с поддержкой естественного языка"""
     
     # Синонимы команд
     COMMAND_SYNONYMS = {
         # Поиск информации (ТОЛЬКО явные команды поиска, НЕ вопросы!)
-        'search': [
-            'поиск', 'найди', 'гугли', 'ищи', 'найдите',
-            'search for', 'find', 'look for', 'google',
-            'поиск в интернете', 'поискать',
-            'гугль', 'яндекс', 'yandex'
-        ],
+        'search': list(vocabulary.SEARCH_WORDS),
         
         # Открыть приложение
-        'open_app': [
-            'открой', 'запусти', 'включи', 'запустите', 'откройте',
-            'открыть', 'запустить', 'включить',
-            'open', 'launch', 'start', 'run', 'exec',
-            'нужна программа', 'запустить'
-        ],
+        # «Нужна программа» — не глагол, а оборот; поэтому список глаголов
+        # берётся общий, а этот случай добавляется рядом.
+        'open_app': list(vocabulary.LAUNCH_VERBS) + ['нужна программа'],
         
         # Создать файл
         # Объект обязателен: что именно создать.
@@ -59,19 +43,10 @@ class CommandParser:
         # занятий для новичка» заводило пустой файл с таким именем и
         # рапортовало об успехе, а «напиши письмо начальнику» — файл «письмо
         # начальнику» вместо самого письма.
-        'create_file': [
-            'создай файл', 'создать файл', 'создайте файл', 'новый файл',
-            'создай новый файл', 'сделай файл',
-            'create file', 'make file', 'new file',
-        ],
+        'create_file': list(vocabulary.CREATE_FILE_PHRASES),
         
         # Создать папку
-        'create_folder': [
-            'создай папку', 'создать папку', 'создайте папку', 'новая папка',
-            'создай новую папку', 'сделай папку',
-            'создай директорию', 'создать директорию', 'создай каталог',
-            'create folder', 'make folder', 'create directory', 'mkdir', 'new folder',
-        ],
+        'create_folder': list(vocabulary.CREATE_FOLDER_PHRASES),
         
         # Информация о системе
         'system_info': [
@@ -113,10 +88,7 @@ class CommandParser:
         ],
         
         # Закрыть приложение
-        'close_app': [
-            'закрой', 'закройте', 'выключи', 'заверши',
-            'close', 'quit', 'exit', 'kill'
-        ],
+        'close_app': list(vocabulary.CLOSE_VERBS),
         
         # PowerShell команды
         'powershell': [
@@ -176,20 +148,10 @@ class CommandParser:
     
     # Глаголы запуска. Держим отдельным списком, а не среди синонимов, потому
     # что запуск проверяется раньше остальных типов.
-    OPEN_APP_VERBS = [
-        'открой', 'откройте', 'открыть',
-        'запусти', 'запустите', 'запустить',
-        'включи', 'включить',
-        'open', 'launch', 'start', 'run', 'exec',
-    ]
+    OPEN_APP_VERBS = vocabulary.LAUNCH_VERBS
 
     # Названия, по которым сразу понятно, что речь о программе.
-    KNOWN_APP_NAMES = [
-        'notepad', 'chrome', 'code', 'vscode', 'cmd', 'powershell', 'paint',
-        'word', 'excel', 'telegram', 'discord', 'spotify', 'browser',
-        'блокнот', 'проводник', 'калькулятор', 'браузер', 'хром', 'ворд',
-        'эксель', 'телеграм', 'дискорд', 'спотифай', 'паинт',
-    ]
+    KNOWN_APP_NAMES = vocabulary.KNOWN_APP_NAMES
 
     def __init__(self):
         print("✅ Парсер команд инициализирован")
@@ -230,11 +192,11 @@ class CommandParser:
         # программу: «закрой дискорд» разбиралось как запуск дискорда.
         open_app_score = 0.0
 
-        if any(_has_word(text, keyword) for keyword in self.OPEN_APP_VERBS):
+        if any(vocabulary.has_word(text, keyword) for keyword in self.OPEN_APP_VERBS):
             open_app_score = 0.9
 
             # Знакомое название рядом с глаголом снимает последние сомнения.
-            if any(_has_word(text, name) for name in self.KNOWN_APP_NAMES):
+            if any(vocabulary.has_word(text, name) for name in self.KNOWN_APP_NAMES):
                 open_app_score = 1.0
 
         if open_app_score > 0:
@@ -268,7 +230,7 @@ class CommandParser:
         # открыть: на «дискорд» человек ждёт запуска, а не вопроса к ИИ. Но
         # решается это в последнюю очередь, когда ни один тип не подошёл, а не
         # вперёд всех остальных.
-        if best_command == 'unknown' and any(_has_word(text, name) for name in self.KNOWN_APP_NAMES):
+        if best_command == 'unknown' and any(vocabulary.has_word(text, name) for name in self.KNOWN_APP_NAMES):
             return 'open_app', 0.5
 
         return best_command, max_score

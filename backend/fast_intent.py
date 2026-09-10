@@ -8,6 +8,8 @@ Fast intent engine for Scott AI.
 """
 
 import re
+
+import vocabulary
 from dataclasses import dataclass
 from typing import Optional
 
@@ -36,16 +38,12 @@ class IntentResult:
 class FastIntentEngine:
     # Примечание: голое 'google' сюда намеренно не включено — оно ложно
     # срабатывало на "открой Google Chrome" (это open_app, а не поиск).
-    SEARCH_PHRASES = [
-        'найди', 'поиск', 'гугли', 'ищи', 'search for', 'find', 'look for',
-        'поискать', 'гугль', 'яндекс', 'search', 'искать', 'посмотри'
-    ]
+    # Строгие слова поиска — те же, что у разборщика, плюс слабые подсказки.
+    # Разъезд этих списков однажды уже открыл путь к сбою: «yandex» знал
+    # разборщик, а список явного поиска о нём не знал.
+    SEARCH_PHRASES = list(vocabulary.SEARCH_WORDS) + list(vocabulary.WEAK_SEARCH_HINTS)
 
-    QUESTION_WORDS = [
-        'что', 'какой', 'какая', 'какое', 'какие', 'кто', 'кого', 'кому',
-        'когда', 'где', 'куда', 'откуда', 'почему', 'зачем', 'как', 'сколько',
-        'который', 'чем', 'каким', 'чего', 'каково'
-    ]
+    QUESTION_WORDS = list(vocabulary.QUESTION_WORDS)
 
     INFO_PHRASES = [
         'расскажи мне', 'расскажи про', 'расскажи о', 'объясни про', 'объясни мне',
@@ -60,10 +58,9 @@ class FastIntentEngine:
         r'^(?:скотт\s+)?что\s+можешь\b',
     ]
 
-    OPEN_APP_PHRASES = [
-        'открой', 'запусти', 'включи', 'открыть', 'запустить', 'включить',
-        'open', 'launch', 'start', 'run', 'exec'
-    ]
+    # Вежливое множественное число приходит из общего словаря: «откройте
+    # блокнот» звучит так же часто, как «открой», а здесь этих форм не было.
+    OPEN_APP_PHRASES = list(vocabulary.LAUNCH_VERBS)
 
     # Объект обязателен: что именно создать.
     #
@@ -71,14 +68,7 @@ class FastIntentEngine:
     # остатка фразы — всё, где не встретилось слово «файл», считалось папкой.
     # «Создай программу занятий для новичка» заводило на диске каталог с таким
     # именем и рапортовало об успехе, хотя человек просил написать текст.
-    CREATE_FILE_PHRASES = [
-        'создай файл', 'создать файл', 'создай новый файл',
-        'создай папку', 'создать папку', 'создай новую папку',
-        'создай директорию', 'создать директорию',
-        'сделай папку', 'сделай файл',
-        'make file', 'create file', 'make folder', 'create folder',
-        'create directory', 'mkdir',
-    ]
+    CREATE_FILE_PHRASES = list(vocabulary.CREATE_FILE_PHRASES) + list(vocabulary.CREATE_FOLDER_PHRASES)
 
     # Имя с расширением называет объект само: «создай отчёт.txt» — файл, и
     # уточнять это словом «файл» человек не станет.
@@ -88,7 +78,7 @@ class FastIntentEngine:
     )
 
     # Слова, по которым просьба опознаётся как папка, а не файл.
-    FOLDER_WORDS = ('папк', 'директор', 'каталог', 'folder', 'directory', 'mkdir')
+    FOLDER_WORDS = vocabulary.FOLDER_MARKERS
 
     # ВАЖНО про эти списки: они матчатся простым вхождением подстроки и проверяются
     # ДО того, как текст будет признан вопросом. Раньше здесь стояли голые
@@ -120,7 +110,7 @@ class FastIntentEngine:
         'места на диске', 'свободного места', 'свободно места',
         'cpu usage', 'ram usage', 'disk space', 'system status',
     ]
-    CLOSE_APP_PHRASES = ['закрой', 'выключи', 'заверши', 'close', 'quit', 'exit']
+    CLOSE_APP_PHRASES = list(vocabulary.CLOSE_VERBS)
     FILE_OPERATION_PHRASES = [
         'удали файл', 'удали папку', 'скопируй файл', 'скопируй папку',
         'перемести файл', 'перемести папку', 'переименуй файл',

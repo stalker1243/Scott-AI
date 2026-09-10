@@ -29,6 +29,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+import vocabulary
+
 # ==================== Что может быть решено ====================
 
 
@@ -82,14 +84,7 @@ GITHUB_FILLER_WORDS = {
 # запрос оказывается пустым, и Scott открывает главную вместо поиска. В логе
 # была фраза «открой youtube в главное меню» — Scott искал на YouTube «главное
 # меню».
-SITE_WORDS = {
-    'главную', 'главная', 'главное', 'меню', 'сайт', 'сайты', 'страницу',
-    'страница', 'приложение', 'просто', 'мне', 'пожалуйста',
-    # Глаголы перехода. Лежат здесь, а не в списке каждого сервиса: «зайди на
-    # ютуб» означало поиск по слову «зайди», потому что у GitHub этот глагол
-    # был, а у YouTube забыли. Общее место — общая судьба.
-    'зайди', 'зайти', 'перейди', 'перейти', 'зайдём', 'давай', 'покажи',
-}
+SITE_WORDS = set(vocabulary.SITE_WORDS)
 
 # По каким сервисам Scott умеет искать, и по каким словам они узнаются.
 WEB_SERVICES = (
@@ -97,27 +92,18 @@ WEB_SERVICES = (
     ('github', ('гитхаб', 'github'), GITHUB_FILLER_WORDS),
 )
 
-# Человек прямо просит поискать в интернете, а не отвечать самому.
-#
-# Список обязан покрывать все слова поиска, известные разборщику команд: пока
-# в нём не было «yandex», фраза «yandex котики» разбиралась как поиск, но
-# явным поиском не считалась — и уходила в ветку, которая падала с ошибкой.
-EXPLICIT_SEARCH_WORDS = (
-    'найди', 'найдите', 'ищи', 'гугли', 'поиск', 'поискать', 'гугль',
-    'яндекс', 'yandex', 'search', 'find', 'look for', 'google',
-)
-
-# Приставки, по которым видно приказ, а не разговор.
-EXPLICIT_ACTION_PREFIXES = (
-    'открой ', 'запусти ', 'открыть ', 'включи ', 'вкл ',
-    'start ', 'launch ', 'run ', 'open ', 'open file ', 'открой файл ',
+# Приставки, по которым видно приказ, а не разговор. Выводятся из общих
+# глаголов запуска: держать их отдельным списком значило бы забыть про
+# вежливое «откройте», как это уже случалось.
+EXPLICIT_ACTION_PREFIXES = tuple(verb + ' ' for verb in vocabulary.LAUNCH_VERBS) + (
+    'вкл ', 'open file ', 'открой файл ',
 )
 
 # Названия, при упоминании которых речь почти наверняка о программе.
-KNOWN_APP_NAMES = (
-    'notepad', 'chrome', 'code', 'vscode', 'cmd', 'powershell', 'explorer',
-    'paint', 'word', 'excel', 'telegram', 'discord', 'spotify', 'browser',
-)
+KNOWN_APP_NAMES = vocabulary.KNOWN_APP_NAMES
+
+# Человек прямо просит поискать, а не отвечать самому.
+EXPLICIT_SEARCH_WORDS = vocabulary.SEARCH_WORDS
 
 # Типы, которые Scott выполняет сам.
 ACTION_COMMAND_TYPES = {
@@ -151,11 +137,7 @@ INTENT_WINS_WHEN_PARSER_LOST = (
 # Намерения, которые сильнее разбора всегда, а не только при его провале.
 INTENT_ALWAYS_WINS = ('reminder', 'write_code', 'run_code')
 
-QUESTION_KEYWORDS = (
-    'что', 'где', 'когда', 'как', 'почему', 'зачем', 'сколько',
-    'чей', 'чья', 'чьё', 'кем', 'какой', 'какая', 'какое', 'какие',
-    'который', 'есть ли', 'можно ли', 'правда ли',
-)
+QUESTION_KEYWORDS = vocabulary.QUESTION_WORDS
 
 
 # ==================== Само решение ====================
@@ -323,15 +305,10 @@ def strip_command_wrapper(text: str) -> str:
             lower_t = t.lower()
             break
 
-    wrappers = (
-        'не мог бы ты ', 'не могла бы ты ', 'не мог ли ты ',
-        'можешь ли ты ', 'можешь ты ', 'ты можешь ли ', 'ты можешь ',
-        'можешь ', 'пожалуйста, ', 'пожалуйста ',
-    )
     changed = True
     while changed:
         changed = False
-        for w in wrappers:
+        for w in vocabulary.POLITE_WRAPPERS:
             if lower_t.startswith(w):
                 t = t[len(w):].strip()
                 lower_t = t.lower()
