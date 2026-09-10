@@ -84,6 +84,12 @@ public static class SettingsStore
 
     private static readonly string FilePath = Path.Combine(Dir, "launcher.json");
 
+    /// <summary>Имя файла настроек внутри папки. Отдельно от полного пути:
+    /// проверкам нужна та же раскладка, но в своей папке.</summary>
+    internal const string FileName = "launcher.json";
+
+    internal const string AvatarFileName = "avatar.png";
+
     /// <summary>Аватар лежит отдельным файлом: складывать картинку в JSON строкой base64 —
     /// значит раздувать конфиг до сотен килобайт и терять возможность просто её посмотреть.</summary>
     private static readonly string AvatarPath = Path.Combine(Dir, "avatar.png");
@@ -111,33 +117,55 @@ public static class SettingsStore
     /// </summary>
     public static void Reset()
     {
-        // Значения обнуляются в существующем объекте, а не подменой ссылки:
-        // страницы держат именно его, и новая копия до них бы не дошла.
-        var clean = new LauncherSettings();
-
-        Current.Style = clean.Style;
-        Current.IsDark = clean.IsDark;
-        Current.AccentHex = clean.AccentHex;
-        Current.GlassOpacity = clean.GlassOpacity;
-        Current.UserName = clean.UserName;
-        Current.Bio = clean.Bio;
-        Current.AvatarOffsetX = clean.AvatarOffsetX;
-        Current.AvatarOffsetY = clean.AvatarOffsetY;
-        Current.AvatarZoom = clean.AvatarZoom;
-        Current.RunInBackground = clean.RunInBackground;
-        Current.IconVariant = clean.IconVariant;
+        ResetFields(Current);
 
         SaveCurrent();
         SaveAvatar(null);
     }
 
-    public static LauncherSettings Load()
+    /// <summary>
+    /// Вернуть все поля к исходным значениям.
+    ///
+    /// Значения обнуляются в существующем объекте, а не подменой ссылки:
+    /// страницы держат именно его, и новая копия до них бы не дошла.
+    ///
+    /// Отдельным методом — чтобы это можно было проверить. Самая вероятная
+    /// ошибка здесь молчаливая: добавили поле в настройки и забыли добавить
+    /// сюда, после чего «сбросить настройки» оставляет его прежним.
+    /// </summary>
+    internal static void ResetFields(LauncherSettings settings)
+    {
+        var clean = new LauncherSettings();
+
+        settings.Style = clean.Style;
+        settings.IsDark = clean.IsDark;
+        settings.AccentHex = clean.AccentHex;
+        settings.GlassOpacity = clean.GlassOpacity;
+        settings.UserName = clean.UserName;
+        settings.Bio = clean.Bio;
+        settings.AvatarOffsetX = clean.AvatarOffsetX;
+        settings.AvatarOffsetY = clean.AvatarOffsetY;
+        settings.AvatarZoom = clean.AvatarZoom;
+        settings.RunInBackground = clean.RunInBackground;
+        settings.IconVariant = clean.IconVariant;
+    }
+
+    public static LauncherSettings Load() => LoadFrom(Dir);
+
+    /// <summary>
+    /// Прочитать настройки из указанной папки.
+    ///
+    /// Папка передаётся явно ради проверок: иначе любая из них писала бы в
+    /// настоящую папку человека и портила его собственные настройки.
+    /// </summary>
+    internal static LauncherSettings LoadFrom(string directory)
     {
         try
         {
-            if (File.Exists(FilePath))
+            var path = Path.Combine(directory, FileName);
+            if (File.Exists(path))
             {
-                var json = File.ReadAllText(FilePath);
+                var json = File.ReadAllText(path);
                 var loaded = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.LauncherSettings);
                 if (loaded != null)
                 {
@@ -156,13 +184,16 @@ public static class SettingsStore
         return new LauncherSettings();
     }
 
-    public static void Save(LauncherSettings settings)
+    public static void Save(LauncherSettings settings) => SaveTo(settings, Dir);
+
+    /// <summary>Записать настройки в указанную папку. См. LoadFrom.</summary>
+    internal static void SaveTo(LauncherSettings settings, string directory)
     {
         try
         {
-            Directory.CreateDirectory(Dir);
+            Directory.CreateDirectory(directory);
             var json = JsonSerializer.Serialize(settings, SettingsJsonContext.Default.LauncherSettings);
-            File.WriteAllText(FilePath, json);
+            File.WriteAllText(Path.Combine(directory, FileName), json);
         }
         catch (Exception)
         {
