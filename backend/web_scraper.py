@@ -4,6 +4,7 @@
 """
 
 import requests
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 import re
 from typing import Dict, Optional, List
@@ -24,7 +25,9 @@ class WebScraper:
     def search_google(self, query: str) -> Dict:
         """Поиск информации через Google"""
         try:
-            search_url = f"https://www.google.com/search?q={query}"
+            # Кодирование обязательно: особые знаки в запросе иначе
+            # обрезают его молча — «C# и C++» превращается в «C».
+            search_url = f"https://www.google.com/search?q={quote_plus(query)}"
             response = self.session.get(search_url, timeout=10)
             response.encoding = 'utf-8'
             
@@ -191,7 +194,8 @@ class WebScraper:
         """Получить новости"""
         try:
             # Используем NewsAPI
-            url = f"https://newsapi.org/v2/everything?q={topic}&language=ru&sortBy=publishedAt&pageSize=5"
+            url = (f"https://newsapi.org/v2/everything?q={quote_plus(topic)}"
+                   "&language=ru&sortBy=publishedAt&pageSize=5")
             response = self.session.get(url, timeout=10)
             
             if response.status_code != 200:

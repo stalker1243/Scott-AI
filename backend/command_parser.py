@@ -351,6 +351,16 @@ class CommandParser:
             elif any(word in text for word in ['скачать', 'download', 'загрузить']):
                 return 'download_file'
         
+        elif command_type == 'search':
+            # Из запроса выкидывается всё, что относится к самой просьбе
+            # искать: глагол, место («в поиске браузера») и предлоги. Иначе
+            # Scott искал «введи браузера рецепт борща» вместо рецепта борща.
+            kept = [
+                w for w in words
+                if w.lower().strip('.,!?:;—-') not in vocabulary.SEARCH_FILLER_WORDS
+            ]
+            return ' '.join(kept) if kept else (' '.join(words) or 'неизвестно')
+
         elif command_type == 'powershell':
             # Оставить всё что осталось как команда
             return ' '.join(words) if words else 'unknown_command'

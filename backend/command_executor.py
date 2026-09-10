@@ -6,6 +6,7 @@
 import subprocess
 import os
 import webbrowser
+from urllib.parse import quote_plus
 import psutil
 import re
 import time
@@ -353,10 +354,19 @@ class CommandExecutor:
     # ============= ИНТЕРНЕТ =============
     
     def search_browser(self, query: str) -> str:
-        """Поиск в браузере (Google)"""
+        """
+        Поиск в браузере.
+
+        Запрос обязательно кодируется. Подставленный как есть, он тихо
+        обрезался на первом же особом знаке: «C# и C++» браузер видел как
+        «C» — всё после решётки он считает частью адреса, а не запроса, — а
+        «кошки & собаки» превращалось в «кошки», потому что амперсанд начинает
+        новый параметр. Человек при этом получал результаты не того, о чём
+        спрашивал, и понять причину не мог.
+        """
         try:
             print(f"🔍 Ищу в браузере: {query}")
-            url = f"https://www.google.com/search?q={query}"
+            url = f"https://www.google.com/search?q={quote_plus(query)}"
             webbrowser.open(url)
             return f"✅ Ищу в браузере: {query}"
         except Exception as e:
