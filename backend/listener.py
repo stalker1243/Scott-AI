@@ -68,8 +68,34 @@ class ListenerConfig:
     onset_blocks: int = 3
 
     # Пауза, после которой фраза считается законченной. Меньше — Scott будет
-    # обрывать на вдохе, больше — заметно задумываться перед ответом.
+    # обрывать на вдохе, больше — заметно задумываться перед ответом. Это
+    # начальное значение: дальше оно подстраивается под человека.
     silence_to_end: float = 0.8
+
+    # Подстройка паузы под темп речи.
+    #
+    # Жёсткая пауза плоха для обеих сторон: кто говорит слитно, ждёт лишнюю
+    # треть секунды всегда, а кому свойственно задумываться посреди фразы —
+    # того Scott обрывает на вдохе и выполняет половину сказанного.
+    adaptive_silence: bool = True
+
+    # Границы подстройки. Ниже нижней Scott начнёт рубить обычную речь, выше
+    # верхней — ощутимо тормозить на каждой фразе.
+    min_silence_to_end: float = 0.45
+    max_silence_to_end: float = 1.2
+
+    # Шаги нарочно неравные. Обрыв — это выполненная половина команды, и
+    # реакция на него резкая. Лишнее ожидание всего лишь неприятно, поэтому
+    # вниз пауза сползает медленно.
+    silence_step_up: float = 0.15
+    silence_step_down: float = 0.03
+
+    # Речь возобновилась быстрее этого — значит человека оборвали на вдохе.
+    resume_gap: float = 0.5
+
+    # Тишина держалась дольше этого — значит фраза кончилась сама, и паузу
+    # можно было выждать короче.
+    clean_gap: float = 2.0
 
     # Границы длины фразы: слишком короткое — случайный звук, слишком
     # длинное — разговор не с ассистентом.
@@ -94,6 +120,13 @@ class ListenerStats:
     last_text: str = ""
     last_error: str = ""
     noise_floor: float = 0.0
+
+    # Текущая пауза и сколько раз речь возобновлялась сразу после закрытия
+    # фразы. Второе — признак того, что Scott обрывал человека; по нему видно,
+    # работает ли подстройка.
+    silence_to_end: float = 0.0
+    cutoffs: int = 0
+
     started_at: float = 0.0
     recent: List[str] = field(default_factory=list)
 
@@ -120,6 +153,13 @@ class VoiceListener:
         self.config = config or ListenerConfig()
 
         self.stats = ListenerStats()
+
+        # Живое значение паузы: начинается с настроенного и подстраивается по
+        # ходу разговора. В конфигурации остаётся точка отсчёта, чтобы её было
+        # с чем сравнивать.
+        self._silence_to_end = self.config.silence_to_end
+        self.stats.silence_to_end = self._silence_to_end
+
         self._running = False
         self._blocks: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=200)
         self._phrases: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=8)
@@ -167,7 +207,14 @@ class VoiceListener:
             return {"success": False, "message": f"Не удалось открыть микрофон: {e}"}
 
         self._running = True
-        self.stats = ListenerStats(started_at=time.time(), noise_floor=self._noise_floor)
+        # Подстроенная пауза переносится в новые показатели: сама она живёт в
+        # _silence_to_end и перезапуск прослушивания переживает, а вот из
+        # диагностики пропала бы.
+        self.stats = ListenerStats(
+            started_at=time.time(),
+            noise_floor=self._noise_floor,
+            silence_to_end=self._silence_to_end,
+        )
 
         self._threads = [
             threading.Thread(target=self._segment_loop, name="scott-segment", daemon=True),
@@ -248,6 +295,10 @@ class VoiceListener:
             "ignored": self.stats.ignored,
             "last_text": self.stats.last_text,
             "last_error": self.stats.last_error,
+            # Пауза меняется сама, поэтому её видно снаружи: иначе разбираться,
+            # почему Scott стал медлительнее, будет негде.
+            "silence_to_end": round(self._silence_to_end, 2),
+            "cutoffs": self.stats.cutoffs,
             "recent": list(self.stats.recent[-10:]),
             "uptime_sec": round(time.time() - self.stats.started_at, 1) if self.stats.started_at else 0,
         }
@@ -303,9 +354,11 @@ class VoiceListener:
         через полчаса сделали бы порог бессмысленным.
         """
         preroll_blocks = max(1, int(self.config.preroll * 1000 / BLOCK_MS))
-        silence_blocks = max(1, int(self.config.silence_to_end * 1000 / BLOCK_MS))
         max_blocks = int(self.config.max_phrase * 1000 / BLOCK_MS)
         min_blocks = max(1, int(self.config.min_phrase * 1000 / BLOCK_MS))
+
+        resume_blocks = max(1, int(self.config.resume_gap * 1000 / BLOCK_MS))
+        clean_blocks = max(1, int(self.config.clean_gap * 1000 / BLOCK_MS))
 
         preroll: List[np.ndarray] = []
         phrase: List[np.ndarray] = []
@@ -313,6 +366,20 @@ class VoiceListener:
         silence_streak = 0
         loud_in_phrase = 0
         in_speech = False
+
+        # Сколько блоков тишины прошло с закрытия предыдущей фразы: по этому
+        # промежутку видно, оборвали ли человека.
+        gap_blocks = 0
+
+        # Сколько тишины успело накопиться к моменту закрытия. Нужно для
+        # второго признака — спокойного окончания: его отсчитывать надо от
+        # последнего громкого блока, а не от закрытия фразы. К закрытию пауза
+        # ожидания уже прошла, и без этой поправки порог в две секунды
+        # требовал почти трёх секунд настоящей тишины.
+        silence_at_close = 0
+
+        had_phrase = False
+        closed_by_length = False
 
         while self._running:
             try:
@@ -336,8 +403,24 @@ class VoiceListener:
                 if len(preroll) > preroll_blocks:
                     preroll.pop(0)
 
+                gap_blocks += 1
+
                 loud_streak = loud_streak + 1 if loud else 0
                 if loud_streak >= self.config.onset_blocks:
+                    # Человек заговорил снова. Если это случилось почти сразу
+                    # после закрытия предыдущей фразы — значит её закрыли рано,
+                    # на вдохе. Долгая тишина, наоборот, означает, что фраза
+                    # кончилась сама и паузу можно выждать короче.
+                    #
+                    # Обрыв по длине фразы сюда не относится: пауза его не
+                    # вызывала, и удлинять её незачем.
+                    if had_phrase and not closed_by_length:
+                        if gap_blocks <= resume_blocks:
+                            self.stats.cutoffs += 1
+                            self._adjust_silence(cut=True)
+                        elif silence_at_close + gap_blocks >= clean_blocks:
+                            self._adjust_silence(cut=False)
+
                     in_speech = True
                     phrase = list(preroll)
                     preroll.clear()
@@ -349,15 +432,23 @@ class VoiceListener:
                     loud_in_phrase += 1
                 silence_streak = 0 if loud else silence_streak + 1
 
+                # Пауза живая: подстройка меняет её между фразами, и значение
+                # берётся заново на каждом блоке.
+                silence_blocks = max(1, int(self._silence_to_end * 1000 / BLOCK_MS))
+
                 too_long = len(phrase) >= max_blocks
                 if silence_streak >= silence_blocks or too_long:
                     in_speech = False
                     loud_streak = 0
+                    gap_blocks = 0
+                    silence_at_close = silence_streak
+                    closed_by_length = too_long
                     # Считаются именно ГРОМКИЕ блоки, а не длина буфера: в него
                     # входят запас перед фразой и пауза после неё, вместе почти
                     # полторы секунды. Проверка по длине буфера пропускала любой
                     # щелчок — тот выглядел как фраза за счёт этой тишины.
                     if loud_in_phrase >= min_blocks:
+                        had_phrase = True
                         audio = np.concatenate(phrase)
                         try:
                             self._phrases.put_nowait(audio)
@@ -365,6 +456,38 @@ class VoiceListener:
                             self.stats.last_error = "Не успеваю обрабатывать — фраза пропущена"
                     phrase = []
                     loud_in_phrase = 0
+
+    def _adjust_silence(self, cut: bool) -> None:
+        """
+        Сдвинуть паузу: вверх при обрыве, вниз при спокойном окончании.
+
+        Шаги неравные намеренно. Обрыв означает, что Scott выполнил половину
+        команды, — на это реакция резкая. Лишняя пауза всего лишь неприятна,
+        поэтому вниз значение сползает медленно и только после настоящей
+        тишины.
+        """
+        if not self.config.adaptive_silence:
+            return
+
+        было = self._silence_to_end
+
+        if cut:
+            стало = было + self.config.silence_step_up
+        else:
+            стало = было - self.config.silence_step_down
+
+        стало = max(self.config.min_silence_to_end,
+                    min(self.config.max_silence_to_end, стало))
+
+        if abs(стало - было) < 0.001:
+            return
+
+        self._silence_to_end = стало
+        self.stats.silence_to_end = стало
+
+        if cut:
+            print(f"⏳ Похоже, оборвал на вдохе — жду дольше: "
+                  f"{было:.2f} -> {стало:.2f} с")
 
     # ==================== Распознавание и выполнение ====================
 
