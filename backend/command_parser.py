@@ -22,6 +22,41 @@ class ParsedCommand:
         return f"ParsedCommand(type={self.command_type}, param={self.main_param}, conf={self.confidence:.2f})"
 
 
+# Насколько точным считается совпадение.
+#
+# Число зависит только от того, что совпало, а не от длины списка, в котором
+# нашлось. Раньше уверенность считалась как очки / (длина списка / 2): каждый
+# добавленный синоним молча снижал уверенность для всего типа, а само число
+# ничего не значило — за одинаково ложные совпадения «поисковик» получал 0.21,
+# а «сайтостроение» 0.67.
+MULTIWORD_MATCH = 0.9      # «создай папку» — сомнений почти нет
+WORD_MATCH = 0.75          # «закрой» — обычное совпадение
+SHORT_MATCH = 0.6          # «run», «cd» — короткое слово легко случайно
+KNOWN_APP_BONUS = 0.1      # знакомое название программы рядом с глаголом
+BARE_APP_NAME = 0.5        # одно название без глагола
+
+
+def _match_confidence(matched: str) -> float:
+    """Насколько точно совпадение описывает просьбу."""
+    if len(matched.split()) >= 2:
+        return MULTIWORD_MATCH
+    return WORD_MATCH if len(matched) > 3 else SHORT_MATCH
+
+
+def _longest_match(text: str, synonyms) -> str:
+    """
+    Самое длинное совпавшее выражение — или пустая строка.
+
+    Длинное точнее короткого: во фразе «создай папку отчёты» совпадают и
+    «создай папку», и «создай», и выбрать нужно первое.
+    """
+    best = ''
+    for synonym in synonyms:
+        if len(synonym) > len(best) and vocabulary.has_word(text, synonym):
+            best = synonym
+    return best
+
+
 class CommandParser:
     """Умный парсер команд с поддержкой естественного языка"""
     
@@ -97,11 +132,17 @@ class CommandParser:
         ],
         
         # Файловые операции
+        # Операции над файлами — именно операции.
+        #
+        # Отсюда убраны «открой папку» и «open folder»: открыть папку — не
+        # операция над файлом, для этого есть свой тип, и путались они всерьёз.
+        # Убраны и голые существительные «файл» и «документ»: по ним в эту
+        # ветку уходила любая фраза, где встретилось слово «файл».
         'file_operation': [
-            'открой папку', 'открыть папку', 'файл', 'документ',
-            'удали файл', 'скопируй', 'переместить', 'скачать',
-            'open folder', 'delete file', 'copy', 'move', 'download',
-            'создать документ', 'новый документ'
+            'удали файл', 'удалить файл', 'скопируй', 'скопировать',
+            'переместить', 'перемести', 'переименуй', 'скачать', 'скачай',
+            'delete file', 'copy file', 'move file', 'download file',
+            'создать документ', 'новый документ',
         ],
         
         # Системные команды
@@ -146,8 +187,9 @@ class CommandParser:
         'короче', 'значит', 'типа', 'вот', 'просто', 'там', 'тут',
     }
     
-    # Глаголы запуска. Держим отдельным списком, а не среди синонимов, потому
-    # что запуск проверяется раньше остальных типов.
+    # Глаголы запуска. Отдельным списком — им пользуется вырезание глагола из
+    # параметра. Особого порядка проверки у запуска больше нет: все типы
+    # считаются по одной формуле, и выигрывает самое точное совпадение.
     OPEN_APP_VERBS = vocabulary.LAUNCH_VERBS
 
     # Названия, по которым сразу понятно, что речь о программе.
@@ -179,62 +221,51 @@ class CommandParser:
             confidence=confidence
         )
     
+    # Типы, для которых знакомое название программы — довод в их пользу.
+    APP_TYPES = ('open_app', 'close_app')
+
     def _detect_command_type(self, text: str) -> Tuple[str, float]:
-        """Определить тип команды из текста"""
-        max_score = 0
-        best_command = 'unknown'  # Default; search должен быть явным
-        
-        # Запуск программы проверяется отдельно от прочих типов: слов-глаголов
-        # для него много, и по общей формуле он проигрывал бы там, где должен
-        # выигрывать. Но очки обязаны быть в той же шкале, что у остальных, —
-        # от нуля до единицы. Раньше они были сырыми (за глагол 2, за знакомую
-        # программу +3), и open_app побеждал ВСЕГДА, стоило человеку назвать
-        # программу: «закрой дискорд» разбиралось как запуск дискорда.
-        open_app_score = 0.0
+        """
+        Определить тип команды.
 
-        if any(vocabulary.has_word(text, keyword) for keyword in self.OPEN_APP_VERBS):
-            open_app_score = 0.9
+        Уверенность зависит только от того, что совпало: многословное выражение
+        точнее одного слова, длинное слово точнее короткого. От длины списка
+        синонимов она не зависит — иначе добавление синонима молча меняло бы
+        поведение всего типа.
+        """
+        best_type = 'unknown'   # search должен быть явным, поэтому не он
+        best_confidence = 0.0
+        best_length = 0
 
-            # Знакомое название рядом с глаголом снимает последние сомнения.
-            if any(vocabulary.has_word(text, name) for name in self.KNOWN_APP_NAMES):
-                open_app_score = 1.0
+        app_named = any(vocabulary.has_word(text, name) for name in self.KNOWN_APP_NAMES)
 
-        if open_app_score > 0:
-            max_score = open_app_score
-            best_command = 'open_app'
-
-        # Проверяем каждый тип команды
         for command_type, synonyms in self.COMMAND_SYNONYMS.items():
-            if command_type == 'open_app':
-                continue  # Уже проверили выше с приоритетом
-                
-            score = 0
-            found_count = 0
-            
-            for synonym in synonyms:
-                if synonym in text:
-                    found_count += 1
-                    # Даём разный вес слов
-                    if len(synonym) > 3:
-                        score += 2
-                    else:
-                        score += 1
-            
-            if found_count > 0:
-                confidence = min(score / (len(synonyms) / 2), 1.0)
-                if confidence > max_score:
-                    max_score = confidence
-                    best_command = command_type
+            matched = _longest_match(text, synonyms)
+            if not matched:
+                continue
 
-        # Название программы без единого глагола — это всё-таки просьба её
-        # открыть: на «дискорд» человек ждёт запуска, а не вопроса к ИИ. Но
-        # решается это в последнюю очередь, когда ни один тип не подошёл, а не
-        # вперёд всех остальных.
-        if best_command == 'unknown' and any(vocabulary.has_word(text, name) for name in self.KNOWN_APP_NAMES):
-            return 'open_app', 0.5
+            confidence = _match_confidence(matched)
 
-        return best_command, max_score
-    
+            # Знакомое название рядом с глаголом снимает последние сомнения:
+            # «открой браузер» надёжнее, чем просто «открой».
+            if app_named and command_type in self.APP_TYPES:
+                confidence = min(confidence + KNOWN_APP_BONUS, 1.0)
+
+            # При равной уверенности выигрывает более длинное совпадение:
+            # «открой сайт» точнее, чем «открой».
+            if (confidence, len(matched)) > (best_confidence, best_length):
+                best_type = command_type
+                best_confidence = confidence
+                best_length = len(matched)
+
+        # Название программы без единого глагола — всё-таки просьба её открыть:
+        # на «дискорд» человек ждёт запуска, а не рассказа о программе. Но
+        # решается это последним, когда ни один тип не подошёл.
+        if best_type == 'unknown' and app_named:
+            return 'open_app', BARE_APP_NAME
+
+        return best_type, best_confidence
+
     def _extract_parameter(self, text: str, command_type: str) -> str:
         """Извлечь основной параметр команды"""
         

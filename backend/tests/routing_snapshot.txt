@@ -49,7 +49,7 @@
 найди рецепт борща
     -> command/search: <выполнено: search / рецепт борща>
 погугли погоду в Москве
-    -> command/search: <выполнено: search / погугли погоду москве>
+    -> command/search: <выполнено: search / погоду москве>
 сделай громче
     -> command/system_command: <выполнено: system_command / volume_up>
 напомни через час позвонить маме
@@ -108,6 +108,12 @@ yandex котики
     -> command/search: <выполнено: search / котики>
 что такое яндекс
     -> question: <локальный ответ>
+поисковик
+    -> question: <локальный ответ>
+сайтостроение
+    -> question: <локальный ответ>
+открой сайт гугл
+    -> command/open_website: <выполнено: open_website / гугл>
 чем открыть pdf
     -> question: <локальный ответ>
 как открыть архив zip
