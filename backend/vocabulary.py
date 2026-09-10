@@ -174,6 +174,32 @@ def has_word(text: str, word: str) -> bool:
     ) is not None
 
 
+def strip_leading(text: str, phrases) -> str:
+    """
+    Убрать из начала фразы одно из служебных выражений — целиком.
+
+    Две тонкости, каждая стоила дефекта:
+
+    * Совпадение проверяется по границе слова. Простой `startswith` вырезал
+      «как» из «какие», оставляя «ие процессы запущены», — и Scott искал
+      процессы с таким именем.
+    * Длинные выражения проверяются первыми. Иначе «что» вырезается раньше,
+      чем «что такое», и в теме вопроса остаётся висеть слово «такое».
+    """
+    stripped = text.strip()
+    lower = stripped.lower()
+
+    for phrase in sorted(phrases, key=len, reverse=True):
+        if not phrase:
+            continue
+        if lower == phrase:
+            return ""
+        if lower.startswith(phrase) and not lower[len(phrase)].isalnum():
+            return stripped[len(phrase):].strip()
+
+    return stripped
+
+
 def has_any_word(text: str, words) -> bool:
     """Встречается ли в тексте хотя бы одно из слов — целиком."""
     return any(has_word(text, word) for word in words)

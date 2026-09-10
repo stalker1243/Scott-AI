@@ -115,4 +115,4 @@ yandex котики
 сколько можно открыть вкладок
     -> question: <локальный ответ>
 какие процессы запущены
-    -> command/list_processes: <выполнено: list_processes / ие процессы запущены>
+    -> command/list_processes: <выполнено: list_processes / процессы запущены>

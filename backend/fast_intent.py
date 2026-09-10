@@ -392,10 +392,14 @@ class FastIntentEngine:
 
     def extract_topic(self, text: str) -> str:
         text = re.sub(r'[?!.]+', '', text).strip()
-        for phrase in self.INFO_PHRASES + self.SEARCH_PHRASES + self.QUESTION_WORDS:
-            if text.startswith(phrase):
-                text = text[len(phrase):].strip()
-                break
+
+        # Служебное начало вырезается по границе слова и с предпочтением
+        # длинных выражений. Простой startswith вырезал «как» из «какие»,
+        # оставляя «ие процессы запущены».
+        text = vocabulary.strip_leading(
+            text,
+            list(self.INFO_PHRASES) + list(self.SEARCH_PHRASES) + list(self.QUESTION_WORDS),
+        )
         text = re.sub(r'^(что[- ]*нибудь|что[- ]*то)\s+', '', text)
         text = re.sub(r'^(о|об|про|на|в|такое|это)\s+', '', text)
         words = text.split()
