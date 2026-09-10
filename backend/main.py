@@ -1196,6 +1196,23 @@ async def _say_thinking() -> None:
             listening.resume()
 
 
+def _listener_interrupted(text: str) -> None:
+    """
+    Человек попросил замолчать — обрываем речь немедленно.
+
+    Обрывается вся очередь, а не только текущая фраза: ответ мог быть разбит
+    на части, и договаривать остальные после «хватит» — ровно то, чего просили
+    не делать.
+    """
+    try:
+        from speech_player import get_player, PLAYBACK_AVAILABLE
+    except ImportError:
+        from .speech_player import get_player, PLAYBACK_AVAILABLE
+
+    if PLAYBACK_AVAILABLE:
+        get_player().stop()
+
+
 def _listener_handle(text: str) -> None:
     """
     Выполнить услышанную команду и озвучить ответ.
@@ -1234,8 +1251,6 @@ def _listener_handle(text: str) -> None:
         # лишней работой Whisper, но стоит ему произнести «Скотт» — и он начнёт
         # разговаривать сам с собой без остановки.
         listening = scott_runtime.listener
-        if listening is not None:
-            listening.suspend()
         try:
             # Вслух — только суть. Замер: ответ ИИ на «что такое фотосинтез»
             # занимает 583 знака, и Scott читал его сорок три секунды. Всё это
@@ -1248,6 +1263,15 @@ def _listener_handle(text: str) -> None:
 
             path = await asyncio.to_thread(voice.speak_to_file, spoken)
             if path:
+                # Слушаем, не перебьют ли. Раньше здесь микрофон приглушался
+                # наглухо, и остановить ответ было нечем: человек ждал десять
+                # секунд, даже поняв ответ с первых слов.
+                #
+                # Начинаем слушать только перед самым звуком: между синтезом и
+                # воспроизведением ничего не звучит, и слушать там нечего.
+                if listening is not None:
+                    listening.expect_interruption(spoken)
+
                 await asyncio.to_thread(voice.play_audio, path)
         except Exception as e:
             print(f"⚠️ Не удалось озвучить ответ: {e}")
@@ -1256,7 +1280,7 @@ def _listener_handle(text: str) -> None:
                 # Небольшая пауза на эхо: звук из колонок доходит до микрофона
                 # с задержкой и не обрывается ровно на последнем слове.
                 await asyncio.sleep(0.4)
-                listening.resume()
+                listening.stop_expecting()
 
     asyncio.run_coroutine_threadsafe(run(), _main_loop)
 
@@ -1325,6 +1349,7 @@ try:
         transcribe=_listener_transcribe,
         handle_command=_listener_handle,
         check_trigger=check_voice_trigger,
+        on_interrupt=_listener_interrupted,
     )
     scott_runtime.set_listener(scott_listener)
     print("🎧 Слушатель готов (микрофон включается по команде из лаунчера)")

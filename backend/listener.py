@@ -107,6 +107,29 @@ class ListenerConfig:
     # в котором чаще всего и звучит имя.
     preroll: float = 0.4
 
+    # Перебивание: насколько громче колонок должен говорить человек.
+    #
+    # Порог считается не от тишины, а от громкости самого Scott — иначе всё
+    # зависело бы от того, насколько громко выкручены колонки. Меньше — Scott
+    # начнёт перебивать себя сам, больше — придётся кричать.
+    interrupt_threshold: float = 2.2
+
+    # Перебивают одним-двумя словами. Всё, что длиннее, — не перебивание, а
+    # обычная реплика, и разбирать её во время речи незачем.
+    interrupt_max_phrase: float = 1.6
+
+    # Пауза, после которой перебивание считается законченным. Короче обычной:
+    # ждать здесь нечего, слово уже сказано.
+    interrupt_silence: float = 0.35
+
+    # Сколько начала ответа уходит на замер громкости колонок.
+    #
+    # Это заведомо голос Scott: так быстро человек отреагировать не успевает.
+    # Замер нужен, чтобы планка перебивания встала на нужную высоту сразу, а не
+    # подстраивалась по ходу — подстраиваясь, она успевала впитать голос
+    # человека и переставала его слышать.
+    interrupt_calibration: float = 0.35
+
     device: Optional[int] = None
 
 
@@ -127,6 +150,11 @@ class ListenerStats:
     silence_to_end: float = 0.0
     cutoffs: int = 0
 
+    # Сколько раз Scott перебили и сколько раз он отверг собственное эхо.
+    # Второе важно не меньше первого: по нему видно, что щель работает узко.
+    interruptions: int = 0
+    echo_ignored: int = 0
+
     started_at: float = 0.0
     recent: List[str] = field(default_factory=list)
 
@@ -146,11 +174,16 @@ class VoiceListener:
         handle_command: Callable[[str], None],
         check_trigger: Optional[Callable[[str], object]] = None,
         config: Optional[ListenerConfig] = None,
+        on_interrupt: Optional[Callable[[str], None]] = None,
     ):
         self.transcribe = transcribe
         self.handle_command = handle_command
         self.check_trigger = check_trigger
         self.config = config or ListenerConfig()
+
+        # Что делать, когда Scott перебили. По умолчанию — ничего: сам
+        # слушатель речью не управляет, это дело того, кто его создал.
+        self.on_interrupt = on_interrupt
 
         self.stats = ListenerStats()
 
@@ -162,7 +195,10 @@ class VoiceListener:
 
         self._running = False
         self._blocks: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=200)
-        self._phrases: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=8)
+        # В очереди не только звук, но и метка «сказано во время речи Scott»:
+        # пока фраза ждёт разбора, он успевает договорить, и по состоянию уже
+        # не понять, перебивали его или нет.
+        self._phrases: "queue.Queue[tuple]" = queue.Queue(maxsize=8)
         self._threads: List[threading.Thread] = []
         self._stream = None
         self._lock = threading.Lock()
@@ -171,6 +207,21 @@ class VoiceListener:
         # Пока Scott говорит, входящий звук не разбирается: иначе он слышит
         # собственный ответ из колонок и принимает его за новую фразу.
         self._suspended = False
+
+        # Речь Scott, которую он произносит прямо сейчас. Нужна, чтобы отличить
+        # человека от эха: услышанное, найденное внутри этого текста, — не
+        # перебивание.
+        self._speaking_text = ""
+        self._expecting_interrupt = False
+
+        # Огибающая громкости колонок: быстро вверх, медленно вниз. По ней и
+        # считается порог перебивания, поэтому громкость колонок значения не
+        # имеет.
+        self._playback_level = 0.0
+
+        # Сколько блоков ответа уже прошло. Первые несколько — заведомо голос
+        # Scott, по ним и замеряется громкость колонок.
+        self._playback_blocks = 0
 
     # ==================== Управление ====================
 
@@ -266,6 +317,51 @@ class VoiceListener:
         """
         self._suspended = True
 
+    def expect_interruption(self, spoken_text: str = "") -> None:
+        """
+        Слушать, не перебьют ли, пока Scott говорит.
+
+        Раньше на это время микрофон приглушался наглухо, и человек не мог
+        остановить ответ, даже поняв его с первых слов. Теперь звук продолжает
+        разбираться, но щель узкая: порог поднимается до громкости самого
+        Scott, фраза принимается только короткая, и она должна распознаться как
+        просьба замолчать.
+
+        `spoken_text` — то, что Scott произносит прямо сейчас. По нему
+        отличается эхо: услышанное, найденное внутри этого текста, человеком не
+        является.
+        """
+        self._speaking_text = (spoken_text or "").lower()
+        self._expecting_interrupt = True
+
+        # Огибающая начинается с тишины и поднимется сама на первых же блоках
+        # речи Scott. Начинать с прошлого значения нельзя: громкость могли
+        # поменять, да и ответ бывает тише предыдущего.
+        self._playback_level = self._noise_floor
+        self._playback_blocks = 0
+
+    def stop_expecting(self) -> None:
+        """
+        Scott договорил — слушать как обычно.
+
+        Очередь блоков очищается: в ней осталась вторая половина собственного
+        ответа, разбирать её теперь незачем.
+        """
+        self._expecting_interrupt = False
+        self._speaking_text = ""
+        self._playback_level = 0.0
+        self._playback_blocks = 0
+
+        while True:
+            try:
+                self._blocks.get_nowait()
+            except queue.Empty:
+                break
+
+    @property
+    def is_expecting_interruption(self) -> bool:
+        return self._expecting_interrupt
+
     def resume(self) -> None:
         """
         Снова слушать.
@@ -299,6 +395,8 @@ class VoiceListener:
             # почему Scott стал медлительнее, будет негде.
             "silence_to_end": round(self._silence_to_end, 2),
             "cutoffs": self.stats.cutoffs,
+            "interruptions": self.stats.interruptions,
+            "echo_ignored": self.stats.echo_ignored,
             "recent": list(self.stats.recent[-10:]),
             "uptime_sec": round(time.time() - self.stats.started_at, 1) if self.stats.started_at else 0,
         }
@@ -315,7 +413,9 @@ class VoiceListener:
         """
         if status:
             self.stats.last_error = str(status)
-        if self._suspended:
+        # Приглушение полное — блоки не копятся вовсе. Но пока Scott говорит и
+        # ждёт перебивания, звук должен идти дальше: иначе перебить его нечем.
+        if self._suspended and not self._expecting_interrupt:
             return
         try:
             self._blocks.put_nowait(indata[:, 0].copy())
@@ -357,6 +457,7 @@ class VoiceListener:
         max_blocks = int(self.config.max_phrase * 1000 / BLOCK_MS)
         min_blocks = max(1, int(self.config.min_phrase * 1000 / BLOCK_MS))
 
+        calibration_blocks = max(1, int(self.config.interrupt_calibration * 1000 / BLOCK_MS))
         resume_blocks = max(1, int(self.config.resume_gap * 1000 / BLOCK_MS))
         clean_blocks = max(1, int(self.config.clean_gap * 1000 / BLOCK_MS))
 
@@ -366,6 +467,7 @@ class VoiceListener:
         silence_streak = 0
         loud_in_phrase = 0
         in_speech = False
+        calibrating = False
 
         # Сколько блоков тишины прошло с закрытия предыдущей фразы: по этому
         # промежутку видно, оборвали ли человека.
@@ -388,14 +490,55 @@ class VoiceListener:
                 continue
 
             level = self._level(block)
-            threshold = max(self._noise_floor * self.config.speech_threshold, self.config.absolute_floor)
+
+            if self._expecting_interrupt:
+                # Планка считается от громкости самого Scott, а не от тишины:
+                # иначе всё зависело бы от того, насколько выкручены колонки.
+                self._playback_blocks += 1
+                calibrating = self._playback_blocks <= calibration_blocks
+
+                if calibrating:
+                    # Начало ответа — заведомо голос Scott: так быстро человек
+                    # отреагировать не успевает. По этим блокам и замеряется
+                    # громкость колонок.
+                    self._playback_level = max(level, self._playback_level)
+
+                threshold = max(
+                    self._playback_level * self.config.interrupt_threshold,
+                    self._noise_floor * self.config.speech_threshold,
+                    self.config.absolute_floor,
+                )
+            else:
+                threshold = max(
+                    self._noise_floor * self.config.speech_threshold,
+                    self.config.absolute_floor,
+                )
+
             loud = level > threshold
+
+            # После замера планка только опускается — вслед за тем, как ответ
+            # становится тише. Подниматься ей нельзя, и это выяснилось не
+            # сразу: между речью Scott и голосом человека есть переходный блок,
+            # где слышно и то и другое. Он оказывается ниже порога, а значит
+            # «тихим», — и поднимал планку настолько, что остальные слова
+            # человека уже не проходили. Перебивание не начиналось вовсе.
+            if (self._expecting_interrupt and not calibrating
+                    and not loud and level < self._playback_level):
+                self._playback_level = 0.92 * self._playback_level + 0.08 * level
 
             if not in_speech:
                 # Фон обновляем только по тишине и очень медленно: резкий
                 # пересчёт по громкому блоку поднял бы порог так, что речь
                 # перестала бы его преодолевать.
-                if not loud:
+                # Фон обновляется только в настоящей тишине. Пока Scott
+                # говорит, в микрофон идёт его собственный голос, и принимать
+                # его за фон комнаты нельзя: порог уезжает вверх до его
+                # громкости, и человека рядом становится не слышно вовсе.
+                #
+                # Прежде эта беда не всплывала, потому что во время речи блоки
+                # отбрасывались целиком. Щель для перебивания её и открыла:
+                # порог доехал до 0.286 при голосе человека 0.247.
+                if not loud and not self._expecting_interrupt:
                     self._noise_floor = 0.95 * self._noise_floor + 0.05 * level
                     self.stats.noise_floor = self._noise_floor
 
@@ -434,9 +577,17 @@ class VoiceListener:
 
                 # Пауза живая: подстройка меняет её между фразами, и значение
                 # берётся заново на каждом блоке.
-                silence_blocks = max(1, int(self._silence_to_end * 1000 / BLOCK_MS))
+                if self._expecting_interrupt:
+                    # Перебивают одним-двумя словами: ждать здесь нечего, слово
+                    # уже сказано, и лишняя пауза — это лишние секунды речи,
+                    # которую человек просил прекратить.
+                    silence_blocks = max(1, int(self.config.interrupt_silence * 1000 / BLOCK_MS))
+                    limit_blocks = int(self.config.interrupt_max_phrase * 1000 / BLOCK_MS)
+                else:
+                    silence_blocks = max(1, int(self._silence_to_end * 1000 / BLOCK_MS))
+                    limit_blocks = max_blocks
 
-                too_long = len(phrase) >= max_blocks
+                too_long = len(phrase) >= limit_blocks
                 if silence_streak >= silence_blocks or too_long:
                     in_speech = False
                     loud_streak = 0
@@ -451,7 +602,10 @@ class VoiceListener:
                         had_phrase = True
                         audio = np.concatenate(phrase)
                         try:
-                            self._phrases.put_nowait(audio)
+                            # Метка ставится здесь, а не при разборе: пока фраза
+                            # ждёт очереди, Scott успевает договорить, и по
+                            # состоянию уже не понять, перебивали его или нет.
+                            self._phrases.put_nowait((audio, self._expecting_interrupt))
                         except queue.Full:
                             self.stats.last_error = "Не успеваю обрабатывать — фраза пропущена"
                     phrase = []
@@ -494,7 +648,7 @@ class VoiceListener:
     def _process_loop(self) -> None:
         while self._running:
             try:
-                audio = self._phrases.get(timeout=0.5)
+                audio, while_speaking = self._phrases.get(timeout=0.5)
             except queue.Empty:
                 continue
 
@@ -506,6 +660,13 @@ class VoiceListener:
                 continue
 
             if not text:
+                continue
+
+            # Фраза, услышанная во время речи Scott, — особый случай: это либо
+            # просьба замолчать, либо его собственное эхо. Обычной командой она
+            # быть не может, и разбирать её как команду нельзя.
+            if while_speaking:
+                self._handle_interruption(text)
                 continue
 
             with self._lock:
@@ -526,6 +687,49 @@ class VoiceListener:
             get_player().stop()
 
             self._dispatch(text)
+
+    def _handle_interruption(self, text: str) -> None:
+        """
+        Решить, перебил ли человек — или Scott услышал сам себя.
+
+        Две проверки поверх громкости и длины. Сначала эхо: если услышанное
+        встречается в том, что Scott произносит, — это его собственный голос из
+        колонок. Затем слово: даже прорвавшись через громкость, звук должен
+        распознаться как просьба замолчать.
+
+        Цена ошибки невелика — в худшем случае Scott замолчит, когда его не
+        просили, — но и такой ошибки лучше избежать.
+        """
+        try:
+            import vocabulary
+        except ImportError:
+            from . import vocabulary
+
+        услышано = text.lower().strip(" .,!?…")
+
+        if self._speaking_text and услышано and услышано in self._speaking_text:
+            with self._lock:
+                self.stats.echo_ignored += 1
+            print(f"🔇 Своё эхо, не перебивание: «{text}»")
+            return
+
+        if not vocabulary.has_any_word(услышано, vocabulary.INTERRUPT_WORDS):
+            with self._lock:
+                self.stats.echo_ignored += 1
+            return
+
+        with self._lock:
+            self.stats.interruptions += 1
+            self.stats.last_text = text
+
+        print(f"✋ Перебили: «{text}» — замолкаю")
+
+        if self.on_interrupt is not None:
+            try:
+                self.on_interrupt(text)
+            except Exception as e:
+                self.stats.last_error = f"Не удалось замолчать: {e}"
+                print(f"⚠️ {self.stats.last_error}")
 
     def _dispatch(self, text: str) -> None:
         """
