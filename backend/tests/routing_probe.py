@@ -91,7 +91,7 @@ def _stubs(main, scott):
     подмены = [
         (main.knowledge_base, "search_memory", lambda text: {}),
         (main.knowledge_base, "add_conversation", lambda *a, **k: None),
-        (main.question_answerer, "answer", lambda text: "<локальный ответ>"),
+        (main.question_answerer, "answer", lambda text, brief=False: "<локальный ответ>"),
         (main.web_integrations, "search_youtube_video",
          lambda q: {"message": f"<ютуб: поиск «{q}»>"}),
         (main.web_integrations, "search_github_repo",

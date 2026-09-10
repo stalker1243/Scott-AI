@@ -301,7 +301,7 @@ class QuestionAnswerer:
             original=text
         )
     
-    def answer(self, text: str) -> Optional[str]:
+    def answer(self, text: str, brief: bool = False) -> Optional[str]:
         """Ответить на вопрос"""
         if not self.is_question(text):
             return None
@@ -398,7 +398,7 @@ class QuestionAnswerer:
                         # тема!"), которая считалась полноценным ответом и не давала вопросу
                         # дойти до LLM — из-за этого на любой содержательный вопрос Scott
                         # отвечал отпиской за 50мс, ни разу не спросив модель.
-                        ai_answer = self._ai_fallback(clean_text, verbosity)
+                        ai_answer = self._ai_fallback(clean_text, verbosity, brief)
                         if ai_answer:
                             return ai_answer
                         return f"Пока не знаю, что такое «{subject}». Могу поискать в интернете, если попросишь."
@@ -420,7 +420,7 @@ class QuestionAnswerer:
                                 return long_desc
                             # Та же причина, что и выше: не подменяем незнание отпиской,
                             # а отдаём вопрос модели.
-                            ai_answer = self._ai_fallback(clean_text, verbosity)
+                            ai_answer = self._ai_fallback(clean_text, verbosity, brief)
                             if ai_answer:
                                 return ai_answer
                             return f"Пока не знаю про «{subject}». Могу поискать в интернете, если попросишь."
@@ -434,7 +434,7 @@ class QuestionAnswerer:
                 # ("что именно тебя интересует?") вместо того, чтобы рассказать.
                 # Сначала пробуем модель, встречный вопрос оставляем только на
                 # случай, когда LLM недоступен.
-                ai_answer = self._ai_fallback(clean_text, verbosity)
+                ai_answer = self._ai_fallback(clean_text, verbosity, brief)
                 if ai_answer:
                     return ai_answer
 
@@ -447,15 +447,16 @@ class QuestionAnswerer:
                 return "Конечно, я могу рассказать. О чем именно ты хочешь узнать?"
 
             # Ни одно встроенное правило не подошло — пробуем IntelligentAnswerer.
-            return self._ai_fallback(clean_text, verbosity)
+            return self._ai_fallback(clean_text, verbosity, brief)
 
         except Exception as e:
             print(f"❌ Ошибка в answer(): {e}")
             import traceback
             traceback.print_exc()
-            return self._ai_fallback(clean_text, verbosity)
+            return self._ai_fallback(clean_text, verbosity, brief)
 
-    def _ai_fallback(self, clean_text: str, verbosity: str) -> Optional[str]:
+    def _ai_fallback(self, clean_text: str, verbosity: str,
+                     brief: bool = False) -> Optional[str]:
         """
         Фоллбэк на IntelligentAnswerer, когда встроенные правила не дали ответа.
 
@@ -483,10 +484,18 @@ class QuestionAnswerer:
                 try:
                     # Запрашиваем ответ у IA, учитывая требуемую подробность
                     with _timing_stage("ответ.llm"):
-                        ai_resp = ia.answer_question(clean_text)
+                        ai_resp = ia.answer_question(clean_text, brief=brief)
                     if ai_resp and isinstance(ai_resp, str):
                         # Вернуть первые 1-2 предложения для краткости и ясности
                         sentences = re.split(r'(?<=[.!?])\s+', ai_resp.strip())
+
+                        # Вопрос задан голосом — подробность короткая, что бы
+                        # ни стояло в самой фразе. Вслух ответ звучит вдвое
+                        # дольше, чем читается глазами, и перебить его нельзя:
+                        # микрофон приглушён, пока Scott говорит.
+                        if brief:
+                            verbosity = 'short'
+
                         if verbosity == 'short':
                             concise = sentences[0] if sentences else ai_resp
                             print(f"🧠 Fallback IA ответ (short): {concise}")

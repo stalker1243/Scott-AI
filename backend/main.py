@@ -65,6 +65,7 @@ load_dotenv()
 from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException, Form, Request, Depends
 from security import require_scott_token, check_rate_limit
 from timing import stage as timing_stage, snapshot as timing_snapshot, reset as timing_reset
+from speech_text import shorten_for_speech
 import understanding
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -702,7 +703,8 @@ class ScottAI:
         phrases = self.acknowledgement_phrases + self.execution_phrases
         return random.choice(phrases)
     
-    async def process_command(self, text: str, quiet_mode: bool = False, user_name: str = "User") -> Dict:
+    async def process_command(self, text: str, quiet_mode: bool = False, user_name: str = "User",
+                              by_voice: bool = False) -> Dict:
         """
         Обёртка над _process_command_impl: замеряет время отклика и пишет
         каждую команду в analytics_manager — раньше это нигде не вызывалось,
@@ -710,7 +712,9 @@ class ScottAI:
         """
         start = time.time()
         with timing_stage("00.команда.всего"):
-            result = await self._process_command_impl(text, quiet_mode=quiet_mode, user_name=user_name)
+            result = await self._process_command_impl(
+                text, quiet_mode=quiet_mode, user_name=user_name, by_voice=by_voice
+            )
         if HAS_V32_FEATURES:
             try:
                 analytics_manager.record_command(
@@ -723,7 +727,8 @@ class ScottAI:
                 print(f"⚠️ Не удалось записать аналитику: {e}")
         return result
 
-    async def _process_command_impl(self, text: str, quiet_mode: bool = False, user_name: str = "User") -> Dict:
+    async def _process_command_impl(self, text: str, quiet_mode: bool = False, user_name: str = "User",
+                                    by_voice: bool = False) -> Dict:
         """
         Понять фразу и сделать то, о чём просили.
 
@@ -791,7 +796,7 @@ class ScottAI:
 
             # ---------------------------------------------------- вопрос
             if decision.kind == 'question':
-                return await self._answer_as_question(text, quiet_mode, decision)
+                return await self._answer_as_question(text, quiet_mode, decision, by_voice)
 
             # ---------------------------------------------------- действие
             with timing_stage("команда.выполнение"):
@@ -815,7 +820,8 @@ class ScottAI:
                 "error": str(e)
             }
 
-    async def _answer_as_question(self, text: str, quiet_mode: bool, decision) -> Dict:
+    async def _answer_as_question(self, text: str, quiet_mode: bool, decision,
+                                  by_voice: bool = False) -> Dict:
         """
         Ответить на вопрос: сначала своими силами, потом с помощью ИИ.
 
@@ -824,7 +830,10 @@ class ScottAI:
         миллисекунд и тратить лимит запросов на то, что и так известно.
         """
         with timing_stage("ответ.локальный"):
-            answer = question_answerer.answer(text)
+            # Признак «спросили голосом» нужен и здесь: отвечающий сам
+            # обращается к модели, когда своих правил ему не хватает, и без
+            # признака оттуда приходил ответ на полтысячи знаков со списками.
+            answer = question_answerer.answer(text, brief=by_voice)
         if answer:
             knowledge_base.add_conversation(text, answer)
             print(f"🤖 Scott: {answer}")
@@ -837,7 +846,9 @@ class ScottAI:
         if intelligent_answerer:
             print(f"🧠 Использую ИИ для ответа...")
             with timing_stage("ответ.llm"):
-                ai_answer = intelligent_answerer.answer_question(text)
+                # Вопрос с микрофона — просим короткий ответ: вслух он
+                # звучит вдвое дольше, чем читается глазами.
+                ai_answer = intelligent_answerer.answer_question(text, brief=by_voice)
             if ai_answer:
                 print(f"✨ Ответ от ИИ: {ai_answer[:100]}...")
                 knowledge_base.add_conversation(text, ai_answer)
@@ -1201,7 +1212,7 @@ def _listener_handle(text: str) -> None:
         # Ответ ИИ иногда идёт долго — замеры показывают до двадцати девяти
         # секунд в худших случаях. Столько молчать нельзя: человек решит, что
         # его не услышали, и повторит вопрос, а потом ещё раз.
-        thinking = asyncio.create_task(scott_ai.process_command(text))
+        thinking = asyncio.create_task(scott_ai.process_command(text, by_voice=True))
         finished, _ = await asyncio.wait({thinking}, timeout=THINKING_CUE_AFTER_SECONDS)
 
         if not finished:
@@ -1226,7 +1237,16 @@ def _listener_handle(text: str) -> None:
         if listening is not None:
             listening.suspend()
         try:
-            path = await asyncio.to_thread(voice.speak_to_file, response)
+            # Вслух — только суть. Замер: ответ ИИ на «что такое фотосинтез»
+            # занимает 583 знака, и Scott читал его сорок три секунды. Всё это
+            # время микрофон приглушён, чтобы он не услышал сам себя, — то есть
+            # перебить его нельзя даже словом. Полный текст остаётся в чате, где
+            # его можно прочитать глазами за пару секунд.
+            spoken = shorten_for_speech(response)
+            if spoken != response:
+                print(f"✂️ Вслух короче: {len(response)} знаков -> {len(spoken)}")
+
+            path = await asyncio.to_thread(voice.speak_to_file, spoken)
             if path:
                 await asyncio.to_thread(voice.play_audio, path)
         except Exception as e:

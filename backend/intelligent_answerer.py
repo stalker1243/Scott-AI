@@ -200,6 +200,34 @@ class ConversationMemory:
         self.conversations = []
 
 
+# Отдельный запрос для вопросов, заданных голосом.
+#
+# Не приписка к обычному, а замена. В обычном есть правило «используй примеры и
+# аналогии для объяснения», и оно тянет в прямо противоположную сторону:
+# приписанная просьба быть кратким ей проигрывала — проверено живьём, ответ
+# остался на триста с лишним знаков.
+#
+# Речь идёт вдвое медленнее чтения: ответ на четыреста знаков Scott читает
+# двадцать пять секунд, и всё это время микрофон приглушён — перебить его
+# нельзя даже словом. В чате тот же ответ читают глазами за пару секунд,
+# поэтому краткость нужна только вслух.
+BRIEF_SYSTEM_PROMPT = """Ты Scott AI — голосовой помощник. Твой ответ будет
+произнесён вслух, поэтому он должен быть коротким.
+
+ПРАВИЛА:
+1. Отвечай на русском, одним-двумя короткими предложениями.
+2. Никаких списков, заголовков, звёздочек и разметки — всё это будет прочитано
+   вслух как есть.
+3. Скажи только главное. Без примеров, аналогий и вступлений вроде «проще
+   говоря».
+4. Не знаешь — скажи коротко и честно.
+"""
+
+# Предел на длину короткого ответа. Одной просьбы бывает мало: модель
+# увлекается и договаривает мысль до конца, сколько бы её ни просили.
+BRIEF_MAX_TOKENS = 160
+
+
 class IntelligentAnswerer:
     """Полнофункциональный ИИ-ассистент на Groq + OpenAI fallback"""
     
@@ -546,7 +574,7 @@ class IntelligentAnswerer:
 
         return False
 
-    def answer(self, text: str, use_memory: bool = True) -> Tuple[str, bool]:
+    def answer(self, text: str, use_memory: bool = True, brief: bool = False) -> Tuple[str, bool]:
         """
         Получить ответ от ИИ (Groq или OpenAI)
         
@@ -569,7 +597,10 @@ class IntelligentAnswerer:
             self.memory.add_message("user", text)
             
             # Получаем контекст разговора
-            messages = [{"role": "system", "content": self.system_prompt}]
+            instructions = BRIEF_SYSTEM_PROMPT if brief else self.system_prompt
+            max_tokens = BRIEF_MAX_TOKENS if brief else self.max_tokens
+
+            messages = [{"role": "system", "content": instructions}]
             if use_memory:
                 messages.extend(self.memory.get_context())
             else:
@@ -588,7 +619,7 @@ class IntelligentAnswerer:
                         "model": self.model,
                         "messages": messages,
                         "temperature": self.temperature,
-                        "max_tokens": self.max_tokens,
+                        "max_tokens": max_tokens,
                     },
                     timeout=30,
                 )
@@ -605,7 +636,7 @@ class IntelligentAnswerer:
                         model=self.model,
                         messages=messages,
                         temperature=self.temperature,
-                        max_tokens=self.max_tokens,
+                        max_tokens=max_tokens,
                         timeout=REQUEST_TIMEOUT_SECONDS,
                     ),
                     provider="Groq",
@@ -621,7 +652,7 @@ class IntelligentAnswerer:
                         model=self.model,
                         messages=messages,
                         temperature=self.temperature,
-                        max_tokens=self.max_tokens,
+                        max_tokens=max_tokens,
                         top_p=0.95,
                         presence_penalty=0.0,
                         frequency_penalty=0.0,
@@ -644,7 +675,7 @@ class IntelligentAnswerer:
             print(error_msg)
             return error_msg, False
     
-    def answer_question(self, question: str) -> str:
+    def answer_question(self, question: str, brief: bool = False) -> str:
         """
         Быстрый метод получить ответ (alias для answer)
         Поддерживает fallback режим без OpenAI API
@@ -659,7 +690,7 @@ class IntelligentAnswerer:
             # Fallback режим - простые ответы без API
             return self._fallback_answer(question)
         
-        answer, success = self.answer(question, use_memory=True)
+        answer, success = self.answer(question, use_memory=True, brief=brief)
         return answer
     
     def _fallback_answer(self, question: str) -> str:
