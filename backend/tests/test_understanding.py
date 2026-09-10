@@ -212,3 +212,56 @@ def test_search_words_cover_the_parser(движки):
         if not any(known in word for known in understanding.EXPLICIT_SEARCH_WORDS)
     ]
     assert not забытые, f"разборщик знает слова поиска, а список явного — нет: {забытые}"
+
+
+# ==================== Вопрос сильнее глагола ====================
+
+@pytest.mark.parametrize("phrase", [
+    "чем открыть pdf",
+    "как открыть архив zip",
+    "где открыть счёт в банке",
+    "сколько можно открыть вкладок",
+    "Скотт, чем открыть djvu",
+    "чем выключить компьютер по расписанию",
+])
+def test_question_word_beats_verb(решить, phrase):
+    """
+    Вопросительное слово в начале сильнее глагола в середине.
+
+    «Чем открыть pdf» — вопрос о том, какой программой это делается. Scott же
+    пытался запустить программу с названием «чем pdf» и рапортовал о неудаче.
+    Глагол «открыть» встречался в фразе, движок намерений объявлял её приказом,
+    и проверка «вопрос ли это» не выполнялась вовсе: она стоит под условием
+    «если не приказ».
+    """
+    decision = решить(phrase)
+    assert decision.kind == "question", f"«{phrase}» -> {decision.kind}/{decision.action}"
+
+
+@pytest.mark.parametrize("phrase,action", [
+    ("какая погода", "get_weather"),
+    ("какие процессы запущены", "list_processes"),
+])
+def test_question_word_does_not_break_real_commands(решить, phrase, action):
+    """
+    Пара к тесту выше, и она важнее.
+
+    Многие настоящие команды начинаются с вопросительного слова: «какая
+    погода», «какие процессы запущены». Правило нарочно узкое — оно перебивает
+    только действия с программами и файлами, где «чем открыть» означает
+    просьбу посоветовать.
+    """
+    decision = решить(phrase)
+    assert decision.kind == "action", f"«{phrase}» -> {decision.kind}"
+    assert decision.action == action
+
+
+@pytest.mark.parametrize("phrase", [
+    "открой блокнот",
+    "закрой дискорд",
+    "можешь открыть телеграм",
+    "открой папку загрузки",
+])
+def test_plain_commands_unaffected(решить, phrase):
+    """Приказы без вопросительного слова остались приказами."""
+    assert решить(phrase).kind == "action", f"«{phrase}» -> {решить(phrase).kind}"

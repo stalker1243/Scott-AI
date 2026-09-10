@@ -105,6 +105,19 @@ KNOWN_APP_NAMES = vocabulary.KNOWN_APP_NAMES
 # Человек прямо просит поискать, а не отвечать самому.
 EXPLICIT_SEARCH_WORDS = vocabulary.SEARCH_WORDS
 
+# Действия с программами и файлами.
+#
+# Отдельный список нужен ради одного правила: вопросительное слово в начале
+# фразы перебивает эти типы, но не остальные. «Чем открыть pdf» — просьба
+# посоветовать, а не запустить программу «чем pdf»; зато «какая погода» и
+# «сколько памяти занято» тоже начинаются с вопросительного слова, и это
+# настоящие команды, на которые Scott отвечает сам.
+PROGRAM_ACTION_TYPES = {
+    'open_app', 'close_app', 'create_file', 'create_folder',
+    'open_folder', 'open_website', 'open_url',
+    'manage_window', 'file_operation',
+}
+
 # Типы, которые Scott выполняет сам.
 ACTION_COMMAND_TYPES = {
     'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
@@ -169,12 +182,27 @@ def understand(text: str, *, intent_engine, parser, answerer) -> Decision:
                 intent=intent,
             )
 
-    # 2. Вопрос — если это не явный приказ. Порядок важен: «Можешь открыть
+    # 2. Вопросительное слово в начале сильнее глагола в середине.
+    #
+    #    «Чем открыть pdf» — вопрос о том, какой программой это делается, а не
+    #    просьба запустить программу «чем pdf». Движок намерений видел глагол
+    #    «открыть» и объявлял фразу приказом, после чего проверка «вопрос ли
+    #    это» не выполнялась вовсе: она стоит ниже, под условием «если не
+    #    приказ».
+    if starts_with_question_word(lower) and intent.intent_type in PROGRAM_ACTION_TYPES:
+        return Decision(
+            kind='question',
+            reason=f"начинается с вопросительного слова — спрашивают, а не приказывают "
+                   f"(разбор предлагал {intent.intent_type})",
+            intent=intent,
+        )
+
+    # 3. Вопрос — если это не явный приказ. Порядок важен: «Можешь открыть
     #    блокнот?» оформлено вопросом, но is_command об этом знает.
     if not intent.is_command and answerer.is_question(text):
         return Decision(kind='question', reason="вопрос по форме", intent=intent)
 
-    # 3. Разбор команды. Если намерение уверено, что это приказ, сначала
+    # 4. Разбор команды. Если намерение уверено, что это приказ, сначала
     #    снимаем вежливую обёртку: разборщик заметно надёжнее на чистом
     #    императиве («открой блокнот»), чем на «Скотт, можешь открыть блокнот?».
     command_text = strip_command_wrapper(text) if intent.is_command else text
@@ -207,7 +235,7 @@ def understand(text: str, *, intent_engine, parser, answerer) -> Decision:
 
     explicit_search = any(word in lower for word in EXPLICIT_SEARCH_WORDS)
 
-    # 4. Поиск без просьбы искать — обычно всё-таки вопрос: «что такое яндекс»
+    # 5. Поиск без просьбы искать — обычно всё-таки вопрос: «что такое яндекс»
     #    не значит «поищи в яндексе».
     if parsed.command_type == 'search' and not explicit_search and looks_like_question(text, intent):
         return Decision(
@@ -217,7 +245,7 @@ def understand(text: str, *, intent_engine, parser, answerer) -> Decision:
             intent=intent,
         )
 
-    # 5. Оболочку не выполняем никогда — проверка стоит раньше исполнения.
+    # 6. Оболочку не выполняем никогда — проверка стоит раньше исполнения.
     if parsed.command_type in SHELL_TYPES:
         return Decision(
             kind='refused',
@@ -227,7 +255,7 @@ def understand(text: str, *, intent_engine, parser, answerer) -> Decision:
             intent=intent,
         )
 
-    # 6. Выполнять или всё-таки отвечать.
+    # 7. Выполнять или всё-таки отвечать.
     explicit_action = any(lower.startswith(prefix) for prefix in EXPLICIT_ACTION_PREFIXES)
     explicit_app = any(name in lower for name in KNOWN_APP_NAMES)
 
@@ -248,7 +276,7 @@ def understand(text: str, *, intent_engine, parser, answerer) -> Decision:
             intent=intent,
         )
 
-    # 7. Ни вопрос по форме, ни знакомая команда. Короткая фраза скорее
+    # 8. Ни вопрос по форме, ни знакомая команда. Короткая фраза скорее
     #    разговор, чем приказ, — на такие лучше ответить, чем сделать
     #    неизвестно что.
     if answerer.is_question(text) or len(lower.split()) <= 5:
@@ -259,7 +287,7 @@ def understand(text: str, *, intent_engine, parser, answerer) -> Decision:
             intent=intent,
         )
 
-    # 8. Последняя возможность: выполнить то, что разобралось.
+    # 9. Последняя возможность: выполнить то, что разобралось.
     return Decision(
         kind='action',
         action=parsed.command_type,
@@ -328,6 +356,26 @@ def extract_web_query(text: str, filler_words) -> str:
     words = strip_command_wrapper(text).split()
     kept = [w for w in words if w.lower().strip('.,!?:;—-') not in filler_words]
     return ' '.join(kept).strip()
+
+
+def starts_with_question_word(text: str) -> bool:
+    """
+    Начинается ли фраза с вопросительного слова.
+
+    Обращение в начале не считается: «Скотт, чем открыть pdf» — тот же вопрос,
+    что и без обращения.
+    """
+    words = [
+        w for w in re.sub(r'[^\w\s]+', ' ', text.lower(), flags=re.UNICODE).split()
+        if w not in vocabulary.ADDRESS_WORDS
+    ]
+    if not words:
+        return False
+
+    # Двусловные вопросительные обороты («есть ли», «можно ли») проверяются
+    # вместе — по одному слову они ничего не значат.
+    начало_двух = ' '.join(words[:2])
+    return words[0] in QUESTION_KEYWORDS or начало_двух in QUESTION_KEYWORDS
 
 
 def looks_like_question(text: str, intent=None) -> bool:
