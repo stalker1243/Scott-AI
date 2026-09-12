@@ -54,6 +54,14 @@ public partial class HomeViewModel : ViewModelBase
     [ObservableProperty]
     private double _diskPercent;
 
+    /// <summary>
+    /// Сколько места на диске занято.
+    ///
+    /// Величина медленная: она меняется не в такт остальным и плавного
+    /// подъезда к новому значению не требует, поэтому берётся как есть.
+    /// </summary>
+    [ObservableProperty] private double _diskUsagePercent;
+
     // ---- Прослушивание микрофона ----
     // Scott слушает непрерывно, но выполняет только то, что сказано после его
     // имени. Поэтому счётчиков два: сколько фраз он услышал вообще и сколько
@@ -200,6 +208,7 @@ public partial class HomeViewModel : ViewModelBase
                 _ramTarget = metrics.Metrics.Ram;
                 _gpuTarget = metrics.Metrics.Gpu;
                 _diskTarget = metrics.Metrics.Disk;
+                DiskUsagePercent = metrics.Metrics.DiskUsage;
                 _processTarget = metrics.Metrics.Processes;
             }
             await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(3));

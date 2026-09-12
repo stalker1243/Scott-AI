@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:conv="using:ScottAI.Avalonia.Converters"
@@ -175,8 +175,8 @@
                 <TextBlock Classes="reading"
                            Text="{Binding DiskPercent, StringFormat={}{0:0}%}"
                            Foreground="{Binding DiskPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                <TextBlock Text="ноги · занято на системном" FontSize="10"
-                           Foreground="{DynamicResource TextMuted}" />
+                <TextBlock Text="{Binding DiskUsagePercent, StringFormat={}ноги · занято места {0:0}%}"
+                           FontSize="10" Foreground="{DynamicResource TextMuted}" />
             </StackPanel>
         </StackPanel>
     </Grid>

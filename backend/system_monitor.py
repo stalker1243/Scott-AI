@@ -11,6 +11,11 @@ import threading
 import time
 
 try:
+    from . import disk_load as disk_load_module
+except ImportError:
+    import disk_load as disk_load_module
+
+try:
     import GPUtil
 except Exception:  # pragma: no cover - optional dependency
     GPUtil = None
@@ -25,6 +30,7 @@ class SystemMonitor:
             "ram": 0,
             "gpu": 0,
             "disk": 0,
+            "disk_usage": 0,
             "processes": 0,
             "network_sent": 0,
             "network_recv": 0
@@ -32,6 +38,11 @@ class SystemMonitor:
         
         self.monitoring = False
         self.monitor_thread = None
+
+        # Нагрузка на диск считается по-разному на разных системах, и у обоих
+        # способов есть состояние: открытый счётчик на Windows, предыдущий
+        # замер на остальных. Поэтому измеритель живёт вместе с монитором.
+        self._disk = disk_load_module.DiskLoad()
         
         print("✅ Монитор системы инициализирован")
     
@@ -41,7 +52,11 @@ class SystemMonitor:
             self.metrics["cpu"] = psutil.cpu_percent(interval=0.1)
             self.metrics["ram"] = psutil.virtual_memory().percent
             disk_path = 'C:' if os.name == 'nt' else '/'
-            self.metrics["disk"] = psutil.disk_usage(disk_path).percent
+            # Нагрузка и заполненность — разные величины, и путать их нельзя:
+            # рядом с процессором, памятью и видеокартой должна стоять
+            # нагрузка, иначе четыре числа означают не одно и то же.
+            self.metrics["disk"] = self._disk.read()
+            self.metrics["disk_usage"] = psutil.disk_usage(disk_path).percent
             self.metrics["processes"] = len(psutil.pids())
             
             # GPU (если доступна)
