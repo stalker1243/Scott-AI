@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -70,6 +70,16 @@ public sealed class Mesh
     public List<Point3> Vertices { get; } = new();
     public List<Face> Faces { get; } = new();
 
+    /// <summary>
+    /// Границы каждой добавленной формы: с какой вершины началась и сколько их.
+    ///
+    /// Нужны не для построения, а для проверки: фигура собрана из полусотни
+    /// отдельных форм, и любая из них может незаметно оказаться в стороне от
+    /// остальных. Так однажды и вышло — кисть висела рядом с предплечьем, не
+    /// касаясь его, и рука выглядела приставленной из кусков.
+    /// </summary>
+    public List<(int Start, int Count, BodyPart Part)> Shapes { get; } = new();
+
     /// <summary>Из чего сделана часть тела, если вещество не названо прямо.</summary>
     public static Substance DefaultSubstance(BodyPart part) => part switch
     {
@@ -134,6 +144,8 @@ public sealed class Mesh
         Quad(3, 2, 6, 7, 1.00);   // зад
         Quad(0, 3, 7, 4, 0.86);   // левый бок
         Quad(1, 5, 6, 2, 0.86);   // правый бок
+
+        Shapes.Add((start, Vertices.Count - start, part));
     }
 
     /// <summary>
@@ -214,6 +226,47 @@ public sealed class Mesh
             var last = (rings.Count - 1) * sides;
             for (var i = 0; i < sides; i++) bottom[i] = start + last + i;
             Faces.Add(new Face(bottom, part) { Tint = tint * 0.7, Substance = stuff });
+        }
+
+        Shapes.Add((start, Vertices.Count - start, part));
+    }
+
+    /// <summary>
+    /// Запомнить, где начинается часть из нескольких форм.
+    ///
+    /// Сдвигать и поворачивать одну последнюю форму мало, когда часть собрана
+    /// из нескольких: рука это плечо, предплечье, ладонь и пять пальцев, и
+    /// двигаться они обязаны вместе. Пока каждая форма ставилась на своё
+    /// место отдельно, кисть висела в стороне от предплечья.
+    /// </summary>
+    public int Mark() => Vertices.Count;
+
+    /// <summary>Сдвинуть всё, что добавлено после отметки.</summary>
+    public void ShiftFrom(int start, double dx, double dy, double dz)
+    {
+        for (var i = start; i < Vertices.Count; i++)
+        {
+            Vertices[i] = Vertices[i] + new Point3(dx, dy, dz);
+        }
+    }
+
+    /// <summary>Наклонить вбок всё, что добавлено после отметки.</summary>
+    public void TiltFrom(int start, double degrees, double pivotX = 0, double pivotY = 0)
+    {
+        var angle = degrees * Math.PI / 180;
+        var cos = Math.Cos(angle);
+        var sin = Math.Sin(angle);
+
+        for (var i = start; i < Vertices.Count; i++)
+        {
+            var v = Vertices[i];
+            var x = v.X - pivotX;
+            var y = v.Y - pivotY;
+
+            Vertices[i] = new Point3(
+                pivotX + x * cos - y * sin,
+                pivotY + x * sin + y * cos,
+                v.Z);
         }
     }
 
@@ -470,11 +523,8 @@ public static class Figure
     // ==================== Рука ====================
     private static void BuildArm(Mesh mesh, int side)
     {
-        // Дельта плеча: округлая шапка. Без неё рука выглядит трубой,
-        // вставленной в корпус.
-        // Дельта начинается выше и уже, чем плечо, и расходится книзу: она
-        // должна вырастать из торса, а не сидеть на нём шаром. Прежняя была
-        // толще плечевого пояса в самой верхней точке и читалась наплечником.
+        // Дельта плеча: округлая шапка. Она вырастает из торса и стоит на
+        // месте, поэтому строится отдельно от подвижной части.
         mesh.AddTube(BodyPart.Arms, new[]
         {
             (-70.5, 2.6, 3.0),
@@ -484,11 +534,18 @@ public static class Figure
             (-58.0, 6.4, 6.8),
         }, sides: Round);
 
-        mesh.ShiftLast(side * 19.5, 0, 0);
+        mesh.ShiftLast(side * 18.5, 0, 0);
 
-        // Рука: плечо толще предплечья, локоть на уровне талии, запястье на
-        // уровне паха. Предплечье полнее у локтя и сходит к запястью — ровная
-        // труба от плеча до кисти читается палкой.
+        // Дальше рука строится вокруг оси и целиком встаёт на место в конце.
+        //
+        // Раньше каждая форма ставилась отдельно, и кисть висела в стороне от
+        // предплечья: наклон уводил его нижний конец к телу, а кисть об этом
+        // не знала.
+        var arm = mesh.Mark();
+
+        // Плечо толще предплечья, локоть на уровне талии, запястье на уровне
+        // паха. Предплечье полнее у локтя и сходит к запястью — ровная труба
+        // от плеча до кисти читается палкой.
         mesh.AddTube(BodyPart.Arms, new[]
         {
             (-61.0, 5.4, 5.4),
@@ -502,17 +559,21 @@ public static class Figure
             (-19.0, 2.9, 2.9),   // запястье
         }, tint: 0.97, sides: Plain);
 
-        mesh.ShiftLast(side * 24, 0, 0);
-        mesh.TiltLast(side * 4, side * 24, -62);
+        BuildHand(mesh);
 
-        BuildHand(mesh, side);
+        // Рука идёт вдоль корпуса и слегка внутрь: у человека опущенная кисть
+        // приходится на середину бедра, а не висит в стороне.
+        mesh.ShiftFrom(arm, side * 18.5, 0, 0);
+        mesh.TiltFrom(arm, side * 2, side * 18.5, -61);
     }
 
     // ==================== Кисть ====================
     //
     // Кисть была одной каплей, и рука заканчивалась культёй. Теперь ладонь и
-    // пять пальцев — четыре в ряд и большой, отставленный вбок.
-    private static void BuildHand(Mesh mesh, int side)
+    // пять пальцев — четыре в ряд и большой, отставленный вперёд.
+    //
+    // Строится вокруг оси: на место её поставит рука, вместе с предплечьем.
+    private static void BuildHand(Mesh mesh)
     {
         // Ладонь: узкая, если смотреть фигуре в лицо, и толстая в глубину.
         //
@@ -528,7 +589,7 @@ public static class Figure
             (-9.5, 2.5, 3.2),
         }, tint: 0.93, sides: Plain);
 
-        mesh.ShiftLast(side * 26, 0, -1);
+        mesh.ShiftLast(0, 0, -1);
 
         // Четыре пальца в ряд по глубине: указательный впереди, мизинец
         // сзади. Длина разная — средний длиннее всех; одинаковые пальцы
@@ -548,10 +609,9 @@ public static class Figure
                 (tip, 0.55, 0.55),
             }, tint: 0.9, sides: Rough);
 
-            mesh.ShiftLast(side * 26, 0, -1 + depths[i]);
+            mesh.ShiftLast(0, 0, -1 + depths[i]);
 
             // Расслабленная кисть держит пальцы подогнутыми, а не по струнке.
-            // Прямые пальцы выдают куклу мгновенно.
             mesh.LeanLast(-10, top, -1 + depths[i]);
         }
 
@@ -564,7 +624,7 @@ public static class Figure
             (-9.5, 0.65, 0.65),
         }, tint: 0.9, sides: Rough);
 
-        mesh.ShiftLast(side * 26, 0, -3.4);
+        mesh.ShiftLast(0, 0, -3.4);
         mesh.LeanLast(-34, -15.0, -3.4);
     }
 
