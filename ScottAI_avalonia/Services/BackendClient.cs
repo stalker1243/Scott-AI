@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -229,6 +231,69 @@ public class BackendClient
         var res = await _http.PostAsJsonAsync("/ifttt/delete-rule", new { name });
         var body = await res.Content.ReadFromJsonAsync<SimpleResponse>();
         return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
+    }
+
+    // ---------- Вложения ----------
+
+    /// <summary>
+    /// Спросить о прикреплённом файле.
+    ///
+    /// Файл уходит целиком, а не путём на диске: путь имеет смысл только на
+    /// той же машине, а лаунчер и backend — вообще говоря, разные программы.
+    ///
+    /// Ждём долго: разбор снимка экрана моделью со зрением занимает заметно
+    /// больше времени, чем обычный вопрос, и обычного срока не хватает.
+    /// </summary>
+    public async Task<(bool Success, string Answer, string Note)> AskAboutFileAsync(
+        string path, string question)
+    {
+        try
+        {
+            using var form = new MultipartFormDataContent();
+            using var bytes = new ByteArrayContent(await File.ReadAllBytesAsync(path));
+
+            bytes.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            form.Add(bytes, "file", Path.GetFileName(path));
+            form.Add(new StringContent(question ?? "", Encoding.UTF8), "question");
+
+            using var patience = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            var res = await _http.PostAsync("/attachments/ask", form, patience.Token);
+
+            var body = await res.Content.ReadFromJsonAsync<AttachmentAnswer>(
+                cancellationToken: patience.Token);
+
+            if (body is null)
+            {
+                return (false, $"Backend ответил HTTP {(int)res.StatusCode}", "");
+            }
+
+            return body.Success
+                ? (true, body.Answer ?? "", body.Note ?? "")
+                : (false, body.Error ?? "Не удалось разобрать файл", "");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message, "");
+        }
+    }
+
+    /// <summary>
+    /// Умеет ли выбранная модель смотреть картинки.
+    ///
+    /// Спрашивается до отправки: сказать заранее, что модель работает только с
+    /// текстом, лучше, чем принять снимок и вернуть ответ ни о чём.
+    /// </summary>
+    public async Task<bool> ModelSeesImagesAsync()
+    {
+        try
+        {
+            var body = await _http.GetFromJsonAsync<VisionAbility>("/attachments/ability");
+            return body?.SeesImages ?? false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // ---------- Протоколы ----------
@@ -617,6 +682,19 @@ public class V33Envelope<T>
 public class IftttListResponse
 {
     [JsonPropertyName("rules")] public List<IftttRule>? Rules { get; set; }
+}
+
+public class AttachmentAnswer
+{
+    [JsonPropertyName("success")] public bool Success { get; set; }
+    [JsonPropertyName("answer")] public string? Answer { get; set; }
+    [JsonPropertyName("error")] public string? Error { get; set; }
+    [JsonPropertyName("note")] public string? Note { get; set; }
+}
+
+public class VisionAbility
+{
+    [JsonPropertyName("sees_images")] public bool SeesImages { get; set; }
 }
 
 public class ProtocolListResponse

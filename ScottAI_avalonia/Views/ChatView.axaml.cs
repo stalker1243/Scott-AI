@@ -60,8 +60,11 @@ public partial class ChatView : UserControl
         });
         if (files.Count == 0) return;
 
+        // Нужен путь, а не только имя: по имени файл не прочитать, а именно
+        // этим прикрепление и занималось — оттого Scott и «не умел»
+        // анализировать картинки.
         if (DataContext is ChatViewModel vm)
-            vm.SetAttachedImage(files[0].Name);
+            vm.SetAttachedImage(files[0].Name, files[0].Path.LocalPath);
     }
 
     private async void OnPickFileClick(object? sender, RoutedEventArgs e)
@@ -77,6 +80,6 @@ public partial class ChatView : UserControl
         if (files.Count == 0) return;
 
         if (DataContext is ChatViewModel vm)
-            vm.SetAttachedFile(files[0].Name);
+            vm.SetAttachedFile(files[0].Name, files[0].Path.LocalPath);
     }
 }

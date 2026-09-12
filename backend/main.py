@@ -611,6 +611,16 @@ try:
 except ImportError as e:
     print(f"⚠️ Endpoints протоколов не подключены: {e}")
 
+# Разбор прикреплённых картинок и документов.
+try:
+    try:
+        from .attachment_endpoints import router as attachment_router
+    except ImportError:
+        from attachment_endpoints import router as attachment_router
+    app.include_router(attachment_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints вложений не подключены: {e}")
+
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
 try:

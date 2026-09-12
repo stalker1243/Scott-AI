@@ -328,6 +328,21 @@ BRIEF_SYSTEM_PROMPT = """Ты Scott AI — голосовой помощник. 
 BRIEF_MAX_TOKENS = 160
 
 
+# Провайдеры, чьи модели умеют смотреть картинки.
+#
+# Список именно провайдеров, а не моделей: у Anthropic и OpenAI зрение есть у
+# всех нынешних разговорных моделей, а у шлюза оно зависит от выбранной — но
+# проверить это заранее нельзя, и отказывать наперёд неправильно.
+#
+# Groq и DeepSeek сюда не входят: их модели работают только с текстом.
+VISION_PROVIDERS = ("Anthropic", "OpenAI", "OpenRouter")
+
+
+def provider_sees_images(provider: str) -> bool:
+    """Умеет ли провайдер принимать картинки вместе с вопросом."""
+    return provider in VISION_PROVIDERS
+
+
 class IntelligentAnswerer:
     """Полнофункциональный ИИ-ассистент на Groq + OpenAI fallback"""
     
@@ -877,6 +892,119 @@ class IntelligentAnswerer:
             print(error_msg)
             return error_msg, False
     
+    def sees_images(self) -> bool:
+        """Умеет ли смотреть картинки нынешняя связка провайдера и модели."""
+        return bool(self.enabled) and provider_sees_images(self.api_provider or "")
+
+    def answer_about_image(self, question: str, image_base64: str,
+                           media_type: str = "image/png") -> Tuple[str, bool]:
+        """
+        Ответить на вопрос о картинке.
+
+        Картинка передаётся отдельной частью сообщения, и форма записи у
+        провайдеров разная: Anthropic ждёт данные в поле source, остальные —
+        ссылку вида data:... в поле image_url.
+
+        Память здесь не используется намеренно: разговор о картинке начинается
+        с чистого листа, иначе модель принимается отвечать на предыдущий
+        вопрос, увидев знакомый контекст.
+        """
+        if not self.enabled:
+            return "ИИ не настроен: добавьте ключ в настройках", False
+
+        if not self.sees_images():
+            return (f"Выбранная модель ({self.api_provider}) не умеет смотреть "
+                    "картинки — она работает только с текстом. Переключитесь в "
+                    "настройках на Anthropic, OpenAI или OpenRouter с моделью, "
+                    "которая видит изображения."), False
+
+        ask = question.strip() or "Что на этом изображении? Опиши подробно."
+
+        try:
+            if self.api_provider == "Anthropic":
+                response = requests.post(
+                    f"{ANTHROPIC_BASE}/messages",
+                    headers={
+                        "x-api-key": self.client["api_key"],
+                        "anthropic-version": ANTHROPIC_VERSION,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "system": self.system_prompt,
+                        "max_tokens": self.max_tokens,
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": image_base64,
+                                    },
+                                },
+                                {"type": "text", "text": ask},
+                            ],
+                        }],
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS * 2,
+                )
+                response.raise_for_status()
+
+                pieces = response.json().get("content", [])
+                answer = "".join(
+                    p.get("text", "") for p in pieces if p.get("type") == "text"
+                ).strip()
+
+                return answer, bool(answer)
+
+            # OpenAI и шлюз говорят на одном языке.
+            content = [
+                {"type": "text", "text": ask},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{image_base64}"},
+                },
+            ]
+
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": content},
+            ]
+
+            if self.api_provider == "OpenRouter":
+                response = requests.post(
+                    f"{OPENROUTER_BASE}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.client['api_key']}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": messages,
+                        "max_tokens": self.max_tokens,
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS * 2,
+                )
+                response.raise_for_status()
+                answer = response.json()["choices"][0]["message"]["content"].strip()
+                return answer, bool(answer)
+
+            # OpenAI через собственную библиотеку.
+            result = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=self.max_tokens,
+                timeout=REQUEST_TIMEOUT_SECONDS * 2,
+            )
+            answer = result.choices[0].message.content.strip()
+            return answer, bool(answer)
+
+        except Exception as e:
+            print(f"⚠️ Ошибка при разборе картинки: {e}")
+            return f"Не удалось разобрать изображение: {e}", False
+
     def answer_question(self, question: str, brief: bool = False) -> str:
         """
         Быстрый метод получить ответ (alias для answer)
