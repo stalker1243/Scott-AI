@@ -82,7 +82,107 @@ STATIC_PROVIDER_MODELS = {
         {"id": "deepseek-chat", "note": "Основная модель — быстрая, недорогая"},
         {"id": "deepseek-reasoner", "note": "С цепочкой рассуждений — сильнее в логике/математике, медленнее"},
     ],
+    # Здесь только то, в чём есть уверенность. Живой список Anthropic отдаёт
+    # сам, и он всегда точнее: модели появляются и снимаются чаще, чем выходят
+    # версии Scott.
+    "Anthropic": [
+        {"id": "claude-sonnet-5", "note": "Обычный выбор: сильная и не самая дорогая"},
+        {"id": "claude-opus-5", "note": "Самая способная, дороже и медленнее"},
+        {"id": "claude-haiku-4-5-20251001", "note": "Быстрая и дешёвая, для простого"},
+    ],
+    # У шлюза каталог живой по определению — здесь пусто не случайно: любой
+    # статический список устареет раньше, чем человек дочитает его до конца.
+    "OpenRouter": [
+        {"id": "anthropic/claude-sonnet-5", "note": "Claude через шлюз"},
+        {"id": "openai/gpt-4o", "note": "GPT через шлюз"},
+        {"id": "google/gemini-2.0-flash-001", "note": "Gemini через шлюз"},
+        {"id": "meta-llama/llama-3.3-70b-instruct", "note": "Llama через шлюз"},
+    ],
 }
+
+# Шлюзы, у которых список моделей запрашивается живым запросом. У каждого свой
+# адрес и свой способ назвать ключ.
+ANTHROPIC_BASE = "https://api.anthropic.com/v1"
+ANTHROPIC_VERSION = "2023-06-01"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+
+def list_anthropic_models(api_key: str) -> List[Dict]:
+    """
+    Живой список моделей Claude.
+
+    Anthropic отдаёт его одним запросом и без лишнего: там только модели для
+    разговора, фильтровать нечего — в отличие от OpenAI, где в общий список
+    попадают и распознавание речи, и рисование.
+    """
+    if not REQUESTS_AVAILABLE:
+        return []
+
+    try:
+        response = requests.get(
+            f"{ANTHROPIC_BASE}/models",
+            headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+            timeout=10,
+        )
+        response.raise_for_status()
+
+        return [
+            {"id": item["id"], "note": item.get("display_name", "") or "Anthropic"}
+            for item in response.json().get("data", [])
+            if item.get("id")
+        ]
+    except Exception as e:
+        print(f"⚠️ Не удалось получить список моделей Anthropic: {e}")
+        return []
+
+
+def list_openrouter_models(api_key: str = "") -> List[Dict]:
+    """
+    Живой список моделей шлюза — сотни строк от разных поставщиков.
+
+    Ключ здесь не обязателен: каталог у шлюза открытый, и показать его можно
+    ещё до того, как человек ввёл ключ. Это ровно тот случай, ради которого
+    статические каталоги и заводились, — только здесь он решается честно.
+
+    Бесплатные модели вынесены наверх: с них разумно начинать знакомство, а в
+    списке на сотни строк их иначе не найти.
+    """
+    if not REQUESTS_AVAILABLE:
+        return []
+
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        response = requests.get(f"{OPENROUTER_BASE}/models", headers=headers, timeout=15)
+        response.raise_for_status()
+
+        модели = []
+        for item in response.json().get("data", []):
+            ident = item.get("id")
+            if not ident:
+                continue
+
+            # Шлюз отдаёт не только разговорные модели: там же рисование,
+            # музыка и распознавание речи. Для Scott годятся только те, что
+            # принимают текст и отвечают текстом, — остальные в списке выбора
+            # означали бы обещание, которое некому выполнить.
+            modality = (item.get("architecture") or {}).get("modality", "")
+            if modality and not modality.endswith("->text"):
+                continue
+
+            цена = (item.get("pricing") or {}).get("prompt")
+            бесплатно = цена in ("0", 0, "0.0")
+
+            модели.append({
+                "id": ident,
+                "note": item.get("name") or "OpenRouter",
+                "free": бесплатно,
+            })
+
+        модели.sort(key=lambda m: (not m.get("free"), m["id"]))
+        return модели
+    except Exception as e:
+        print(f"⚠️ Не удалось получить список моделей OpenRouter: {e}")
+        return []
 
 AI_CONFIG_PATH = Path("data/ai_config.json")
 
@@ -252,6 +352,8 @@ class IntelligentAnswerer:
             "Groq": os.getenv("GROQ_API_KEY"),
             "DeepSeek": os.getenv("DEEPSEEK_API_KEY"),
             "OpenAI": os.getenv("OPENAI_API_KEY"),
+            "Anthropic": os.getenv("ANTHROPIC_API_KEY"),
+            "OpenRouter": os.getenv("OPENROUTER_API_KEY"),
         }
         # Ключи, явно введённые пользователем через Настройки (в приоритете над .env)
         self.custom_keys: Dict[str, str] = {}
@@ -286,6 +388,14 @@ class IntelligentAnswerer:
 
         if not connected and self.env_keys["DeepSeek"] and REQUESTS_AVAILABLE:
             connected = self._connect_provider("DeepSeek", "deepseek-chat", self.env_keys["DeepSeek"])
+
+        if not connected and self.env_keys["Anthropic"] and REQUESTS_AVAILABLE:
+            connected = self._connect_provider(
+                "Anthropic", "claude-sonnet-5", self.env_keys["Anthropic"])
+
+        if not connected and self.env_keys["OpenRouter"] and REQUESTS_AVAILABLE:
+            connected = self._connect_provider(
+                "OpenRouter", "anthropic/claude-sonnet-5", self.env_keys["OpenRouter"])
 
         if not connected and self.env_keys["OpenAI"] and OPENAI_AVAILABLE:
             connected = self._connect_provider("OpenAI", "gpt-3.5-turbo", self.env_keys["OpenAI"])
@@ -388,6 +498,24 @@ class IntelligentAnswerer:
                 self.api_provider = "DeepSeek"
                 self.model = model
                 print(f"✅ DeepSeek API подключен (модель: {self.model})")
+            elif provider == "Anthropic":
+                if not REQUESTS_AVAILABLE:
+                    self.last_connect_error = "библиотека requests не установлена"
+                    return False
+                self.client = {"api_key": api_key, "base_url": ANTHROPIC_BASE}
+                self.enabled = True
+                self.api_provider = "Anthropic"
+                self.model = model
+                print(f"✅ Anthropic API подключен (модель: {self.model})")
+            elif provider == "OpenRouter":
+                if not REQUESTS_AVAILABLE:
+                    self.last_connect_error = "библиотека requests не установлена"
+                    return False
+                self.client = {"api_key": api_key, "base_url": OPENROUTER_BASE}
+                self.enabled = True
+                self.api_provider = "OpenRouter"
+                self.model = model
+                print(f"✅ OpenRouter подключен (модель: {self.model})")
             elif provider == "OpenAI":
                 if not OPENAI_AVAILABLE:
                     self.last_connect_error = "библиотека openai не установлена"
@@ -540,14 +668,34 @@ class IntelligentAnswerer:
         provider_notes = {
             "OpenAI": "Высокое качество ответов, платно",
             "DeepSeek": "Сильна в логике/математике, недорого",
+            "Anthropic": "Claude: сильные ответы на русском, платно",
+            "OpenRouter": "Один ключ — сотни моделей разных поставщиков",
         }
+
+        # Провайдеры, у которых список моделей можно спросить живым запросом.
+        # Он всегда точнее статического: модели появляются и снимаются чаще,
+        # чем выходят версии Scott, и на этом уже обжигались — захардкоженная
+        # модель Groq оказалась снята с поддержки, и Scott замолчал.
+        live_lists = {
+            "Anthropic": lambda key: list_anthropic_models(key),
+
+            # У шлюза каталог открытый: его видно и без ключа, то есть до того,
+            # как человек что-либо ввёл. Это ровно тот случай, ради которого
+            # заводились статические каталоги, — здесь он решается честно.
+            "OpenRouter": lambda key: list_openrouter_models(key or ""),
+        }
+
         for provider_id, models in STATIC_PROVIDER_MODELS.items():
             key = self.custom_keys.get(provider_id) or self.env_keys.get(provider_id)
+
+            fetch = live_lists.get(provider_id)
+            live = fetch(key) if fetch and (key or provider_id == "OpenRouter") else []
+
             providers.append({
                 "id": provider_id,
                 "note": provider_notes.get(provider_id, ""),
                 "configured": bool(key),
-                "models": models,
+                "models": live or models,
             })
 
         return providers
@@ -628,6 +776,60 @@ class IntelligentAnswerer:
                 answer = data["choices"][0]["message"]["content"].strip()
                 print(f"✅ DeepSeek ответ получен ({len(answer)} символов)")
             
+            # Claude: у него другой разговорный формат.
+            elif self.api_provider == "Anthropic":
+                print(f"🟣 Anthropic API запрос ({self.model})...")
+
+                # Системная подсказка идёт отдельным полем, а не первым
+                # сообщением: Anthropic роли "system" в списке сообщений не
+                # принимает и отвечает отказом на весь запрос.
+                беседа = [m for m in messages if m["role"] != "system"]
+
+                response = requests.post(
+                    f"{ANTHROPIC_BASE}/messages",
+                    headers={
+                        "x-api-key": self.client["api_key"],
+                        "anthropic-version": ANTHROPIC_VERSION,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "system": instructions,
+                        "messages": беседа,
+                        "max_tokens": max_tokens,
+                        "temperature": self.temperature,
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+
+                куски = response.json().get("content", [])
+                answer = "".join(
+                    кусок.get("text", "") for кусок in куски if кусок.get("type") == "text"
+                ).strip()
+                print(f"✅ Anthropic ответ получен ({len(answer)} символов)")
+
+            # Шлюз к сотням моделей: формат тот же, что у OpenAI.
+            elif self.api_provider == "OpenRouter":
+                print(f"🌐 OpenRouter запрос ({self.model})...")
+                response = requests.post(
+                    f"{OPENROUTER_BASE}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.client['api_key']}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": messages,
+                        "temperature": self.temperature,
+                        "max_tokens": max_tokens,
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                answer = response.json()["choices"][0]["message"]["content"].strip()
+                print(f"✅ OpenRouter ответ получен ({len(answer)} символов)")
+
             # Используем Groq если доступен
             elif self.api_provider == "Groq":
                 print(f"⚡ Groq API запрос ({self.model})...")
