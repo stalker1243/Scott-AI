@@ -208,17 +208,44 @@ public class HologramCanvas : Control
 
             var load = LoadFor(face.Part);
 
-            // Пластина красится цветом доспеха, подкрашенным нагрузкой, и
-            // притеняется по свету. Кромка светится цветом нагрузки заметно
-            // сильнее: именно по кромкам состояние и читается с одного
-            // взгляда, а металл при этом остаётся металлом.
-            var plate = Palette.Shade(Palette.PlateFor(face.Part, load), face.Light * face.Tint);
-            var rim = Palette.EdgeFor(face.Part, load);
+            // Пластина красится цветом своего материала, подкрашенным
+            // нагрузкой, и притеняется по свету. Кромка у металла светится
+            // цветом нагрузки заметно сильнее: именно по кромкам состояние и
+            // читается с одного взгляда, а металл при этом остаётся металлом.
+            var plate = Palette.Shade(
+                Palette.PlateFor(face.Substance, load), face.Light * face.Tint);
 
-            var cloth = face.Part == BodyPart.Cape;
+            // Блик: отражение источника в поверхности. Без него полированная
+            // сталь и матовая бумага выглядят одинаково — вся разница между
+            // ними в том, насколько узкий и яркий у них блик.
+            var (glossStrength, glossSharpness) = Palette.Gloss(face.Substance);
 
-            var fill = new SolidColorBrush(plate, cloth ? 0.55 : 0.95);
-            var edge = new SolidColorBrush(rim, cloth ? 0.45 : 0.75);
+            if (glossStrength > 0)
+            {
+                var highlight = Math.Pow(face.Mirror, glossSharpness) * glossStrength;
+
+                // Золото отражает тёплым, сталь — почти белым. Мелочь, но
+                // именно она не даёт золочёной отделке выглядеть жёлтой
+                // краской поверх того же металла.
+                var sparkColor = face.Substance == Substance.Gold
+                    ? Palette.Blend(Colors.White, Palette.Gold, 0.35)
+                    : Colors.White;
+
+                plate = Palette.Blend(plate, sparkColor, highlight);
+            }
+
+            var rim = Palette.EdgeFor(face.Substance, load);
+
+            var opacity = Palette.Opacity(face.Substance);
+            var soft = face.Substance is Substance.Cloth or Substance.Lining;
+
+            var fill = new SolidColorBrush(plate, opacity);
+
+            // Обводка приглушена намеренно. Яркая линия на каждом кольце трубы
+            // давала столько бирюзы, что материал под ней переставал читаться:
+            // фигура выглядела проволочной схемой, раскрашенной внутри. Кромка
+            // должна показывать нагрузку, а не подменять собой поверхность.
+            var edge = new SolidColorBrush(rim, soft ? 0.35 : 0.5);
 
             var geometry = new StreamGeometry();
             using (var sink = geometry.Open())
@@ -231,7 +258,7 @@ public class HologramCanvas : Control
                 sink.EndFigure(isClosed: true);
             }
 
-            context.DrawGeometry(fill, new Pen(edge, cloth ? 0.7 : 1.0), geometry);
+            context.DrawGeometry(fill, new Pen(edge, soft ? 0.6 : 0.8), geometry);
         }
     }
 

@@ -29,6 +29,18 @@ public sealed class ProjectedFace
 
     /// <summary>Собственная яркость детали, заданная при построении модели.</summary>
     public double Tint { get; init; } = 1.0;
+
+    /// <summary>
+    /// Насколько ровно грань отражает источник в сторону зрителя.
+    ///
+    /// Ноль — отражение уходит мимо, единица — попадает прямо в глаз. Сама по
+    /// себе величина ничего не говорит о материале: во что её превратить,
+    /// решает палитра, у сукна блика не будет и при единице.
+    /// </summary>
+    public required double Mirror { get; init; }
+
+    /// <summary>Из чего грань сделана.</summary>
+    public required Substance Substance { get; init; }
 }
 
 /// <summary>
@@ -62,6 +74,14 @@ public static class Projector
     private const double LightX = 0.45;
     private const double LightY = 0.72;
     private const double LightZ = 0.53;
+
+    // Половинный вектор между направлением к источнику и направлением к
+    // зрителю — normalize(-L + (0, 0, -1)). Посчитан один раз: свет не
+    // движется, и пересчитывать его на каждой грани каждого кадра незачем.
+    private const double HalfLength = 1.7498;
+    private const double HalfX = -LightX / HalfLength;
+    private const double HalfY = -LightY / HalfLength;
+    private const double HalfZ = (-LightZ - 1) / HalfLength;
 
     /// <summary>Сколько света достаётся грани, отвёрнутой от источника.</summary>
     private const double Ambient = 0.34;
@@ -137,6 +157,7 @@ public static class Projector
             // тёмные нижние — то, по чему объём и узнают.
             var length = normal.Length;
             var lambert = 0.0;
+            var mirror = 0.0;
 
             if (length > 0.0001)
             {
@@ -146,6 +167,15 @@ public static class Projector
 
                 lambert = Math.Clamp(
                     -(nx * LightX + ny * LightY + nz * LightZ), 0, 1);
+
+                // Блик по половинному вектору: если нормаль смотрит ровно
+                // между источником и зрителем, отражение попадает в глаз.
+                //
+                // Вектор к источнику — это минус направление света, вектор к
+                // зрителю — минус ось глубины: экран ближе к зрителю там, где
+                // Z меньше.
+                mirror = Math.Clamp(
+                    nx * HalfX + ny * HalfY + nz * HalfZ, 0, 1);
             }
 
             // Подсветка со стороны зрителя, слабая: она не даёт теневым
@@ -158,7 +188,9 @@ public static class Projector
                 Depth = depth,
                 Part = face.Part,
                 Tint = face.Tint,
+                Substance = face.Substance,
                 Light = Ambient + Diffuse * lambert + Rim * toViewer,
+                Mirror = mirror,
                 Facing = facing,
             });
         }

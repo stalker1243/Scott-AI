@@ -434,4 +434,139 @@ public class HologramTests
 
         return направления.Count;
     }
+
+    // ==================== Материалы и цвет ====================
+
+    [Fact]
+    public void На_фигуре_есть_все_материалы()
+    {
+        // Пока материала не существовало, вся фигура была отлита из одного
+        // вещества разной яркости: и полированная кираса, и суконный плащ, и
+        // золочёный обод ядра отражали свет одинаково.
+        var mesh = Suits.Build();
+        var материалы = mesh.Faces.Select(f => f.Substance).ToHashSet();
+
+        foreach (var нужный in new[]
+                 {
+                     Substance.Plate, Substance.Mask, Substance.Gold,
+                     Substance.Cloth, Substance.Lining, Substance.Leather, Substance.Glow,
+                 })
+        {
+            Assert.Contains(нужный, материалы);
+        }
+    }
+
+    [Fact]
+    public void Материал_не_привязан_к_части_тела()
+    {
+        // Отделка на фигуре не сплошная: пояс золочёный, а шея, набедренники и
+        // перчатки кожаные, хотя помечены одной частью. Ради этого материал и
+        // отделён от части — иначе золото растекается по фигуре и перестаёт
+        // быть заметным.
+        var mesh = Suits.Build();
+
+        var уОтделки = mesh.Faces
+            .Where(f => f.Part == BodyPart.Trim)
+            .Select(f => f.Substance)
+            .ToHashSet();
+
+        Assert.True(уОтделки.Count > 1,
+                    "у отделки один материал на всё — разделение потеряно");
+    }
+
+    [Fact]
+    public void Отделка_и_ткань_не_показывают_нагрузку()
+    {
+        // У них своя задача: это постоянные пятна цвета, по которым фигура
+        // узнаётся при любой нагрузке. Если и они начнут перекрашиваться,
+        // фигура снова станет схемой.
+        foreach (var материал in new[] { Substance.Gold, Substance.Cloth, Substance.Lining, Substance.Leather })
+        {
+            Assert.Equal(Palette.PlateFor(материал, 0), Palette.PlateFor(материал, 100));
+        }
+
+        // А металл — показывает.
+        Assert.NotEqual(Palette.PlateFor(Substance.Plate, 0), Palette.PlateFor(Substance.Plate, 100));
+    }
+
+    [Fact]
+    public void Тёплого_на_фигуре_мало()
+    {
+        // Золочёная отделка и подкладка плаща — единственные тёплые пятна, и
+        // работают они, только пока их мало. Если тёплым станет ещё и доспех,
+        // пропадут оба.
+        Assert.True(Palette.Gold.R > Palette.Gold.B, "золото должно быть тёплым");
+        Assert.True(Palette.Lining.R > Palette.Lining.G, "подкладка должна быть тёплой");
+
+        Assert.True(Palette.Steel.B > Palette.Steel.R, "сталь должна оставаться холодной");
+        Assert.True(Palette.Cloth.G > Palette.Cloth.R, "сукно должно оставаться холодным");
+    }
+
+    [Fact]
+    public void Металл_бликует_а_сукно_нет()
+    {
+        // Матовая бумага и полированная сталь при одном рассеянном свете
+        // выглядят одинаково — вся разница между ними в блике.
+        Assert.True(Palette.Gloss(Substance.Plate).Strength > 0.2);
+        Assert.True(Palette.Gloss(Substance.Gold).Strength > 0.2);
+
+        Assert.Equal(0, Palette.Gloss(Substance.Cloth).Strength);
+        Assert.Equal(0, Palette.Gloss(Substance.Lining).Strength);
+
+        // Светящееся не отражает чужой свет: у него нет для этого поверхности.
+        Assert.Equal(0, Palette.Gloss(Substance.Glow).Strength);
+    }
+
+    [Fact]
+    public void Блик_попадает_на_грани_восьмигранника()
+    {
+        // Ровно то, на чём обожглись: при резкости 28 блик сходился в точку
+        // между гранями и не попадал ни на одну. На фигуре его не было видно
+        // вовсе, хотя считался он правильно.
+        //
+        // Грани восьмигранного сечения стоят через сорок пять градусов, и блик
+        // должен быть шире этого зазора.
+        var mesh = new Mesh();
+        mesh.AddTube(BodyPart.Torso, new[]
+        {
+            (-20.0, 12.0, 12.0),
+            (20.0, 12.0, 12.0),
+        });
+
+        var (сила, резкость) = Palette.Gloss(Substance.Plate);
+
+        var самыйЯркий = Projector
+            .Project(mesh, 0, 0, 1, 0, 0)
+            .Where(f => f.Facing)
+            .Max(f => Math.Pow(f.Mirror, резкость) * сила);
+
+        Assert.True(самыйЯркий > 0.08,
+                    $"самый яркий блик на трубе — всего {самыйЯркий:F3}, его не видно");
+    }
+
+    [Fact]
+    public void Блик_гаснет_на_отвёрнутой_грани()
+    {
+        // Низ коробки отвёрнут и от зрителя, и от источника: отражать ему
+        // нечего.
+        var mesh = new Mesh();
+        mesh.AddBox(new Point3(0, 0, 0), 20, 20, 20, BodyPart.Torso);
+
+        var грани = Projector.Project(mesh, 0, 0, 1, 0, 0).ToList();
+
+        var кЗрителю = грани.Where(f => f.Facing).Max(f => f.Mirror);
+        var отЗрителя = грани.Where(f => !f.Facing).Max(f => f.Mirror);
+
+        Assert.True(кЗрителю > отЗрителя,
+                    "обращённая грань должна отражать сильнее отвёрнутой");
+    }
+
+    [Fact]
+    public void Ткань_плотнее_прозрачной_плёнки()
+    {
+        // Полупрозрачное сукно выглядело марлей: со спины сквозь плащ
+        // просвечивала вся фигура вместе с ногами.
+        Assert.True(Palette.Opacity(Substance.Cloth) > 0.8);
+        Assert.True(Palette.Opacity(Substance.Lining) > 0.8);
+    }
 }
