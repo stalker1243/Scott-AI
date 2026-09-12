@@ -50,7 +50,7 @@ public class HologramTests
     [Fact]
     public void Фигура_собирается()
     {
-        var mesh = Suits.Build();
+        var mesh = Figure.Build();
 
         Assert.NotEmpty(mesh.Vertices);
         Assert.NotEmpty(mesh.Faces);
@@ -62,19 +62,11 @@ public class HologramTests
     }
 
     [Fact]
-    public void У_фигуры_есть_плащ()
-    {
-        // Плащ — половина силуэта: без него остаётся просто доспех, и фигура
-        // теряет то, по чему её узнают.
-        Assert.Contains(Suits.Build().Faces, f => f.Part == BodyPart.Cape);
-    }
-
-    [Fact]
     public void Каждая_подсистема_чем_то_показана()
     {
         // Фигура — это показания приборов. Подсистема без своей части просто
         // исчезла бы с экрана, и человек не заметил бы пропажи.
-        var mesh = Suits.Build();
+        var mesh = Figure.Build();
 
         foreach (var part in new[] { BodyPart.Head, BodyPart.Core, BodyPart.Torso, BodyPart.Legs })
         {
@@ -96,33 +88,6 @@ public class HologramTests
         Assert.Equal(0, Середина(mesh, v => v.X), precision: 6);
         Assert.Equal(0, Середина(mesh, v => v.Y), precision: 6);
         Assert.Equal(0, Середина(mesh, v => v.Z), precision: 6);
-    }
-
-    [Fact]
-    public void Готовая_фигура_отцентрована_по_доспеху()
-    {
-        // Ровно то, на чём обжигались: фигура вращалась вокруг пояса и уезжала
-        // из кадра.
-        //
-        // Центровка считается по доспеху, а не по всей модели: плащ висит за
-        // спиной и свисает ниже пояса, и по нему середина приходится не туда,
-        // где человек видит фигуру.
-        var mesh = Suits.Build();
-        var доспех = ВершиныДоспеха(mesh);
-
-        Assert.Equal(0, Середина(доспех, v => v.X), precision: 6);
-        Assert.Equal(0, Середина(доспех, v => v.Y), precision: 6);
-        Assert.Equal(0, Середина(доспех, v => v.Z), precision: 6);
-    }
-
-    private static List<Point3> ВершиныДоспеха(Mesh mesh)
-    {
-        var indices = mesh.Faces
-            .Where(f => f.Part != BodyPart.Cape)
-            .SelectMany(f => f.Indices)
-            .Distinct();
-
-        return indices.Select(i => mesh.Vertices[i]).ToList();
     }
 
     private static double Середина(Mesh mesh, Func<Point3, double> ось)
@@ -170,7 +135,7 @@ public class HologramTests
         // На этом порядке держится вся отрисовка: рисуя от дальних к ближним,
         // ближние закрывают дальние сами собой. Перепутанный порядок вывернул
         // бы фигуру наизнанку.
-        var mesh = Suits.Build();
+        var mesh = Figure.Build();
         var грани = Projector.Project(mesh, 0.5, 0.2, 2, 100, 100);
 
         for (var i = 1; i < грани.Count; i++)
@@ -226,26 +191,31 @@ public class HologramTests
         const double width = 240;
         const double height = 400;
 
-        var mesh = Suits.Build();
+        var mesh = Figure.Build();
         var scale = Projector.FitScale(mesh, width, height);
-        // Тот же расчёт, что и при отрисовке: считать посадку отдельно значило
-        // бы проверять не то, что показывают человеку.
-        var centerY = Projector.GroundedCenterY(mesh, scale, height);
 
         for (var шаг = 0; шаг < 24; шаг++)
         {
             var yaw = шаг * Math.PI / 12;
 
-            foreach (var pitch in new[] { -0.55, 0.0, 0.55 })
+            foreach (var pitch in new[] { -Projector.MaxPitch, 0.0, Projector.MaxPitch })
             {
+                // Тот же расчёт, что и при отрисовке, вместе с наклоном:
+                // считать посадку отдельно значило бы проверять не то, что
+                // показывают человеку.
+                var centerY = Projector.GroundedCenterY(mesh, scale, height, pitch);
                 var грани = Projector.Project(mesh, yaw, pitch, scale, width / 2, centerY);
 
                 foreach (var грань in грани)
                 {
                     foreach (var (x, y) in грань.Points)
                     {
-                        Assert.InRange(x, 0, width);
-                        Assert.InRange(y, 0, height);
+                        // Сообщение важнее самой проверки: без него видно
+                        // только «значение вне диапазона», и непонятно, какой
+                        // угол и какая часть фигуры вылезли за край.
+                        Assert.True(x >= 0 && x <= width && y >= 0 && y <= height,
+                            $"поворот {yaw:F2}, наклон {pitch:F2}, {грань.Part}: " +
+                            $"точка ({x:F1}, {y:F1}) вне кадра {width}×{height}");
                     }
                 }
             }
@@ -273,64 +243,17 @@ public class HologramTests
         // Ровно это и было перепутано: в AddBox стороны коробки были подписаны
         // наоборот, по этим подписям собралась вся модель, и фигура стояла к
         // человеку спиной — вместе с плащом, оттого он и проходил сквозь тело.
-        var mesh = Suits.Build();
+        var mesh = Figure.Build();
 
-        var лицо = ВершиныЧасти(mesh, BodyPart.Head);
-        var корпус = ВершиныЧасти(mesh, BodyPart.Torso);
-
-        Assert.True(Середина(лицо, v => v.Z) < Середина(корпус, v => v.Z),
-                    "маска должна выступать в сторону зрителя, а не от него");
-
-        // Ядро светится на груди, а не между лопаток.
+        // Свечение в груди, а не между лопаток.
         Assert.True(Середина(ВершиныЧасти(mesh, BodyPart.Core), v => v.Z) < 0);
-    }
 
-    [Fact]
-    public void Плащ_висит_за_спиной_а_не_сквозь_тело()
-    {
-        // Замечание с живого просмотра: полотнище проходило сквозь фигуру.
-        //
-        // Проверяется по соседству: для каждой точки плаща берутся точки
-        // доспеха рядом — по высоте и вбок, — и плащ обязан быть за ними,
-        // то есть глубже. Сравнивать одни только крайние значения бесполезно:
-        // плащ шире фигуры и ниже её, и общие границы пересечения не покажут.
-        var mesh = Suits.Build();
+        // Стопы вытянуты вперёд, как у человека, а не назад.
+        var ступни = ВершиныЧасти(mesh, BodyPart.Legs);
+        var самаяНижняя = ступни.Max(v => v.Y);
+        var носок = ступни.Where(v => v.Y > самаяНижняя - 12).Min(v => v.Z);
 
-        var доспех = ВершиныЧасти(mesh, BodyPart.Torso)
-            .Concat(ВершиныЧасти(mesh, BodyPart.Arms))
-            .Concat(ВершиныЧасти(mesh, BodyPart.Head))
-            .Concat(ВершиныЧасти(mesh, BodyPart.Core))
-            .ToList();
-
-        foreach (var точка in Полотнище(mesh))
-        {
-            var рядом = доспех
-                .Where(v => Math.Abs(v.Y - точка.Y) < 7 && Math.Abs(v.X - точка.X) < 7)
-                .ToList();
-
-            if (рядом.Count == 0) continue;
-
-            var глубжеВсех = рядом.Max(v => v.Z);
-
-            Assert.True(точка.Z >= глубжеВсех,
-                        $"плащ вошёл в доспех на высоте {точка.Y:F0}: " +
-                        $"ткань на глубине {точка.Z:F1}, металл на {глубжеВсех:F1}");
-        }
-    }
-
-    /// <summary>
-    /// Само полотнище плаща — без капюшона и воротника.
-    ///
-    /// Они тоже помечены как Cape (красятся тканью), но капюшон облегает
-    /// голову, и по нему любая проверка на пересечение с доспехом сработает
-    /// впустую. Полотнище строится первым, и это его вершины идут в начале.
-    /// </summary>
-    private static List<Point3> Полотнище(Mesh mesh)
-    {
-        var сетка = new Mesh();
-        сетка.AddCape(top: 0, height: 1, halfWidth: 1, depth: 1);
-
-        return mesh.Vertices.Take(сетка.Vertices.Count).ToList();
+        Assert.True(носок < -6, $"стопы смотрят не вперёд: носок на глубине {носок:F1}");
     }
 
     private static List<Point3> ВершиныЧасти(Mesh mesh, BodyPart часть)
@@ -341,26 +264,6 @@ public class HologramTests
             .Distinct();
 
         return indices.Select(i => mesh.Vertices[i]).ToList();
-    }
-
-    [Fact]
-    public void Плащ_виден_с_обеих_сторон()
-    {
-        // Отрисовщик пропускает грани, отвёрнутые от зрителя. Для замкнутых
-        // форм это верно, но у ткани нет толщины, и полотнище просто исчезало:
-        // спереди плаща не было видно вообще, только воротник.
-        var mesh = Suits.Build();
-
-        foreach (var yaw in new[] { 0.0, Math.PI })
-        {
-            var ткань = Projector
-                .Project(mesh, yaw, 0, 1, 0, 0)
-                .Where(f => f.Part == BodyPart.Cape && f.Facing)
-                .ToList();
-
-            Assert.True(ткань.Count > 20,
-                        $"при повороте {yaw:F2} видно всего {ткань.Count} кусков ткани");
-        }
     }
 
     // ==================== Округлость ====================
@@ -404,7 +307,7 @@ public class HologramTests
         // У коробки всего шесть направлений граней, и сколько коробок ни
         // ставь рядом, больше их не станет. Округлая форма узнаётся именно по
         // числу разных направлений.
-        var mesh = Suits.Build();
+        var mesh = Figure.Build();
 
         foreach (var часть in new[] { BodyPart.Torso, BodyPart.Arms, BodyPart.Legs })
         {
@@ -438,86 +341,6 @@ public class HologramTests
     // ==================== Материалы и цвет ====================
 
     [Fact]
-    public void На_фигуре_есть_все_материалы()
-    {
-        // Пока материала не существовало, вся фигура была отлита из одного
-        // вещества разной яркости: и полированная кираса, и суконный плащ, и
-        // золочёный обод ядра отражали свет одинаково.
-        var mesh = Suits.Build();
-        var материалы = mesh.Faces.Select(f => f.Substance).ToHashSet();
-
-        foreach (var нужный in new[]
-                 {
-                     Substance.Plate, Substance.Mask, Substance.Gold,
-                     Substance.Cloth, Substance.Lining, Substance.Leather, Substance.Glow,
-                 })
-        {
-            Assert.Contains(нужный, материалы);
-        }
-    }
-
-    [Fact]
-    public void Материал_не_привязан_к_части_тела()
-    {
-        // Отделка на фигуре не сплошная: пояс золочёный, а шея, набедренники и
-        // перчатки кожаные, хотя помечены одной частью. Ради этого материал и
-        // отделён от части — иначе золото растекается по фигуре и перестаёт
-        // быть заметным.
-        var mesh = Suits.Build();
-
-        var уОтделки = mesh.Faces
-            .Where(f => f.Part == BodyPart.Trim)
-            .Select(f => f.Substance)
-            .ToHashSet();
-
-        Assert.True(уОтделки.Count > 1,
-                    "у отделки один материал на всё — разделение потеряно");
-    }
-
-    [Fact]
-    public void Отделка_и_ткань_не_показывают_нагрузку()
-    {
-        // У них своя задача: это постоянные пятна цвета, по которым фигура
-        // узнаётся при любой нагрузке. Если и они начнут перекрашиваться,
-        // фигура снова станет схемой.
-        foreach (var материал in new[] { Substance.Gold, Substance.Cloth, Substance.Lining, Substance.Leather })
-        {
-            Assert.Equal(Palette.PlateFor(материал, 0), Palette.PlateFor(материал, 100));
-        }
-
-        // А металл — показывает.
-        Assert.NotEqual(Palette.PlateFor(Substance.Plate, 0), Palette.PlateFor(Substance.Plate, 100));
-    }
-
-    [Fact]
-    public void Тёплого_на_фигуре_мало()
-    {
-        // Золочёная отделка и подкладка плаща — единственные тёплые пятна, и
-        // работают они, только пока их мало. Если тёплым станет ещё и доспех,
-        // пропадут оба.
-        Assert.True(Palette.Gold.R > Palette.Gold.B, "золото должно быть тёплым");
-        Assert.True(Palette.Lining.R > Palette.Lining.G, "подкладка должна быть тёплой");
-
-        Assert.True(Palette.Steel.B > Palette.Steel.R, "сталь должна оставаться холодной");
-        Assert.True(Palette.Cloth.G > Palette.Cloth.R, "сукно должно оставаться холодным");
-    }
-
-    [Fact]
-    public void Металл_бликует_а_сукно_нет()
-    {
-        // Матовая бумага и полированная сталь при одном рассеянном свете
-        // выглядят одинаково — вся разница между ними в блике.
-        Assert.True(Palette.Gloss(Substance.Plate).Strength > 0.2);
-        Assert.True(Palette.Gloss(Substance.Gold).Strength > 0.2);
-
-        Assert.Equal(0, Palette.Gloss(Substance.Cloth).Strength);
-        Assert.Equal(0, Palette.Gloss(Substance.Lining).Strength);
-
-        // Светящееся не отражает чужой свет: у него нет для этого поверхности.
-        Assert.Equal(0, Palette.Gloss(Substance.Glow).Strength);
-    }
-
-    [Fact]
     public void Блик_попадает_на_грани_восьмигранника()
     {
         // Ровно то, на чём обожглись: при резкости 28 блик сходился в точку
@@ -533,7 +356,7 @@ public class HologramTests
             (20.0, 12.0, 12.0),
         });
 
-        var (сила, резкость) = Palette.Gloss(Substance.Plate);
+        var (сила, резкость) = Palette.Gloss(Substance.Body);
 
         var самыйЯркий = Projector
             .Project(mesh, 0, 0, 1, 0, 0)
@@ -561,12 +384,4 @@ public class HologramTests
                     "обращённая грань должна отражать сильнее отвёрнутой");
     }
 
-    [Fact]
-    public void Ткань_плотнее_прозрачной_плёнки()
-    {
-        // Полупрозрачное сукно выглядело марлей: со спины сквозь плащ
-        // просвечивала вся фигура вместе с ногами.
-        Assert.True(Palette.Opacity(Substance.Cloth) > 0.8);
-        Assert.True(Palette.Opacity(Substance.Lining) > 0.8);
-    }
 }

@@ -218,9 +218,36 @@ public static class Projector
     /// Считается по самой модели, а не подбирается на глаз: у плаща и брони
     /// разные размеры, и зашитое число обрезало бы одну из фигур.
     /// </summary>
-    /// <summary>Половина высоты модели — по ней фигуру ставят ногами на кольца.</summary>
-    public static double HalfHeight(Mesh mesh)
-        => mesh.Vertices.Count == 0 ? 0 : mesh.Vertices.Max(v => Math.Abs(v.Y));
+    /// <summary>
+    /// Насколько сильно фигуру разрешено наклонять.
+    ///
+    /// То же число, что и предел наклона мышью в самом холсте. Оно нужно при
+    /// подборе масштаба: наклонённая фигура занимает по высоте больше, чем её
+    /// рост, и не знать об этом подбор не имеет права.
+    /// </summary>
+    public const double MaxPitch = 0.55;
+
+    /// <summary>
+    /// Половина высоты модели — по ней фигуру ставят ногами на кольца.
+    ///
+    /// При наклоне вертикальный размер проекции складывается из двух частей:
+    /// рост, сжатый косинусом наклона, и глубина, развёрнутая синусом. Вторая
+    /// часть долго отсутствовала в расчёте, и при наклоне ступни вылезали за
+    /// нижний край кадра — на невысокой фигуре в доспехе это пряталось в запас
+    /// в шесть процентов, на фигуре человеческих пропорций запас кончился.
+    ///
+    /// Глубина берётся как отход от оси вращения: при повороте вокруг неё
+    /// точка уезжает в глубину ровно на это расстояние, не дальше.
+    /// </summary>
+    public static double HalfHeight(Mesh mesh, double pitch = 0)
+    {
+        if (mesh.Vertices.Count == 0) return 0;
+
+        var tall = mesh.Vertices.Max(v => Math.Abs(v.Y));
+        if (pitch == 0) return tall;
+
+        return tall * Math.Cos(pitch) + Reach(mesh) * Math.Sin(Math.Abs(pitch));
+    }
 
     /// <summary>
     /// Насколько далеко точки отходят от оси вращения.
@@ -249,35 +276,56 @@ public static class Projector
     /// то, что ближе к зрителю, и повёрнутая к человеку ступня опускается ниже
     /// плоского расчёта. Проверка это и поймала — фигура вылезала за нижний
     /// край ровно тем боком, который к зрителю.
+    ///
+    /// Второй раз та же проверка поймала наклон: при нём ступни уходили за
+    /// край ещё на две десятых пикселя. Поэтому для каждой вершины считается,
+    /// как низко она может оказаться при любом повороте — рост, сжатый
+    /// косинусом наклона, плюс отход от оси, развёрнутый синусом, и всё это
+    /// увеличенное перспективой в самом близком к зрителю положении.
+    ///
+    /// Оценка берётся по худшему повороту, а не по текущему: иначе фигура
+    /// подпрыгивала бы, вращаясь. При нулевом наклоне она точная — это обычное
+    /// состояние фигуры, и повисать над кольцами она не должна.
     /// </summary>
-    public static double GroundedCenterY(Mesh mesh, double scale, double height)
+    public static double GroundedCenterY(Mesh mesh, double scale, double height, double pitch = 0)
     {
         if (mesh.Vertices.Count == 0) return height / 2;
 
-        var half = HalfHeight(mesh);
-        if (half <= 0) return height / 2;
+        var cos = Math.Cos(pitch);
+        var sin = Math.Abs(Math.Sin(pitch));
+        var drop = 0.0;
 
-        // Увеличение считается по самым нижним точкам, а не по всей модели.
-        //
-        // Фигура стоит на ступнях, а они близко к оси вращения: перспектива
-        // растягивает их куда слабее, чем разведённые плечи. Взяв общее
-        // увеличение, фигуру приходилось поднимать с запасом — и она повисала
-        // над кольцами проекции вместо того, чтобы стоять в них.
-        var lowest = mesh.Vertices.Where(v => v.Y > half * 0.8).ToList();
-        var footReach = lowest.Count > 0
-            ? lowest.Max(v => Math.Sqrt(v.X * v.X + v.Z * v.Z))
-            : Reach(mesh);
+        foreach (var v in mesh.Vertices)
+        {
+            var reach = Math.Sqrt(v.X * v.X + v.Z * v.Z);
 
-        var closeUp = ViewerDistance / Math.Max(1, ViewerDistance - footReach);
+            var low = v.Y * cos + reach * sin;
+            if (low <= 0) continue;
 
-        return height - half * scale * closeUp;
+            // Насколько близко точка может подойти к зрителю. Наклон сам по
+            // себе подтаскивает низ фигуры вперёд — при взгляде снизу ступни
+            // оказываются ближе плеч, — и без этого слагаемого перспектива
+            // недооценивалась в полтора раза, а ступни уходили за нижний край.
+            var nearest = v.Y * Math.Sin(pitch) - reach * Math.Abs(cos);
+            var closeUp = ViewerDistance / Math.Max(1, ViewerDistance + nearest);
+
+            drop = Math.Max(drop, low * closeUp);
+        }
+
+        if (drop <= 0) return height / 2;
+
+        return height - drop * scale;
     }
 
     public static double FitScale(Mesh mesh, double width, double height, double margin = 0.94)
     {
         if (mesh.Vertices.Count == 0) return 1;
 
-        var maxY = HalfHeight(mesh);
+        // Высота считается для самого сильного наклона, какой человек может
+        // задать мышью: масштаб подбирается один раз, а наклон меняется на
+        // ходу, и пересчитывать его на каждом кадре значило бы дёргать размер
+        // фигуры под рукой.
+        var maxY = HalfHeight(mesh, MaxPitch);
         var reach = Reach(mesh);
         var closeUp = CloseUp(mesh);
 

@@ -66,7 +66,9 @@ public class HologramCanvas : Control
     /// мышью неочевидно. Ограничение мягче, чем кажется: смотреть на голограмму
     /// снизу всё равно незачем.
     /// </summary>
-    private const double MaxPitch = 0.55;
+    // Предел наклона живёт в отрисовщике: он же учитывает наклон при подборе
+    // масштаба, и два независимых числа неминуемо разошлись бы.
+    private const double MaxPitch = Projector.MaxPitch;
 
     private double _yaw = 0.45;
     private double _pitch = 0.12;
@@ -178,7 +180,7 @@ public class HologramCanvas : Control
         var height = Bounds.Height;
         if (width < 20 || height < 20) return;
 
-        _mesh ??= Suits.Build();
+        _mesh ??= Figure.Build();
 
         // Снизу оставлено место под кольца проекции: фигура должна стоять над
         // ними, а не пересекаться с ними ногами.
@@ -190,7 +192,7 @@ public class HologramCanvas : Control
         // Второе казалось очевидным и выглядело плохо: между ступнями и
         // кольцами оставался просвет в палец, и фигура висела в воздухе вместо
         // того, чтобы стоять в проекции.
-        var centerY = Projector.GroundedCenterY(_mesh, scale, height - pedestal);
+        var centerY = Projector.GroundedCenterY(_mesh, scale, height - pedestal, _pitch);
 
         var faces = Projector.Project(_mesh, _yaw, _pitch, scale, width / 2, centerY);
 
@@ -223,21 +225,13 @@ public class HologramCanvas : Control
             if (glossStrength > 0)
             {
                 var highlight = Math.Pow(face.Mirror, glossSharpness) * glossStrength;
-
-                // Золото отражает тёплым, сталь — почти белым. Мелочь, но
-                // именно она не даёт золочёной отделке выглядеть жёлтой
-                // краской поверх того же металла.
-                var sparkColor = face.Substance == Substance.Gold
-                    ? Palette.Blend(Colors.White, Palette.Gold, 0.35)
-                    : Colors.White;
-
-                plate = Palette.Blend(plate, sparkColor, highlight);
+                plate = Palette.Blend(plate, Colors.White, highlight);
             }
 
             var rim = Palette.EdgeFor(face.Substance, load);
 
             var opacity = Palette.Opacity(face.Substance);
-            var soft = face.Substance is Substance.Cloth or Substance.Lining;
+            var soft = face.Substance == Substance.Glow;
 
             var fill = new SolidColorBrush(plate, opacity);
 
@@ -265,19 +259,20 @@ public class HologramCanvas : Control
     /// <summary>
     /// Показание подсистемы, которой принадлежит часть.
     ///
-    /// Плащ и отделка ничего не показывают: у них своя задача, и спорить с
-    /// показаниями приборов за внимание им незачем.
+    /// Раньше здесь были ещё плащ и отделка, которые не показывали ничего:
+    /// у них была своя задача. Костюма нет, и каждая часть фигуры теперь
+    /// занята делом.
     /// </summary>
     private double LoadFor(BodyPart part) => part switch
     {
         BodyPart.Head => Gpu,
-        BodyPart.Core => Cpu,
         BodyPart.Torso => Ram,
         BodyPart.Legs => Disk,
 
-        // Наплечники и наручи держат сторону кирасы: они её продолжение, и
-        // собственного показания у них нет.
-        BodyPart.Arms => Ram,
+        // Руки и свечение в груди показывают процессор: руки — то, чем
+        // работают, и загруженный процессор виден по ним первым.
+        BodyPart.Arms => Cpu,
+        BodyPart.Core => Cpu,
 
         _ => 0,
     };
