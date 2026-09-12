@@ -26,6 +26,9 @@ public sealed class ProjectedFace
 
     /// <summary>Обращена ли грань к зрителю.</summary>
     public required bool Facing { get; init; }
+
+    /// <summary>Собственная яркость детали, заданная при построении модели.</summary>
+    public double Tint { get; init; } = 1.0;
 }
 
 /// <summary>
@@ -46,6 +49,28 @@ public static class Projector
     /// объёмной, но ещё не искажается как через дверной глазок.
     /// </summary>
     public const double ViewerDistance = 250;
+
+    // Направление света: сверху, слева и спереди. Нормализовано вручную —
+    // считать длину на каждой грани незачем, вектор не меняется.
+    //
+    // Знаки выверены, а не подобраны: экранная ось Y смотрит вниз, поэтому
+    // верхняя грань имеет нормаль (0, -1, 0). Освещённость считается как
+    // -(n · L), и чтобы верх был светлее низа, составляющая Y у света должна
+    // быть положительной. Сначала все три знака стояли наоборот, и доспех
+    // освещался снизу — проверка «обращённая грань ярче отвёрнутой» это и
+    // показала.
+    private const double LightX = 0.45;
+    private const double LightY = 0.72;
+    private const double LightZ = 0.53;
+
+    /// <summary>Сколько света достаётся грани, отвёрнутой от источника.</summary>
+    private const double Ambient = 0.34;
+
+    /// <summary>Вклад наклонного света — им и создаётся объём.</summary>
+    private const double Diffuse = 0.62;
+
+    /// <summary>Слабая подсветка со стороны зрителя.</summary>
+    private const double Rim = 0.16;
 
     /// <summary>
     /// Разложить модель по граням, готовым к отрисовке.
@@ -103,17 +128,37 @@ public static class Projector
             var normal = Normal(rotated, face.Indices);
             var facing = normal.Z <= 0;
 
-            // Освещённость считается по нормали: грань, смотрящая на зрителя,
-            // ярче той, что стоит ребром.
+            // Освещённость: источник светит сверху, слева и спереди.
+            //
+            // Раньше яркость считалась просто по тому, насколько грань
+            // повёрнута к зрителю. Выходило плоско: все обращённые к человеку
+            // пластины светились одинаково, и металл выглядел бумагой. С
+            // наклонным светом у доспеха появляются светлые верхние грани и
+            // тёмные нижние — то, по чему объём и узнают.
             var length = normal.Length;
-            var light = length > 0.0001 ? Math.Clamp(-normal.Z / length, 0, 1) : 0;
+            var lambert = 0.0;
+
+            if (length > 0.0001)
+            {
+                var nx = normal.X / length;
+                var ny = normal.Y / length;
+                var nz = normal.Z / length;
+
+                lambert = Math.Clamp(
+                    -(nx * LightX + ny * LightY + nz * LightZ), 0, 1);
+            }
+
+            // Подсветка со стороны зрителя, слабая: она не даёт теневым
+            // граням проваливаться в чёрноту, а голограмма светится сама.
+            var toViewer = length > 0.0001 ? Math.Clamp(-normal.Z / length, 0, 1) : 0;
 
             result.Add(new ProjectedFace
             {
                 Points = points,
                 Depth = depth,
                 Part = face.Part,
-                Light = 0.45 + 0.55 * light,
+                Tint = face.Tint,
+                Light = Ambient + Diffuse * lambert + Rim * toViewer,
                 Facing = facing,
             });
         }

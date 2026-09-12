@@ -206,22 +206,19 @@ public class HologramCanvas : Control
             // насквозь.
             if (!face.Facing) continue;
 
-            var color = ColorFor(face.Part);
+            var load = LoadFor(face.Part);
 
-            // Заливка почти непрозрачная. Полупрозрачность в полсилы оказалась
-            // худшим из вариантов: сквозь ближние коробки всё равно видно
-            // дальние, и вместо брони получается стопка стеклянных ящиков.
-            // Небольшой просвет остаётся — ровно настолько, чтобы фигура
-            // читалась как проекция, а не как вырезанная из картона.
-            // Ткань полупрозрачнее доспеха. Латы — тело фигуры, они и должны
-            // быть плотными; у ткани своя задача, и спорить с показаниями
-            // приборов за внимание ей незачем. Без этого плащ накрывал фигуру
-            // целиком, и из-под него лишь что-то просвечивало.
+            // Пластина красится цветом доспеха, подкрашенным нагрузкой, и
+            // притеняется по свету. Кромка светится цветом нагрузки заметно
+            // сильнее: именно по кромкам состояние и читается с одного
+            // взгляда, а металл при этом остаётся металлом.
+            var plate = Palette.Shade(Palette.PlateFor(face.Part, load), face.Light * face.Tint);
+            var rim = Palette.EdgeFor(face.Part, load);
+
             var cloth = face.Part == BodyPart.Cape;
 
-            var fill = new SolidColorBrush(color, (cloth ? 0.42 : 0.88) * face.Light);
-            var edge = new SolidColorBrush(color,
-                Math.Min(1.0, (cloth ? 0.7 : 1.15) * face.Light));
+            var fill = new SolidColorBrush(plate, cloth ? 0.55 : 0.95);
+            var edge = new SolidColorBrush(rim, cloth ? 0.45 : 0.75);
 
             var geometry = new StreamGeometry();
             using (var sink = geometry.Open())
@@ -234,27 +231,27 @@ public class HologramCanvas : Control
                 sink.EndFigure(isClosed: true);
             }
 
-            context.DrawGeometry(fill, new Pen(edge, 1.1), geometry);
+            context.DrawGeometry(fill, new Pen(edge, cloth ? 0.7 : 1.0), geometry);
         }
     }
 
     /// <summary>
-    /// Цвет части — по показанию её подсистемы.
+    /// Показание подсистемы, которой принадлежит часть.
     ///
-    /// Плащ и отделка ничего не показывают и красятся нейтрально: иначе каждая
-    /// складка спорила бы с показаниями за внимание, и смысл цвета пропал бы.
+    /// Плащ и отделка ничего не показывают: у них своя задача, и спорить с
+    /// показаниями приборов за внимание им незачем.
     /// </summary>
-    private Color ColorFor(BodyPart part) => part switch
+    private double LoadFor(BodyPart part) => part switch
     {
-        BodyPart.Head => LoadToBrushConverter.ColorFor(Gpu),
-        BodyPart.Core => LoadToBrushConverter.ColorFor(Cpu),
-        BodyPart.Torso => LoadToBrushConverter.ColorFor(Ram),
-        BodyPart.Legs => LoadToBrushConverter.ColorFor(Disk),
-        BodyPart.Arms => Neutral,
-        BodyPart.Cape => Cloth,
-        _ => Neutral,
-    };
+        BodyPart.Head => Gpu,
+        BodyPart.Core => Cpu,
+        BodyPart.Torso => Ram,
+        BodyPart.Legs => Disk,
 
-    private static readonly Color Neutral = Color.FromRgb(0x7D, 0xD3, 0xFC);
-    private static readonly Color Cloth = Color.FromRgb(0x93, 0xC5, 0xFD);
+        // Наплечники и наручи держат сторону кирасы: они её продолжение, и
+        // собственного показания у них нет.
+        BodyPart.Arms => Ram,
+
+        _ => 0,
+    };
 }

@@ -225,71 +225,111 @@ public static class Suits
         //
         // Строится первым: при равной глубине грани рисуются в порядке
         // добавления, и плащ должен оказаться позади фигуры, а не поверх неё.
-        // Уже плеч и выше ступней: плащ обрамляет фигуру, а не прячет её, и не
-        // должен пересекаться с кольцами проекции у ног.
         mesh.AddCape(top: -66, height: 100, halfWidth: 31, depth: 24);
 
-        // Воротник: высокий, стоячий, за головой. Именно он делает силуэт
-        // тяжёлым и «властным» — без него фигура просто человек в накидке.
-        mesh.AddBox(new Point3(-16, -80, -12), 10, 34, 10, BodyPart.Cape, tint: 1.12, lean: -6);
-        mesh.AddBox(new Point3(16, -80, -12), 10, 34, 10, BodyPart.Cape, tint: 1.12, lean: -6);
-        mesh.AddBox(new Point3(0, -74, -15), 34, 22, 8, BodyPart.Cape, tint: 0.96);
+        // Воротник: высокий, стоячий, из отдельных зубцов. Именно он делает
+        // силуэт властным — без него фигура просто человек в накидке. Зубцами,
+        // а не двумя брусками: из них и берётся ощущение кованой вещи.
+        for (var i = 0; i < 5; i++)
+        {
+            var side = i - 2;
+            var x = side * 9.5;
+            var height = 30 - Math.Abs(side) * 5;
+
+            mesh.AddBox(new Point3(x, -78 + Math.Abs(side) * 2.5, -13),
+                        7, height, 7, BodyPart.Cape,
+                        tint: 1.14 - Math.Abs(side) * 0.04, lean: -5);
+        }
 
         // ==================== Голова ====================
         //
-        // Капюшон закрывает череп целиком, из-под него выступает глухая маска.
-        mesh.AddBox(new Point3(0, -86, -2), 23, 25, 24, BodyPart.Cape, tint: 0.94, taper: 1.06);
-        mesh.AddBox(new Point3(0, -84, 10), 17, 22, 8, BodyPart.Head, taper: 0.94);
+        // Капюшон облегает череп, из-под него выступает глухая маска. Шлем
+        // гранёный: лоб, скулы и подбородок отдельными пластинами.
+        mesh.AddBox(new Point3(0, -88, -4), 22, 19, 22, BodyPart.Cape, tint: 0.96, taper: 1.02);
+        mesh.AddBox(new Point3(0, -78, -6), 21, 14, 20, BodyPart.Cape, tint: 0.9, taper: 0.92);
+
+        // Лоб маски
+        mesh.AddBox(new Point3(0, -90, 7), 17, 9, 10, BodyPart.Head, tint: 1.12, taper: 1.04);
 
         // Прорезь для глаз — единственная яркая деталь на лице.
-        mesh.AddBox(new Point3(0, -88, 14), 12, 3, 3, BodyPart.Head, tint: 1.7);
+        mesh.AddBox(new Point3(0, -85, 12), 13, 3, 4, BodyPart.Head, tint: 1.85);
 
-        // Скулы маски: две пластины по бокам, чтобы лицо не было плоским.
-        mesh.AddBox(new Point3(-8, -82, 11), 4, 16, 6, BodyPart.Head, tint: 1.15);
-        mesh.AddBox(new Point3(8, -82, 11), 4, 16, 6, BodyPart.Head, tint: 1.15);
+        // Скулы
+        mesh.AddBox(new Point3(-7, -80, 9), 6, 12, 9, BodyPart.Head, tint: 1.06, taper: 0.86);
+        mesh.AddBox(new Point3(7, -80, 9), 6, 12, 9, BodyPart.Head, tint: 1.06, taper: 0.86);
 
-        mesh.AddBox(new Point3(0, -69, 0), 11, 7, 11, BodyPart.Trim);
+        // Подбородок: сужается книзу, отчего маска перестаёт быть коробкой.
+        mesh.AddBox(new Point3(0, -74, 8), 13, 9, 9, BodyPart.Head, tint: 0.98, taper: 0.62);
 
-        // ==================== Плечи и руки ====================
+        // Горловое кольцо
+        mesh.AddBox(new Point3(0, -68, 0), 12, 5, 12, BodyPart.Trim, tint: 1.1);
+
+        // ==================== Наплечники ====================
         //
-        // Наплечники широкие и приподнятые: силуэт должен читаться как доспех
-        // даже когда фигура размером с ноготь и деталей ещё не видно.
-        mesh.AddBox(new Point3(-28, -60, 0), 21, 14, 23, BodyPart.Arms, tint: 1.05, taper: 0.76);
-        mesh.AddBox(new Point3(28, -60, 0), 21, 14, 23, BodyPart.Arms, tint: 1.05, taper: 0.76);
+        // По три пластины на каждый, уступами — как настоящие. Одной коробкой
+        // они выглядели ящиками на плечах.
+        foreach (var side in new[] { -1, 1 })
+        {
+            mesh.AddBox(new Point3(side * 27, -62, 0), 20, 9, 21, BodyPart.Arms, tint: 1.16, taper: 0.92);
+            mesh.AddBox(new Point3(side * 29, -55, 0), 19, 8, 20, BodyPart.Arms, tint: 1.04, taper: 0.9);
+            mesh.AddBox(new Point3(side * 30, -49, 0), 17, 7, 18, BodyPart.Arms, tint: 0.94, taper: 0.88);
+        }
 
-        mesh.AddBox(new Point3(-30, -44, 0), 12, 22, 12, BodyPart.Arms, taper: 0.88);
-        mesh.AddBox(new Point3(30, -44, 0), 12, 22, 12, BodyPart.Arms, taper: 0.88);
+        // ==================== Руки ====================
+        foreach (var side in new[] { -1, 1 })
+        {
+            mesh.AddBox(new Point3(side * 30, -41, 0), 12, 14, 12, BodyPart.Arms, taper: 0.9);
 
-        // Наручи
-        mesh.AddBox(new Point3(-30, -26, 0), 11, 16, 11, BodyPart.Arms, tint: 1.08);
-        mesh.AddBox(new Point3(30, -26, 0), 11, 16, 11, BodyPart.Arms, tint: 1.08);
+            // Налокотник
+            mesh.AddBox(new Point3(side * 30, -33, 0), 13, 6, 13, BodyPart.Arms, tint: 1.18);
+
+            // Наруч
+            mesh.AddBox(new Point3(side * 30, -25, 0), 11, 13, 11, BodyPart.Arms, tint: 1.02, taper: 0.92);
+
+            // Латная перчатка
+            mesh.AddBox(new Point3(side * 30, -17, 1), 10, 7, 12, BodyPart.Arms, tint: 1.1);
+        }
 
         // ==================== Кираса ====================
-        mesh.AddBox(new Point3(0, -54, 0), 36, 26, 22, BodyPart.Torso, taper: 0.9);
-        mesh.AddBox(new Point3(0, -31, 0), 31, 24, 19, BodyPart.Torso, taper: 0.76);
+        mesh.AddBox(new Point3(0, -58, 0), 34, 14, 21, BodyPart.Torso, tint: 1.08, taper: 0.98);
 
-        // Ядро в груди
-        mesh.AddBox(new Point3(0, -54, 11), 10, 10, 4, BodyPart.Core, tint: 1.7);
+        // Грудные пластины: две, с разворотом — центр груди выступает вперёд.
+        mesh.AddBox(new Point3(-9, -50, 3), 17, 16, 19, BodyPart.Torso, tint: 1.02, taper: 0.96);
+        mesh.AddBox(new Point3(9, -50, 3), 17, 16, 19, BodyPart.Torso, tint: 1.02, taper: 0.96);
 
-        // Пояс и набедренные пластины
-        mesh.AddBox(new Point3(0, -16, 0), 27, 8, 17, BodyPart.Trim, tint: 1.1);
-        mesh.AddBox(new Point3(-11, -8, 0), 12, 12, 14, BodyPart.Trim, taper: 0.85);
-        mesh.AddBox(new Point3(11, -8, 0), 12, 12, 14, BodyPart.Trim, taper: 0.85);
+        // Набрюшник
+        mesh.AddBox(new Point3(0, -36, 0), 29, 16, 18, BodyPart.Torso, tint: 0.94, taper: 0.84);
+        mesh.AddBox(new Point3(0, -25, 0), 25, 10, 16, BodyPart.Torso, tint: 0.88, taper: 0.86);
+
+        // Ядро в груди: обод и само свечение.
+        mesh.AddBox(new Point3(0, -52, 12), 13, 13, 3, BodyPart.Trim, tint: 1.2);
+        mesh.AddBox(new Point3(0, -52, 13), 8, 8, 3, BodyPart.Core, tint: 1.9);
+
+        // ==================== Пояс ====================
+        mesh.AddBox(new Point3(0, -18, 0), 27, 7, 17, BodyPart.Trim, tint: 1.16);
+        mesh.AddBox(new Point3(0, -18, 9), 9, 9, 4, BodyPart.Trim, tint: 1.3);   // пряжка
+
+        // Набедренные пластины
+        foreach (var side in new[] { -1, 1 })
+        {
+            mesh.AddBox(new Point3(side * 11, -9, 1), 12, 13, 14, BodyPart.Trim, tint: 1.0, taper: 0.82);
+        }
 
         // ==================== Ноги ====================
-        mesh.AddBox(new Point3(-10, 8, 0), 13, 30, 13, BodyPart.Legs, taper: 0.88);
-        mesh.AddBox(new Point3(10, 8, 0), 13, 30, 13, BodyPart.Legs, taper: 0.88);
+        foreach (var side in new[] { -1, 1 })
+        {
+            mesh.AddBox(new Point3(side * 10, 4, 0), 13, 22, 13, BodyPart.Legs, taper: 0.9);
 
-        // Наколенники
-        mesh.AddBox(new Point3(-10, 24, 1), 12, 8, 13, BodyPart.Legs, tint: 1.12);
-        mesh.AddBox(new Point3(10, 24, 1), 12, 8, 13, BodyPart.Legs, tint: 1.12);
+            // Наколенник
+            mesh.AddBox(new Point3(side * 10, 17, 1), 13, 8, 14, BodyPart.Legs, tint: 1.2);
 
-        mesh.AddBox(new Point3(-10, 36, 0), 11, 18, 12, BodyPart.Legs, taper: 0.9);
-        mesh.AddBox(new Point3(10, 36, 0), 11, 18, 12, BodyPart.Legs, taper: 0.9);
+            // Поножи
+            mesh.AddBox(new Point3(side * 10, 29, 0), 11, 18, 12, BodyPart.Legs, tint: 1.0, taper: 0.9);
 
-        // Сабатоны
-        mesh.AddBox(new Point3(-10, 47, 3), 11, 6, 17, BodyPart.Legs);
-        mesh.AddBox(new Point3(10, 47, 3), 11, 6, 17, BodyPart.Legs);
+            // Сабатон: вытянут вперёд, оттого нога перестаёт быть столбиком.
+            mesh.AddBox(new Point3(side * 10, 40, 2), 11, 5, 15, BodyPart.Legs, tint: 1.1);
+            mesh.AddBox(new Point3(side * 10, 44, 5), 10, 4, 18, BodyPart.Legs, tint: 0.95);
+        }
 
         mesh.Center();
         return mesh;
