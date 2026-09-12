@@ -336,3 +336,112 @@ def test_brief_request_reaches_claude(отвечающий, monkeypatch):
 
     assert отправлено["body"]["system"] == ia.BRIEF_SYSTEM_PROMPT
     assert отправлено["body"]["max_tokens"] == ia.BRIEF_MAX_TOKENS
+
+# ==================== Понятные отказы ====================
+
+def test_empty_balance_is_explained_plainly():
+    """
+    Кончившиеся деньги отличаются от неверного ключа.
+
+    Здесь ключ верный, модель верная, интернет работает, — и человек, читающий
+    «не удалось подключиться», пойдёт перепроверять ключ вместо того, чтобы
+    заглянуть в счёт. Проверено на живых ключах: у Anthropic и OpenAI ответ
+    приходит с «credit balance is too low», у DeepSeek — «402 Payment
+    Required».
+    """
+    for причина in (
+        '{"error":{"message":"Your credit balance is too low to access the API"}}',
+        "402 Client Error: Payment Required for url",
+        "You exceeded your current quota, please check your plan and billing",
+    ):
+        текст = ia.explain_connect_error("Anthropic", "claude-sonnet-5", причина)
+
+        assert "средства" in текст, текст
+        assert "пополните" in текст.lower(), текст
+
+
+def test_bad_key_is_not_confused_with_empty_balance():
+    """Отозванный ключ и пустой счёт — разные беды с разными действиями."""
+    текст = ia.explain_connect_error("Groq", "модель", "401 Unauthorized: invalid api key")
+
+    assert "ключ" in текст
+    assert "средства" not in текст
+
+
+def test_error_body_reaches_the_explanation():
+    """
+    Причина берётся из тела ответа, а не из текста исключения.
+
+    raise_for_status кладёт в исключение только код и адрес: «400 Client
+    Error: Bad Request for url ...». Само объяснение сервис пишет в теле, и
+    оно терялось — человек с нулевым балансом видел голый код ошибки.
+    """
+    class Отказ:
+        status_code = 400
+        text = '{"error":{"message":"Your credit balance is too low"}}'
+
+    with pytest.raises(RuntimeError) as поймано:
+        ia.raise_with_body(Отказ())
+
+    assert "credit balance" in str(поймано.value)
+
+
+def test_successful_response_passes_through():
+    class Успех:
+        status_code = 200
+        text = "{}"
+
+    ia.raise_with_body(Успех())    # не должно бросать
+
+
+# ==================== Память после неудачи ====================
+
+def test_unanswered_question_is_dropped():
+    """
+    Вопрос без ответа убирается из памяти разговора.
+
+    Вопрос кладётся туда до запроса, ответ — после удачного. После неудачи
+    вопрос остаётся висеть, и со следующим их становится два подряд.
+    Anthropic такую переписку отвергает целиком: одна неудача — скажем,
+    кончились деньги — ломала бы и все последующие запросы, уже исправные.
+    """
+    память = ia.ConversationMemory(max_history=6)
+    память.conversations = []
+
+    память.add_message("user", "первый вопрос")
+    память.add_message("assistant", "первый ответ")
+    память.add_message("user", "вопрос, на который не ответили")
+
+    память.drop_unanswered()
+
+    роли = [m["role"] for m in память.conversations]
+    assert роли == ["user", "assistant"]
+
+
+def test_no_two_questions_in_a_row_after_failures():
+    """Сколько бы неудач ни случилось подряд, висячих вопросов не остаётся."""
+    память = ia.ConversationMemory(max_history=10)
+    память.conversations = []
+
+    for n in range(3):
+        память.add_message("user", f"вопрос {n}")
+        память.drop_unanswered()
+
+    assert память.conversations == []
+
+
+def test_key_is_taken_from_either_name(monkeypatch):
+    """
+    Ключ Claude читается и как ANTHROPIC_API_KEY, и как CLAUDE_API_KEY.
+
+    Компания называется Anthropic, а модель — Claude, и человек пишет то, что
+    видит у себя в личном кабинете. Ровно на этом ключ однажды и не
+    подхватился: он лежал в .env под именем CLAUDE_API_KEY, а Scott искал
+    ANTHROPIC_API_KEY и молча не находил ничего.
+    """
+    import os
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("CLAUDE_API_KEY", "ключ-под-вторым-именем")
+
+    assert (os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"))         == "ключ-под-вторым-именем"

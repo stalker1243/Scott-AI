@@ -214,6 +214,23 @@ def _looks_like_bad_key(reason: str) -> bool:
     ))
 
 
+def raise_with_body(response) -> None:
+    """
+    Проверить ответ и, если это отказ, бросить исключение с телом внутри.
+
+    `raise_for_status` кладёт в текст исключения только код и адрес, а
+    объяснение сервис пишет в теле. Так терялось самое нужное: на нулевом
+    балансе в теле прямым текстом стояло «credit balance is too low», а
+    человек видел «400 Client Error» и шёл перепроверять ключ.
+    """
+    if response.status_code < 400:
+        return
+
+    body = (response.text or "").strip()
+    raise RuntimeError(f"{response.status_code}: {body[:500]}" if body
+                       else f"{response.status_code}")
+
+
 def explain_connect_error(provider: str, model: str, reason: str) -> str:
     """
     Перевести отказ провайдера на человеческий язык.
@@ -232,6 +249,18 @@ def explain_connect_error(provider: str, model: str, reason: str) -> str:
                                          "name or service", "getaddrinfo", "ssl")):
         return (f"Не удалось связаться с {provider}. Проверьте интернет; "
                 "в некоторых странах доступ к этому сервису закрыт и нужен VPN")
+
+    # Кончились деньги. Отличать этот случай от прочих важно: ключ здесь
+    # верный, модель верная, интернет работает, и человек, читающий «не удалось
+    # подключиться», пойдёт перепроверять ключ вместо того, чтобы заглянуть в
+    # счёт. У Anthropic и OpenAI бесплатного тарифа нет вовсе, а у DeepSeek
+    # деньги просто кончаются.
+    if any(marker in text for marker in (
+            "credit balance", "insufficient", "quota", "payment required",
+            "402", "billing", "exceeded your current quota")):
+        return (f"У {provider} закончились средства на счету. Ключ рабочий — "
+                "пополните баланс в личном кабинете или выберите другого "
+                "провайдера: у OpenRouter есть бесплатные модели")
 
     if any(marker in text for marker in ("model", "does not exist", "not found", "404")):
         return (f"Модель «{model}» недоступна этому ключу — выберите другую в списке")
@@ -266,6 +295,19 @@ class ConversationMemory:
                 print(f"⚠️ Ошибка загрузки истории: {e}")
                 self.conversations = []
     
+    def drop_unanswered(self) -> None:
+        """
+        Убрать последний вопрос, на который не ответили.
+
+        Вопрос кладётся в память до запроса к модели, ответ — после удачного.
+        Когда запрос не удался, вопрос остаётся висеть, и со следующим их
+        оказывается два подряд. Anthropic такую переписку отвергает целиком:
+        два сообщения от человека без ответа между ними — нарушение формата.
+        Одна неудача ломала бы все последующие запросы, уже исправные.
+        """
+        while self.conversations and self.conversations[-1].get("role") == "user":
+            self.conversations.pop()
+
     def add_message(self, role: str, content: str):
         """Добавить сообщение в память"""
         message = {
@@ -367,7 +409,12 @@ class IntelligentAnswerer:
             "Groq": os.getenv("GROQ_API_KEY"),
             "DeepSeek": os.getenv("DEEPSEEK_API_KEY"),
             "OpenAI": os.getenv("OPENAI_API_KEY"),
-            "Anthropic": os.getenv("ANTHROPIC_API_KEY"),
+            # Оба имени, и это не прихоть. Компания называется Anthropic, а
+            # модель — Claude, и человек, заводящий ключ, пишет то, что видит
+            # у себя в личном кабинете. Ровно на этом ключ однажды и не
+            # подхватился: он лежал в .env под именем CLAUDE_API_KEY, а Scott
+            # искал ANTHROPIC_API_KEY и молча не находил ничего.
+            "Anthropic": os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"),
             "OpenRouter": os.getenv("OPENROUTER_API_KEY"),
         }
         # Ключи, явно введённые пользователем через Настройки (в приоритете над .env)
@@ -517,6 +564,26 @@ class IntelligentAnswerer:
                 if not REQUESTS_AVAILABLE:
                     self.last_connect_error = "библиотека requests не установлена"
                     return False
+
+                # Ключ проверяется сразу, списком моделей: запрос бесплатный, а
+                # узнать об опечатке в Настройках гораздо лучше, чем при первом
+                # заданном вопросе.
+                #
+                # Денег на счету он не проверяет — это выяснится только
+                # настоящим запросом. Зато когда выяснится, объяснение будет
+                # внятным, а не «400 Client Error».
+                probe = requests.get(
+                    f"{ANTHROPIC_BASE}/models",
+                    headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+                    timeout=15,
+                )
+
+                if probe.status_code != 200:
+                    self.last_connect_error = explain_connect_error(
+                        "Anthropic", model, probe.text)
+                    print(f"⚠️ {self.last_connect_error}")
+                    return False
+
                 self.client = {"api_key": api_key, "base_url": ANTHROPIC_BASE}
                 self.enabled = True
                 self.api_provider = "Anthropic"
@@ -786,7 +853,7 @@ class IntelligentAnswerer:
                     },
                     timeout=30,
                 )
-                response.raise_for_status()
+                raise_with_body(response)
                 data = response.json()
                 answer = data["choices"][0]["message"]["content"].strip()
                 print(f"✅ DeepSeek ответ получен ({len(answer)} символов)")
@@ -816,7 +883,7 @@ class IntelligentAnswerer:
                     },
                     timeout=REQUEST_TIMEOUT_SECONDS,
                 )
-                response.raise_for_status()
+                raise_with_body(response)
 
                 куски = response.json().get("content", [])
                 answer = "".join(
@@ -841,7 +908,7 @@ class IntelligentAnswerer:
                     },
                     timeout=REQUEST_TIMEOUT_SECONDS,
                 )
-                response.raise_for_status()
+                raise_with_body(response)
                 answer = response.json()["choices"][0]["message"]["content"].strip()
                 print(f"✅ OpenRouter ответ получен ({len(answer)} символов)")
 
@@ -888,9 +955,24 @@ class IntelligentAnswerer:
             return answer, True
         
         except Exception as e:
-            error_msg = f"❌ Ошибка API: {str(e)}"
-            print(error_msg)
-            return error_msg, False
+            # Неотвеченный вопрос убирается из памяти разговора.
+            #
+            # Вопрос кладётся туда до запроса, ответ — после удачного. Если
+            # запрос не удался, в истории остаётся «висячий» вопрос, и со
+            # следующим их становится два подряд. Для Anthropic это прямое
+            # нарушение формата: два сообщения от человека без ответа между
+            # ними он отвергает целиком. То есть одна неудача — скажем,
+            # кончились деньги — ломала бы и все последующие запросы, уже
+            # после пополнения счёта.
+            self.memory.drop_unanswered()
+
+            # Разбор причины тот же, что в Настройках. Подключиться можно и с
+            # нулевым счётом — ключ верен, модель верна, а денег нет, — и
+            # сырое «400 Client Error» отправляет человека перепроверять ключ,
+            # который ни при чём.
+            понятно = explain_connect_error(self.api_provider or "", self.model, str(e))
+            print(f"⚠️ {понятно}")
+            return f"❌ {понятно}", False
     
     def sees_images(self) -> bool:
         """Умеет ли смотреть картинки нынешняя связка провайдера и модели."""
@@ -950,7 +1032,7 @@ class IntelligentAnswerer:
                     },
                     timeout=REQUEST_TIMEOUT_SECONDS * 2,
                 )
-                response.raise_for_status()
+                raise_with_body(response)
 
                 pieces = response.json().get("content", [])
                 answer = "".join(
@@ -987,7 +1069,7 @@ class IntelligentAnswerer:
                     },
                     timeout=REQUEST_TIMEOUT_SECONDS * 2,
                 )
-                response.raise_for_status()
+                raise_with_body(response)
                 answer = response.json()["choices"][0]["message"]["content"].strip()
                 return answer, bool(answer)
 
@@ -1002,8 +1084,9 @@ class IntelligentAnswerer:
             return answer, bool(answer)
 
         except Exception as e:
-            print(f"⚠️ Ошибка при разборе картинки: {e}")
-            return f"Не удалось разобрать изображение: {e}", False
+            понятно = explain_connect_error(self.api_provider or "", self.model, str(e))
+            print(f"⚠️ Не удалось разобрать картинку: {понятно}")
+            return f"❌ {понятно}", False
 
     def answer_question(self, question: str, brief: bool = False) -> str:
         """
