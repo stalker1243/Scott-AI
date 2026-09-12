@@ -67,6 +67,7 @@ from security import require_scott_token, check_rate_limit
 from timing import stage as timing_stage, snapshot as timing_snapshot, reset as timing_reset
 from speech_text import shorten_for_speech
 import understanding
+import protocols as protocols_module
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -600,6 +601,16 @@ try:
 except ImportError as e:
     print(f"⚠️ Endpoints работы с кодом не подключены: {e}")
 
+# Протоколы: именованные последовательности шагов.
+try:
+    try:
+        from .protocol_endpoints import router as protocol_router
+    except ImportError:
+        from protocol_endpoints import router as protocol_router
+    app.include_router(protocol_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints протоколов не подключены: {e}")
+
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
 try:
@@ -780,8 +791,24 @@ class ScottAI:
                     intent_engine=fast_intent_engine,
                     parser=command_parser,
                     answerer=question_answerer,
+                    find_protocol=(scott_runtime.protocols.match
+                                   if scott_runtime.protocols else None),
                 )
             print(f"🔎 Решение: {decision.kind} — {decision.reason}")
+
+            # ---------------------------------------------------- протокол
+            if decision.kind == 'protocol':
+                result = await self.run_protocol(
+                    decision.protocol, depth=getattr(self, '_protocol_depth', 0))
+                response = result.summary()
+                knowledge_base.add_conversation(text, response)
+                print(f"🤖 Scott: {response}")
+                return {
+                    "type": "protocol",
+                    "protocol": decision.protocol.name,
+                    "response": response,
+                    "quiet_mode": quiet_mode,
+                }
 
             # ---------------------------------------------------- сайты
             if decision.kind == 'web':
@@ -837,6 +864,38 @@ class ScottAI:
                 "response": error_msg,
                 "error": str(e)
             }
+
+    async def run_protocol(self, protocol, depth: int = 0):
+        """
+        Выполнить протокол: каждый шаг проходит тем же путём, что и фраза.
+
+        Именно поэтому шаги записаны словами, а не названиями действий:
+        протоколу достаётся весь уже отлаженный разбор, и всё, что Scott умеет
+        по голосу, работает в протоколе с первого дня.
+
+        Глубина считается от вложенности: шаг «запусти протокол ...» — обычная
+        фраза, и ничто не мешает написать её внутри самого протокола. Без
+        предела это был бы бесконечный цикл.
+        """
+        async def выполнить(шаг: str):
+            self._protocol_depth = depth + 1
+            try:
+                return await self._process_command_impl(шаг, quiet_mode=True)
+            finally:
+                self._protocol_depth = depth
+
+        result = await protocols_module.run_async(
+            protocol,
+            execute=выполнить,
+            sleep=asyncio.sleep,
+            depth=depth,
+        )
+
+        if result.ok and scott_runtime.protocols:
+            scott_runtime.protocols.mark_run(protocol)
+
+        print(f"📋 {result.summary()}")
+        return result
 
     async def _answer_as_question(self, text: str, quiet_mode: bool, decision,
                                   by_voice: bool = False) -> Dict:
@@ -1142,6 +1201,12 @@ class ScottAI:
 
 # Инициализируем Scott AI
 scott_ai = ScottAI()
+
+# Протоколы умеют хранить себя сами, но не умеют выполнять шаги: шаг — обычная
+# фраза, и разбирает её ассистент. Отдаём ему эту работу той же дорогой, что
+# голос и слушатель, — иначе роутеру протоколов пришлось бы импортировать
+# main.py, а импорты замкнулись бы в кольцо.
+scott_runtime.set_protocol_runner(scott_ai.run_protocol)
 
 
 # ============= ПРОСЛУШИВАНИЕ МИКРОФОНА =============

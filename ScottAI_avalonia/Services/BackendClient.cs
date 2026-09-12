@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 using ScottAI.Avalonia.Models;
 
@@ -227,6 +228,48 @@ public class BackendClient
     {
         var res = await _http.PostAsJsonAsync("/ifttt/delete-rule", new { name });
         var body = await res.Content.ReadFromJsonAsync<SimpleResponse>();
+        return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
+    }
+
+    // ---------- Протоколы ----------
+
+    public async Task<List<Protocol>> ListProtocolsAsync()
+    {
+        var body = await _http.GetFromJsonAsync<ProtocolListResponse>("/protocols");
+        return body?.Protocols ?? new List<Protocol>();
+    }
+
+    public async Task<(bool Success, string Message)> AddProtocolAsync(
+        string name, List<ProtocolStep> steps, List<string> phrases, string description)
+    {
+        var res = await _http.PostAsJsonAsync("/protocols", new { name, steps, phrases, description });
+        var body = await res.Content.ReadFromJsonAsync<SimpleResponse>();
+        return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
+    }
+
+    public async Task<(bool Success, string Message)> DeleteProtocolAsync(string name)
+    {
+        var res = await _http.DeleteAsync($"/protocols/{Uri.EscapeDataString(name)}");
+        var body = await res.Content.ReadFromJsonAsync<SimpleResponse>();
+        return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
+    }
+
+    /// <summary>
+    /// Выполнить протокол прямо сейчас.
+    ///
+    /// Ответ ждём долго: протокол из нескольких шагов открывает программы, и
+    /// каждая из них отвечает не мгновенно. Обычного срока ожидания на это не
+    /// хватает.
+    /// </summary>
+    public async Task<(bool Success, string Message)> RunProtocolAsync(string name)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"/protocols/{Uri.EscapeDataString(name)}/run");
+
+        using var patience = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        var res = await _http.SendAsync(request, patience.Token);
+
+        var body = await res.Content.ReadFromJsonAsync<SimpleResponse>(cancellationToken: patience.Token);
         return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
     }
 
@@ -560,6 +603,11 @@ public class V33Envelope<T>
 public class IftttListResponse
 {
     [JsonPropertyName("rules")] public List<IftttRule>? Rules { get; set; }
+}
+
+public class ProtocolListResponse
+{
+    [JsonPropertyName("protocols")] public List<Protocol>? Protocols { get; set; }
 }
 
 public class RecommendationsResponse

@@ -1,22 +1,23 @@
-using CommunityToolkit.Mvvm.ComponentModel;
+﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ScottAI.Avalonia.Services;
 
 namespace ScottAI.Avalonia.ViewModels;
 
-/// <summary>Контейнер вкладки «Автоматизация» — переключает 4 под-раздела (как в Tauri-версии).</summary>
+/// <summary>Контейнер вкладки «Автоматизация» — переключает под-разделы.</summary>
 public partial class AutomationViewModel : ViewModelBase
 {
     public CustomCommandsViewModel Commands { get; }
     public IftttViewModel Ifttt { get; }
     public MacrosViewModel Macros { get; }
     public TemplatesViewModel Templates { get; }
+    public ProtocolsViewModel Protocols { get; }
 
     [ObservableProperty]
     private ViewModelBase _currentTab;
 
     [ObservableProperty]
-    private string _activeTab = "commands";
+    private string _activeTab = "protocols";
 
     public AutomationViewModel(BackendClient client)
     {
@@ -24,7 +25,24 @@ public partial class AutomationViewModel : ViewModelBase
         Ifttt = new IftttViewModel(client);
         Macros = new MacrosViewModel(client);
         Templates = new TemplatesViewModel(client);
-        _currentTab = Commands;
+        Protocols = new ProtocolsViewModel(client);
+
+        // Протоколы открываются первыми: это единственный раздел, где одна
+        // запись делает несколько дел подряд, и с него понятнее всего, зачем
+        // страница нужна.
+        _currentTab = Protocols;
+    }
+
+    [RelayCommand]
+    private void ShowProtocols()
+    {
+        CurrentTab = Protocols;
+        ActiveTab = "protocols";
+
+        // Список перечитывается при каждом открытии, а не только при создании
+        // модели. Протокол можно завести и голосом, и из другого места — без
+        // этого он не появлялся бы в списке до перезапуска лаунчера.
+        Protocols.RefreshCommand.Execute(null);
     }
 
     [RelayCommand]

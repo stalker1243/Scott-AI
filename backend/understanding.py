@@ -44,8 +44,11 @@ class Decision:
     писал код.
     """
 
-    kind: str                       # 'web' | 'question' | 'action' | 'refused'
+    kind: str                       # 'protocol' | 'web' | 'question' | 'action' | 'refused'
     reason: str = ""
+
+    # kind='protocol'
+    protocol: Any = None            # сам протокол, найденный по фразе
 
     # kind='web'
     service: str = ""               # youtube | github
@@ -156,16 +159,34 @@ QUESTION_KEYWORDS = vocabulary.QUESTION_WORDS
 # ==================== Само решение ====================
 
 
-def understand(text: str, *, intent_engine, parser, answerer) -> Decision:
+def understand(text: str, *, intent_engine, parser, answerer,
+               find_protocol=None) -> Decision:
     """
     Решить, что значит фраза.
 
     Движки передаются снаружи, а не берутся из `main`: так решение можно
     проверить, не поднимая backend целиком, и порядок загрузки модулей ни на
-    что не влияет.
+    что не влияет. По той же причине протокол ищется переданной функцией, а не
+    импортом: модуль решений не должен знать, где лежат протоколы.
     """
     lower = text.lower().strip()
     intent = intent_engine.detect(text)
+
+    # 0. Протокол человек составил сам и назвал сам. Что бы ни думали о фразе
+    #    встроенные правила, его собственная настройка сильнее: иначе
+    #    протокол, названный обычными словами, было бы невозможно позвать.
+    #
+    #    Перехватывать чужие фразы он при этом не может — совпадение имени
+    #    только точное, см. ProtocolStore.match.
+    if find_protocol is not None:
+        protocol = find_protocol(text)
+        if protocol is not None:
+            return Decision(
+                kind='protocol',
+                protocol=protocol,
+                reason=f"позван протокол «{getattr(protocol, 'name', '')}»",
+                intent=intent,
+            )
 
     # 1. Названный сервис — самый надёжный признак из всех. Упоминание YouTube
     #    или GitHub однозначно говорит о намерении, и рисковать тем, что общая

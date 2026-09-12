@@ -104,3 +104,31 @@ def set_reminders(service) -> None:
     """Отдать модулю запущенную службу напоминаний."""
     global reminders
     reminders = service
+
+
+# ==================== Протоколы ====================
+# Хранилище создаётся здесь, а не в main.py: ему ничего не нужно от ассистента,
+# оно просто читает свой файл. А вот выполнять шаги само оно не умеет и не
+# должно — шаг протокола это обычная фраза, и разбирает её тот же путь, что и
+# голосовую команду. Функция исполнения приходит из main.py, как голос и
+# слушатель.
+try:
+    try:
+        from .protocols import ProtocolStore
+    except ImportError:
+        from protocols import ProtocolStore
+
+    protocols = ProtocolStore()
+    print(f"✅ Протоколов загружено: {len(protocols.all())}")
+except Exception as e:
+    protocols = None
+    print(f"⚠️ Протоколы не загружены: {e}")
+
+
+run_protocol = None
+
+
+def set_protocol_runner(runner) -> None:
+    """Отдать модулю способ выполнить протокол целиком."""
+    global run_protocol
+    run_protocol = runner

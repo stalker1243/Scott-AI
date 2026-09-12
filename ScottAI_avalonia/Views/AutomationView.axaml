@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:conv="using:ScottAI.Avalonia.Converters"
@@ -9,6 +9,8 @@
                    Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,16" />
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,16">
+            <Button Content="Протоколы" Command="{Binding ShowProtocolsCommand}" Classes="tab"
+                    Classes.tabactive="{Binding ActiveTab, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=protocols}" />
             <Button Content="Кастомные команды" Command="{Binding ShowCommandsCommand}" Classes="tab"
                     Classes.tabactive="{Binding ActiveTab, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=commands}" />
             <Button Content="IFTTT-правила" Command="{Binding ShowIftttCommand}" Classes="tab"
