@@ -2,23 +2,35 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:conv="using:ScottAI.Avalonia.Converters"
+             xmlns:holo="using:ScottAI.Avalonia.Hologram"
              x:DataType="vm:HomeViewModel"
              x:Class="ScottAI.Avalonia.Views.HologramView">
 
     <!-- Голограмма состояния машины.
 
-         Каждая часть тела отвечает за свою подсистему, и это не украшение:
+         Каждая часть фигуры отвечает за свою подсистему, и это не украшение:
          человек должен одним взглядом понять, что происходит, не читая цифр.
-         Голова — видеокарта (на ней живут распознавание и синтез речи), грудь —
-         процессор, корпус — оперативная память, основание — диск.
+         Голова — видеокарта (на ней живут распознавание и синтез речи), ядро в
+         груди — процессор, корпус — оперативная память, ноги — диск.
 
-         Части наливаются снизу вверх и меняют цвет от бирюзового к красному.
-         Руки пока ничего не показывают — они оставлены под сеть и температуру.
-
-         Рисуется всё простыми фигурами, без картинок: так голограмма остаётся
-         чёткой на любом размере окна и подстраивается под тему. -->
+         Фигура объёмная, её можно крутить мышью. Плащ и отделка ничего не
+         показывают и красятся нейтрально: иначе каждая складка спорила бы с
+         показаниями за внимание. -->
 
     <UserControl.Styles>
+        <!-- Дыхание проекции: лёгкое колебание яркости. Дольше четырёх секунд —
+             иначе мерцание начинает раздражать боковое зрение, а мигать
+             интерфейс не должен. -->
+        <Style Selector="Grid.figure">
+            <Style.Animations>
+                <Animation Duration="0:0:4.0" IterationCount="INFINITE">
+                    <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1.0" /></KeyFrame>
+                    <KeyFrame Cue="50%"><Setter Property="Opacity" Value="0.9" /></KeyFrame>
+                    <KeyFrame Cue="100%"><Setter Property="Opacity" Value="1.0" /></KeyFrame>
+                </Animation>
+            </Style.Animations>
+        </Style>
+
         <!-- Луч развёртки: тонкая полоса, бегущая по фигуре сверху вниз.
              Именно она делает картинку живой — без движения это просто схема. -->
         <Style Selector="Rectangle.scanline">
@@ -28,41 +40,12 @@
                         <Setter Property="Opacity" Value="0" />
                         <Setter Property="TranslateTransform.Y" Value="-10" />
                     </KeyFrame>
-                    <KeyFrame Cue="12%">
-                        <Setter Property="Opacity" Value="0.55" />
-                    </KeyFrame>
-                    <KeyFrame Cue="88%">
-                        <Setter Property="Opacity" Value="0.55" />
-                    </KeyFrame>
+                    <KeyFrame Cue="12%"><Setter Property="Opacity" Value="0.5" /></KeyFrame>
+                    <KeyFrame Cue="88%"><Setter Property="Opacity" Value="0.5" /></KeyFrame>
                     <KeyFrame Cue="100%">
                         <Setter Property="Opacity" Value="0" />
-                        <Setter Property="TranslateTransform.Y" Value="430" />
+                        <Setter Property="TranslateTransform.Y" Value="400" />
                     </KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
-
-        <!-- Дыхание проекции: лёгкое колебание яркости всей фигуры. Дольше
-             четырёх секунд — иначе мерцание начинает раздражать боковое
-             зрение, а мигать интерфейс не должен. -->
-        <Style Selector="Grid.figure">
-            <Style.Animations>
-                <Animation Duration="0:0:4.0" IterationCount="INFINITE">
-                    <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1.0" /></KeyFrame>
-                    <KeyFrame Cue="50%"><Setter Property="Opacity" Value="0.88" /></KeyFrame>
-                    <KeyFrame Cue="100%"><Setter Property="Opacity" Value="1.0" /></KeyFrame>
-                </Animation>
-            </Style.Animations>
-        </Style>
-
-        <!-- Ядро в груди: пульс, как у сердца. Быстрее общего дыхания —
-             процессор и есть самая деятельная часть. -->
-        <Style Selector="Ellipse.core">
-            <Style.Animations>
-                <Animation Duration="0:0:1.8" IterationCount="INFINITE">
-                    <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0.55" /></KeyFrame>
-                    <KeyFrame Cue="40%"><Setter Property="Opacity" Value="1.0" /></KeyFrame>
-                    <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.55" /></KeyFrame>
                 </Animation>
             </Style.Animations>
         </Style>
@@ -72,13 +55,12 @@
         <Style Selector="Ellipse.pedestal">
             <Style.Animations>
                 <Animation Duration="0:0:3.0" IterationCount="INFINITE" Easing="CubicEaseOut">
-                    <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0.55" /></KeyFrame>
+                    <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0.5" /></KeyFrame>
                     <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0" /></KeyFrame>
                 </Animation>
             </Style.Animations>
         </Style>
 
-        <!-- Подписи: тонкие, чтобы не спорить с фигурой за внимание. -->
         <Style Selector="TextBlock.caption">
             <Setter Property="FontSize" Value="10" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -95,27 +77,6 @@
                 </Transitions>
             </Setter>
         </Style>
-
-        <!-- Заполнение частей меняется плавно: скачок выглядел бы как сбой
-             отрисовки, а не как изменение нагрузки. -->
-        <Style Selector="Rectangle.fill">
-            <Setter Property="Transitions">
-                <Transitions>
-                    <DoubleTransition Property="Height" Duration="0:0:0.7" Easing="CubicEaseOut" />
-                    <DoubleTransition Property="Opacity" Duration="0:0:0.7" />
-                    <BrushTransition Property="Fill" Duration="0:0:0.7" />
-                </Transitions>
-            </Setter>
-        </Style>
-
-        <Style Selector="Path.outline">
-            <Setter Property="StrokeThickness" Value="1.4" />
-            <Setter Property="Transitions">
-                <Transitions>
-                    <BrushTransition Property="Stroke" Duration="0:0:0.7" />
-                </Transitions>
-            </Setter>
-        </Style>
     </UserControl.Styles>
 
     <Grid ColumnDefinitions="*,Auto,*" MinHeight="440">
@@ -129,7 +90,7 @@
                 <TextBlock Classes="reading" HorizontalAlignment="Right"
                            Text="{Binding GpuPercent, StringFormat={}{0:0}%}"
                            Foreground="{Binding GpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                <TextBlock Text="распознавание и синтез речи" FontSize="10"
+                <TextBlock Text="голова · распознавание и синтез речи" FontSize="10"
                            Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Right" />
             </StackPanel>
 
@@ -138,150 +99,38 @@
                 <TextBlock Classes="reading" HorizontalAlignment="Right"
                            Text="{Binding RamPercent, StringFormat={}{0:0}%}"
                            Foreground="{Binding RamPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
+                <TextBlock Text="корпус" FontSize="10"
+                           Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Right" />
             </StackPanel>
         </StackPanel>
 
         <!-- ==================== Сама фигура ==================== -->
-        <Grid Grid.Column="1" Classes="figure" Width="220" Height="440">
+        <Grid Grid.Column="1" Classes="figure" Width="260" Height="440" RowDefinitions="*,Auto">
 
-            <!-- Свечение вокруг фигуры: без него она выглядит наклейкой, а не
-                 проекцией в воздухе. -->
-            <Ellipse Width="200" Height="380" VerticalAlignment="Center" Opacity="0.10">
-                <Ellipse.Fill>
-                    <RadialGradientBrush>
-                        <GradientStop Offset="0" Color="#22D3EE" />
-                        <GradientStop Offset="1" Color="Transparent" />
-                    </RadialGradientBrush>
-                </Ellipse.Fill>
-            </Ellipse>
+            <Grid Grid.Row="0">
+                <!-- Свечение вокруг фигуры: без него она выглядит наклейкой, а не
+                     проекцией в воздухе. -->
+                <Ellipse Width="230" Height="360" VerticalAlignment="Center" Opacity="0.10"
+                         IsHitTestVisible="False">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush>
+                            <GradientStop Offset="0" Color="#22D3EE" />
+                            <GradientStop Offset="1" Color="Transparent" />
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
 
-            <Canvas Width="220" Height="440">
+                <holo:HologramCanvas Name="Figure"
+                                     Gpu="{Binding GpuPercent}"
+                                     Cpu="{Binding CpuPercent}"
+                                     Ram="{Binding RamPercent}"
+                                     Disk="{Binding DiskPercent}"
+                                     Suit="{Binding Suit}"
+                                     ToolTip.Tip="Потяните мышью, чтобы повернуть" />
 
-                <!-- ========== ГОЛОВА: видеокарта ========== -->
-                <Canvas Canvas.Left="80" Canvas.Top="18">
-                    <!-- Голова наливается снизу вверх. Заливка задана градиентом
-                         по самому силуэту: у градиента ноль наверху, единица
-                         внизу, и граница считается наоборот — чем больше
-                         нагрузка, тем выше она поднимается.
-
-                         Прямоугольник с обрезкой здесь уже пробовался дважды, и
-                         оба раза часть наливалась сверху: его нужно к чему-то
-                         прижимать, а обрезка ездит вместе с его высотой. -->
-                    <Ellipse Width="60" Height="66">
-                        <Ellipse.Fill>
-                            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                                <GradientStop Color="#1622D3EE"
-                                              Offset="{Binding GpuPercent, Converter={x:Static conv:LoadToFillEdgeConverter.Instance}, ConverterParameter=feather}" />
-                                <GradientStop Offset="{Binding GpuPercent, Converter={x:Static conv:LoadToFillEdgeConverter.Instance}}"
-                                              Color="{Binding GpuPercent, Converter={x:Static conv:LoadToColorConverter.Instance}}" />
-                                <GradientStop Offset="1"
-                                              Color="{Binding GpuPercent, Converter={x:Static conv:LoadToColorConverter.Instance}}" />
-                            </LinearGradientBrush>
-                        </Ellipse.Fill>
-                    </Ellipse>
-
-                    <Ellipse Width="60" Height="66" Fill="Transparent" StrokeThickness="1.6"
-                             Stroke="{Binding GpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-
-                    <!-- Визор: без него голова читается как просто овал. Узкий
-                         и яркий — широкая полоса выглядела знаком «минус»
-                         поперёк лица. -->
-                    <Rectangle Canvas.Left="14" Canvas.Top="28" Width="32" Height="4" RadiusX="2" RadiusY="2"
-                               Fill="#BAE6FD" Opacity="0.95" />
-                    <Rectangle Canvas.Left="10" Canvas.Top="26" Width="40" Height="8" RadiusX="4" RadiusY="4"
-                               Opacity="0.28"
-                               Fill="{Binding GpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                </Canvas>
-
-                <!-- Шея -->
-                <Rectangle Canvas.Left="104" Canvas.Top="84" Width="12" Height="14" Opacity="0.5"
-                           Fill="{Binding GpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-
-                <!-- Плечи: без них фигура читается как ведро на палке. -->
-                <Path Classes="outline" Opacity="0.55"
-                      Stroke="{Binding RamPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}"
-                      Data="M 74,110 Q 110,98 146,110" />
-
-                <!-- ========== РУКИ: оставлены под сеть и температуру ========== -->
-                <Path Classes="outline" Opacity="0.28" Stroke="#22D3EE"
-                      Data="M 74,112 L 46,150 L 40,208" />
-                <Path Classes="outline" Opacity="0.28" Stroke="#22D3EE"
-                      Data="M 146,112 L 174,150 L 180,208" />
-
-                <!-- ========== КОРПУС: оперативная память ========== -->
-                <Canvas Canvas.Left="72" Canvas.Top="100">
-                    <!-- Корпус наливается так же, как голова. -->
-                    <Path Data="M 4,4 L 72,4 L 62,132 L 14,132 Z">
-                        <Path.Fill>
-                            <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                                <GradientStop Color="#1622D3EE"
-                                              Offset="{Binding RamPercent, Converter={x:Static conv:LoadToFillEdgeConverter.Instance}, ConverterParameter=feather}" />
-                                <GradientStop Offset="{Binding RamPercent, Converter={x:Static conv:LoadToFillEdgeConverter.Instance}}"
-                                              Color="{Binding RamPercent, Converter={x:Static conv:LoadToColorConverter.Instance}}" />
-                                <GradientStop Offset="1"
-                                              Color="{Binding RamPercent, Converter={x:Static conv:LoadToColorConverter.Instance}}" />
-                            </LinearGradientBrush>
-                        </Path.Fill>
-                    </Path>
-
-                    <Path Classes="outline"
-                          Stroke="{Binding RamPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}"
-                          Data="M 4,4 L 72,4 L 62,132 L 14,132 Z" />
-                </Canvas>
-
-                <Canvas Canvas.Left="88" Canvas.Top="126">
-                    <Ellipse Classes="core" Width="44" Height="44" Opacity="0.65">
-                        <Ellipse.Fill>
-                            <RadialGradientBrush>
-                                <GradientStop Offset="0" Color="#22D3EE" />
-                                <GradientStop Offset="1" Color="Transparent" />
-                            </RadialGradientBrush>
-                        </Ellipse.Fill>
-                    </Ellipse>
-
-                    <Ellipse Canvas.Left="10" Canvas.Top="10" Width="24" Height="24"
-                             Opacity="{Binding CpuPercent, Converter={x:Static conv:LoadToGlowConverter.Instance}}"
-                             Fill="{Binding CpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-
-                    <Ellipse Canvas.Left="4" Canvas.Top="4" Width="36" Height="36" Fill="Transparent"
-                             StrokeThickness="1.4" StrokeDashArray="3,3"
-                             Stroke="{Binding CpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                </Canvas>
-
-                <!-- ========== НОГИ И ОСНОВАНИЕ: диск ========== -->
-                <Path Classes="outline"
-                      Stroke="{Binding DiskPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}"
-                      Data="M 86,236 L 80,330 L 74,352" />
-                <Path Classes="outline"
-                      Stroke="{Binding DiskPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}"
-                      Data="M 134,236 L 140,330 L 146,352" />
-
-                <!-- Полоса заполнения диска у основания: ноги слишком тонкие,
-                     чтобы наливаться заметно. -->
-                <Canvas Canvas.Left="60" Canvas.Top="360">
-                    <Rectangle Width="100" Height="6" RadiusX="3" RadiusY="3" Opacity="0.18"
-                               Fill="{Binding DiskPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                    <Rectangle Classes="fill" Height="6" RadiusX="3" RadiusY="3"
-                               Width="{Binding DiskPercent, Converter={x:Static conv:LoadToHeightConverter.Instance}, ConverterParameter=100}"
-                               Opacity="{Binding DiskPercent, Converter={x:Static conv:LoadToGlowConverter.Instance}}"
-                               Fill="{Binding DiskPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                </Canvas>
-
-                <!-- Кольца проекции -->
-                <Ellipse Canvas.Left="40" Canvas.Top="382" Width="140" Height="34" Fill="Transparent"
-                         StrokeThickness="1.2" Opacity="0.5" Stroke="#22D3EE" />
-                <Ellipse Classes="pedestal" Canvas.Left="20" Canvas.Top="374" Width="180" Height="50"
-                         Fill="Transparent" StrokeThickness="1" Stroke="#22D3EE" />
-
-                <!-- Полосы развёртки: то, по чему голограмму узнают с первого
-                     взгляда. Одной фигурой из множества отрезков — два десятка
-                     отдельных прямоугольников выглядели бы так же, но замусорили
-                     бы разметку. -->
-                <Path Stroke="#7DD3FC" StrokeThickness="1" Opacity="0.07" IsHitTestVisible="False"
-                      Data="M 26,20 H 194 M 26,29 H 194 M 26,38 H 194 M 26,47 H 194 M 26,56 H 194 M 26,65 H 194 M 26,74 H 194 M 26,83 H 194 M 26,92 H 194 M 26,101 H 194 M 26,110 H 194 M 26,119 H 194 M 26,128 H 194 M 26,137 H 194 M 26,146 H 194 M 26,155 H 194 M 26,164 H 194 M 26,173 H 194 M 26,182 H 194 M 26,191 H 194 M 26,200 H 194 M 26,209 H 194 M 26,218 H 194 M 26,227 H 194 M 26,236 H 194 M 26,245 H 194 M 26,254 H 194 M 26,263 H 194 M 26,272 H 194 M 26,281 H 194 M 26,290 H 194 M 26,299 H 194 M 26,308 H 194 M 26,317 H 194 M 26,326 H 194 M 26,335 H 194 M 26,344 H 194 M 26,353 H 194 M 26,362 H 194 M 26,371 H 194 M 26,380 H 194 M 26,389 H 194 M 26,398 H 194" />
-
-                <!-- Луч развёртки поверх всего -->
-                <Rectangle Classes="scanline" Canvas.Left="20" Canvas.Top="0" Width="180" Height="2">
+                <!-- Луч развёртки поверх фигуры -->
+                <Rectangle Classes="scanline" Height="2" VerticalAlignment="Top"
+                           Margin="20,0" IsHitTestVisible="False">
                     <Rectangle.Fill>
                         <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
                             <GradientStop Offset="0" Color="Transparent" />
@@ -293,7 +142,31 @@
                         <TranslateTransform />
                     </Rectangle.RenderTransform>
                 </Rectangle>
-            </Canvas>
+
+                <!-- Кольца проекции у ног.
+
+                     Выравниваются по центру, а не по абсолютным координатам:
+                     фигура центрируется по своему полю, и зашитые числа
+                     оставляли её стоящей рядом с кольцом, а не в нём. -->
+                <Grid IsHitTestVisible="False" VerticalAlignment="Bottom" Margin="0,0,0,6">
+                    <Ellipse Width="144" Height="34" HorizontalAlignment="Center" Fill="Transparent"
+                             StrokeThickness="1.2" Opacity="0.45" Stroke="#22D3EE" />
+                    <Ellipse Classes="pedestal" Width="188" Height="50" HorizontalAlignment="Center"
+                             Fill="Transparent" StrokeThickness="1" Stroke="#22D3EE" />
+                </Grid>
+            </Grid>
+
+            <!-- Выбор костюма. Два вида — не ради разнообразия: это первое, что
+                 человек показывает другим, открыв программу. -->
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Center" Margin="0,8,0,0">
+                <Button Content="Броня" Classes="tab" FontSize="11" Padding="12,5"
+                        Command="{Binding SetSuitCommand}" CommandParameter="Armor"
+                        Classes.tabactive="{Binding IsArmorSuit}" />
+                <Button Content="Плащ" Classes="tab" FontSize="11" Padding="12,5"
+                        Command="{Binding SetSuitCommand}" CommandParameter="Cloak"
+                        Classes.tabactive="{Binding !IsArmorSuit}" />
+            </StackPanel>
         </Grid>
 
         <!-- ==================== Подписи справа ==================== -->
@@ -305,7 +178,7 @@
                 <TextBlock Classes="reading"
                            Text="{Binding CpuPercent, StringFormat={}{0:0}%}"
                            Foreground="{Binding CpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                <TextBlock Text="{Binding ProcessCount, StringFormat={}{0} процессов}" FontSize="10"
+                <TextBlock Text="{Binding ProcessCount, StringFormat={}ядро · {0} процессов}" FontSize="10"
                            Foreground="{DynamicResource TextMuted}" />
             </StackPanel>
 
@@ -314,7 +187,7 @@
                 <TextBlock Classes="reading"
                            Text="{Binding DiskPercent, StringFormat={}{0:0}%}"
                            Foreground="{Binding DiskPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                <TextBlock Text="занято на системном" FontSize="10"
+                <TextBlock Text="ноги · занято на системном" FontSize="10"
                            Foreground="{DynamicResource TextMuted}" />
             </StackPanel>
         </StackPanel>
