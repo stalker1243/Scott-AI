@@ -482,6 +482,22 @@ public class MetricsInner
     [JsonPropertyName("ram")]
     public double Ram { get; set; }
 
+    /// <summary>
+    /// Загрузка видеокарты в процентах.
+    ///
+    /// Backend считал её с самого начала, но модель читала только три поля из
+    /// шести, и остальные молча пропадали. А видеокарта здесь главная рабочая
+    /// лошадь: на ней живут и распознавание речи, и синтез.
+    ///
+    /// Ноль означает и «не загружена», и «видеокарты нет» — отличить их можно
+    /// по разделу диагностики, где видно саму карту.
+    /// </summary>
+    [JsonPropertyName("gpu")]
+    public double Gpu { get; set; }
+
+    [JsonPropertyName("disk")]
+    public double Disk { get; set; }
+
     [JsonPropertyName("processes")]
     public int Processes { get; set; }
 }

@@ -1,63 +1,89 @@
 ﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:views="using:ScottAI.Avalonia.Views"
              xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:mi="using:Material.Icons.Avalonia"
              x:DataType="vm:HomeViewModel"
              x:Class="ScottAI.Avalonia.Views.HomeView">
-    <!-- Прокрутка: на невысоком окне карточки и кнопки уезжали за край. -->
+
+    <!-- Главная страница.
+
+         Раньше здесь было три карточки с цифрами — загрузка процессора, память,
+         число процессов, — и половина страницы пустовала. Это диагностика, а не
+         помощник: первое, что видел человек, открыв Scott, были три числа о его
+         компьютере.
+
+         Теперь те же данные показывает голограмма справа, и показывает лучше:
+         по ней видно состояние машины одним взглядом, без чтения цифр. А слева
+         осталось то, ради чего сюда приходят, — что Scott умеет и как с ним
+         заговорить. -->
+
     <ScrollViewer>
-    <StackPanel Margin="40" Spacing="24">
-        <StackPanel Spacing="8">
-            <TextBlock Text="Добро пожаловать" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
-            <TextBlock Text="Scott готов к работе." FontSize="15" Foreground="{DynamicResource TextSecondary}" />
-        </StackPanel>
+        <Grid ColumnDefinitions="*,Auto" Margin="40,32,32,32" MinHeight="480">
 
-        <StackPanel Orientation="Horizontal" Spacing="16">
-            <Border Name="CpuCard" Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
-                    BorderThickness="1" CornerRadius="14" Width="180" Height="110" Padding="18">
-                <StackPanel VerticalAlignment="Center" Spacing="6">
-                    <TextBlock Text="CPU" FontSize="13" Foreground="{DynamicResource TextSecondary}" />
-                    <TextBlock Text="{Binding CpuPercent, StringFormat={}{0:0.0}%}" FontSize="26" FontWeight="Bold"
-                               Foreground="{DynamicResource TextPrimary}" />
-                </StackPanel>
-            </Border>
-            <Border Name="RamCard" Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
-                    BorderThickness="1" CornerRadius="14" Width="180" Height="110" Padding="18">
-                <StackPanel VerticalAlignment="Center" Spacing="6">
-                    <TextBlock Text="RAM" FontSize="13" Foreground="{DynamicResource TextSecondary}" />
-                    <TextBlock Text="{Binding RamPercent, StringFormat={}{0:0.0}%}" FontSize="26" FontWeight="Bold"
-                               Foreground="{DynamicResource TextPrimary}" />
-                </StackPanel>
-            </Border>
-            <Border Name="ProcessCard" Classes="card" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
-                    BorderThickness="1" CornerRadius="14" Width="180" Height="110" Padding="18">
-                <StackPanel VerticalAlignment="Center" Spacing="6">
-                    <TextBlock Text="Процессы" FontSize="13" Foreground="{DynamicResource TextSecondary}" />
-                    <TextBlock Text="{Binding ProcessCount}" FontSize="26" FontWeight="Bold"
-                               Foreground="{DynamicResource TextPrimary}" />
-                </StackPanel>
-            </Border>
-        </StackPanel>
+            <!-- ==================== Слева: с чего начать ==================== -->
+            <StackPanel Grid.Column="0" Spacing="26" VerticalAlignment="Center" MaxWidth="460">
 
-        <StackPanel Spacing="12">
-            <StackPanel Orientation="Horizontal" Spacing="12">
-                <Button Name="LaunchButton" Content="Открыть чат" Command="{Binding LaunchChatCommand}"
-                        Background="{DynamicResource Accent}" Foreground="White" Padding="20,12"
-                        CornerRadius="10" FontWeight="SemiBold" />
-                <Button Content="{Binding ListenButtonText}" Command="{Binding ToggleListeningCommand}"
-                        IsEnabled="{Binding MicAvailable}"
-                        Background="{DynamicResource BgElevated}" Foreground="{DynamicResource TextPrimary}"
-                        Padding="20,12" CornerRadius="10" FontWeight="SemiBold" />
+                <StackPanel Name="Greeting" Spacing="8">
+                    <TextBlock Text="Добро пожаловать" FontSize="30" FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimary}" />
+                    <TextBlock Text="Scott готов к работе. Спросите голосом или напишите в чат."
+                               FontSize="15" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSecondary}" />
+                </StackPanel>
+
+                <!-- Примеры команд. Человек, открывший помощника впервые, не
+                     знает, что ему можно сказать, — и чаще всего не говорит
+                     ничего. -->
+                <StackPanel Name="ExamplesBlock" Spacing="10">
+                    <TextBlock Text="ПОПРОБУЙТЕ СКАЗАТЬ" FontSize="10" FontWeight="SemiBold"
+                               LetterSpacing="1.2" Foreground="{DynamicResource TextMuted}" />
+
+                    <ItemsControl ItemsSource="{Binding Examples}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="8" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:HomeExample">
+                                <Border Classes="card example" Background="{DynamicResource BgSurface}"
+                                        BorderBrush="{DynamicResource BorderColor}" BorderThickness="1"
+                                        CornerRadius="10" Padding="14,10">
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <mi:MaterialIcon Kind="{Binding Icon}" Width="16" Height="16"
+                                                         VerticalAlignment="Center"
+                                                         Foreground="{DynamicResource Accent}" />
+                                        <TextBlock Text="{Binding Text}" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextPrimary}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <StackPanel Name="Actions" Spacing="12">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Name="LaunchButton" Content="Открыть чат" Command="{Binding LaunchChatCommand}"
+                                Classes="accent" Padding="20,12" />
+                        <Button Content="{Binding ListenButtonText}" Command="{Binding ToggleListeningCommand}"
+                                IsEnabled="{Binding MicAvailable}" Classes="soft" Padding="20,12" />
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding ListenHint}" FontSize="12" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextMuted}" />
+                    <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"
+                               IsVisible="{Binding LastHeard, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
+                        <Run Text="Последнее услышанное:" />
+                        <Run Text="{Binding LastHeard}" FontStyle="Italic" />
+                    </TextBlock>
+                </StackPanel>
             </StackPanel>
 
-            <TextBlock Text="{Binding ListenHint}" FontSize="12" TextWrapping="Wrap"
-                       Foreground="{DynamicResource TextMuted}" />
-            <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"
-                       IsVisible="{Binding LastHeard, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
-                <Run Text="Последнее услышанное:" />
-                <Run Text="{Binding LastHeard}" FontStyle="Italic" />
-            </TextBlock>
-        </StackPanel>
-    </StackPanel>
+            <!-- ==================== Справа: голограмма ==================== -->
+            <views:HologramView Name="Hologram" Grid.Column="1" VerticalAlignment="Center" Margin="24,0,0,0" />
+        </Grid>
     </ScrollViewer>
 </UserControl>

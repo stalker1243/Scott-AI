@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -16,6 +17,8 @@ public partial class HomeViewModel : ViewModelBase
 
     private double _cpuTarget;
     private double _ramTarget;
+    private double _gpuTarget;
+    private double _diskTarget;
     private double _processTarget;
     private double _processDisplay;
 
@@ -27,6 +30,29 @@ public partial class HomeViewModel : ViewModelBase
 
     [ObservableProperty]
     private int _processCount;
+
+    /// <summary>
+    /// Примеры того, что Scott умеет.
+    ///
+    /// Человек, открывший помощника впервые, не знает, что ему можно сказать, —
+    /// и чаще всего не говорит ничего. Список короткий намеренно: длинный никто
+    /// не читает.
+    /// </summary>
+    public ObservableCollection<HomeExample> Examples { get; } = new(new[]
+    {
+        new HomeExample("Открой браузер", "OpenInNew"),
+        new HomeExample("Что такое фотосинтез", "HelpCircleOutline"),
+        new HomeExample("Напомни через час позвонить маме", "BellOutline"),
+        new HomeExample("Введи в поиск браузера рецепт борща", "Magnify"),
+    });
+
+    /// <summary>Загрузка видеокарты. Ноль означает и «свободна», и «её нет».</summary>
+    [ObservableProperty]
+    private double _gpuPercent;
+
+    /// <summary>Заполненность системного диска.</summary>
+    [ObservableProperty]
+    private double _diskPercent;
 
     // ---- Прослушивание микрофона ----
     // Scott слушает непрерывно, но выполняет только то, что сказано после его
@@ -123,6 +149,8 @@ public partial class HomeViewModel : ViewModelBase
         const double ease = 0.22;
         CpuPercent = Ease(CpuPercent, _cpuTarget, ease);
         RamPercent = Ease(RamPercent, _ramTarget, ease);
+        GpuPercent = Ease(GpuPercent, _gpuTarget, ease);
+        DiskPercent = Ease(DiskPercent, _diskTarget, ease);
         _processDisplay = Ease(_processDisplay, _processTarget, ease);
         ProcessCount = (int)Math.Round(_processDisplay);
     }
@@ -143,6 +171,8 @@ public partial class HomeViewModel : ViewModelBase
             {
                 _cpuTarget = metrics.Metrics.Cpu;
                 _ramTarget = metrics.Metrics.Ram;
+                _gpuTarget = metrics.Metrics.Gpu;
+                _diskTarget = metrics.Metrics.Disk;
                 _processTarget = metrics.Metrics.Processes;
             }
             await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(3));
@@ -152,3 +182,8 @@ public partial class HomeViewModel : ViewModelBase
     [RelayCommand]
     private void LaunchChat() => _onLaunchChat();
 }
+
+
+/// <summary>Одна строка в списке примеров: что сказать и каким значком это
+/// отметить.</summary>
+public sealed record HomeExample(string Text, string Icon);
