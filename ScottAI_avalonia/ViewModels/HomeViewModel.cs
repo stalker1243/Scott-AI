@@ -82,7 +82,7 @@ public partial class HomeViewModel : ViewModelBase
         _animTimer.Start();
 
         _ = PollMetricsAsync();
-        _ = RefreshListening();
+        _ = PollListeningAsync();
     }
 
     [RelayCommand]
@@ -112,6 +112,33 @@ public partial class HomeViewModel : ViewModelBase
     private async Task RefreshListening()
     {
         ApplyListenState(await _client.ListenStatusAsync());
+    }
+
+    /// <summary>
+    /// Следить за состоянием микрофона, а не спрашивать его один раз.
+    ///
+    /// Спрошенное при создании страницы всегда неверно: backend в этот момент
+    /// ещё поднимается. Подпись «backend не отвечает» так и висела под
+    /// кнопками, пока вверху окна горело «online».
+    ///
+    /// Живыми становятся и счётчики услышанного: по разнице между «услышано
+    /// фраз» и «из них ко мне» видно, слышит ли Scott комнату и узнаёт ли себя.
+    /// Замороженные на нуле, они говорили ровно противоположное тому, что
+    /// происходит.
+    /// </summary>
+    private async Task PollListeningAsync()
+    {
+        while (true)
+        {
+            // Пока переключение в пути, состояние с сервера устарело: оно
+            // вернуло бы кнопку в прежнее положение прямо под рукой человека.
+            if (!ListenBusy)
+            {
+                await RefreshListening();
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(3));
+        }
     }
 
     private void ApplyListenState(ListenStatus? state)
