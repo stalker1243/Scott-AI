@@ -58,8 +58,6 @@ public sealed class LauncherSettings
     /// </summary>
     public string IconVariant { get; set; } = "dark";
 
-    /// <summary>Костюм голограммы: «armor» или «cloak».</summary>
-    public string Suit { get; set; } = "armor";
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]
@@ -151,7 +149,6 @@ public static class SettingsStore
         settings.AvatarZoom = clean.AvatarZoom;
         settings.RunInBackground = clean.RunInBackground;
         settings.IconVariant = clean.IconVariant;
-        settings.Suit = clean.Suit;
     }
 
     public static LauncherSettings Load() => LoadFrom(Dir);

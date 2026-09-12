@@ -141,21 +141,68 @@ public static class Projector
     /// Считается по самой модели, а не подбирается на глаз: у плаща и брони
     /// разные размеры, и зашитое число обрезало бы одну из фигур.
     /// </summary>
-    public static double FitScale(Mesh mesh, double width, double height, double margin = 0.86)
+    /// <summary>Половина высоты модели — по ней фигуру ставят ногами на кольца.</summary>
+    public static double HalfHeight(Mesh mesh)
+        => mesh.Vertices.Count == 0 ? 0 : mesh.Vertices.Max(v => Math.Abs(v.Y));
+
+    /// <summary>
+    /// Насколько далеко точки отходят от оси вращения.
+    ///
+    /// Берётся расстояние в плоскости пола: при любом повороте дальше него
+    /// точка не уедет.
+    /// </summary>
+    public static double Reach(Mesh mesh)
+        => mesh.Vertices.Count == 0
+            ? 0
+            : mesh.Vertices.Max(v => Math.Sqrt(v.X * v.X + v.Z * v.Z));
+
+    /// <summary>
+    /// Во сколько раз перспектива увеличивает ближнюю к зрителю половину.
+    ///
+    /// Нужна дважды: при подборе масштаба и при посадке фигуры. Считать её в
+    /// двух местах по отдельности — верный способ развести их между собой.
+    /// </summary>
+    public static double CloseUp(Mesh mesh)
+        => ViewerDistance / Math.Max(1, ViewerDistance - Reach(mesh));
+
+    /// <summary>
+    /// Где должна быть середина фигуры, чтобы она стояла ногами на низу.
+    ///
+    /// Просто «высота минус половина роста» не годится: перспектива увеличивает
+    /// то, что ближе к зрителю, и повёрнутая к человеку ступня опускается ниже
+    /// плоского расчёта. Проверка это и поймала — фигура вылезала за нижний
+    /// край ровно тем боком, который к зрителю.
+    /// </summary>
+    public static double GroundedCenterY(Mesh mesh, double scale, double height)
+    {
+        if (mesh.Vertices.Count == 0) return height / 2;
+
+        var half = HalfHeight(mesh);
+        if (half <= 0) return height / 2;
+
+        // Увеличение считается по самым нижним точкам, а не по всей модели.
+        //
+        // Фигура стоит на ступнях, а они близко к оси вращения: перспектива
+        // растягивает их куда слабее, чем разведённые плечи. Взяв общее
+        // увеличение, фигуру приходилось поднимать с запасом — и она повисала
+        // над кольцами проекции вместо того, чтобы стоять в них.
+        var lowest = mesh.Vertices.Where(v => v.Y > half * 0.8).ToList();
+        var footReach = lowest.Count > 0
+            ? lowest.Max(v => Math.Sqrt(v.X * v.X + v.Z * v.Z))
+            : Reach(mesh);
+
+        var closeUp = ViewerDistance / Math.Max(1, ViewerDistance - footReach);
+
+        return height - half * scale * closeUp;
+    }
+
+    public static double FitScale(Mesh mesh, double width, double height, double margin = 0.94)
     {
         if (mesh.Vertices.Count == 0) return 1;
 
-        var maxY = mesh.Vertices.Max(v => Math.Abs(v.Y));
-
-        // Запас на поворот: в профиль фигура шире, чем анфас, и без запаса она
-        // задевала бы края при вращении. Берётся расстояние от оси в плоскости
-        // пола — при любом повороте дальше него точка не уедет.
-        var reach = mesh.Vertices.Max(v => Math.Sqrt(v.X * v.X + v.Z * v.Z));
-
-        // Перспектива увеличивает то, что ближе к зрителю: ближняя половина
-        // фигуры вырастает примерно во столько раз. Без этой поправки она
-        // вылезала за край ровно тем боком, который повёрнут к человеку.
-        var closeUp = ViewerDistance / Math.Max(1, ViewerDistance - reach);
+        var maxY = HalfHeight(mesh);
+        var reach = Reach(mesh);
+        var closeUp = CloseUp(mesh);
 
         var byWidth = reach > 0 ? width / 2 / (reach * closeUp) : 1;
         var byHeight = maxY > 0 ? height / 2 / (maxY * closeUp) : 1;

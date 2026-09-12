@@ -40,7 +40,7 @@ public enum BodyPart
 /// <summary>Плоская грань: несколько вершин модели и то, что она показывает.</summary>
 public sealed record Face(int[] Indices, BodyPart Part)
 {
-    /// <summary>Собственная яркость грани — им задаётся объём у плоских деталей.</summary>
+    /// <summary>Собственная яркость грани — ею задаётся объём у плоских деталей.</summary>
     public double Tint { get; init; } = 1.0;
 }
 
@@ -53,18 +53,19 @@ public sealed class Mesh
     /// <summary>
     /// Добавить коробку — основной строительный блок фигуры.
     ///
-    /// Коробками собрано почти всё: голова, корпус, руки, ноги. Это не лень:
-    /// гранёная броня из коробок и должна выглядеть гранёной, а сглаженные
-    /// формы на такой мелкой фигуре всё равно неразличимы.
+    /// Коробками собрано почти всё: шлем, кираса, наручи, поножи. Это не лень:
+    /// латный доспех и состоит из плоских пластин, а сглаженные формы на фигуре
+    /// в двести пикселей всё равно неразличимы.
     /// </summary>
     public void AddBox(Point3 center, double width, double height, double depth,
-                       BodyPart part, double tint = 1.0, double taper = 1.0)
+                       BodyPart part, double tint = 1.0, double taper = 1.0,
+                       double lean = 0)
     {
         var hw = width / 2;
         var hh = height / 2;
         var hd = depth / 2;
 
-        // Сужение книзу: с ним корпус перестаёт быть ящиком и становится
+        // Сужение книзу: с ним кираса перестаёт быть ящиком и становится
         // торсом, а нога — ногой.
         var bw = hw * taper;
         var bd = hd * taper;
@@ -72,10 +73,10 @@ public sealed class Mesh
         var start = Vertices.Count;
 
         // Верх
-        Vertices.Add(new Point3(center.X - hw, center.Y - hh, center.Z - hd));
-        Vertices.Add(new Point3(center.X + hw, center.Y - hh, center.Z - hd));
-        Vertices.Add(new Point3(center.X + hw, center.Y - hh, center.Z + hd));
-        Vertices.Add(new Point3(center.X - hw, center.Y - hh, center.Z + hd));
+        Vertices.Add(new Point3(center.X - hw, center.Y - hh, center.Z - hd + lean));
+        Vertices.Add(new Point3(center.X + hw, center.Y - hh, center.Z - hd + lean));
+        Vertices.Add(new Point3(center.X + hw, center.Y - hh, center.Z + hd + lean));
+        Vertices.Add(new Point3(center.X - hw, center.Y - hh, center.Z + hd + lean));
 
         // Низ
         Vertices.Add(new Point3(center.X - bw, center.Y + hh, center.Z - bd));
@@ -114,12 +115,28 @@ public sealed class Mesh
     {
         if (Vertices.Count == 0) return;
 
+        // Центруем по доспеху, а не по всей модели. Плащ висит за спиной и
+        // свисает ниже ног: считая по нему, середина коробки приходится не
+        // туда, где человек видит фигуру, и она уезжает вбок и вверх.
+        var body = new HashSet<int>();
+        foreach (var face in Faces)
+        {
+            if (face.Part == BodyPart.Cape) continue;
+            foreach (var index in face.Indices) body.Add(index);
+        }
+
+        if (body.Count == 0)
+        {
+            for (var i = 0; i < Vertices.Count; i++) body.Add(i);
+        }
+
         double minX = double.MaxValue, maxX = double.MinValue;
         double minY = double.MaxValue, maxY = double.MinValue;
         double minZ = double.MaxValue, maxZ = double.MinValue;
 
-        foreach (var v in Vertices)
+        foreach (var index in body)
         {
+            var v = Vertices[index];
             minX = Math.Min(minX, v.X); maxX = Math.Max(maxX, v.X);
             minY = Math.Min(minY, v.Y); maxY = Math.Max(maxY, v.Y);
             minZ = Math.Min(minZ, v.Z); maxZ = Math.Max(maxZ, v.Z);
@@ -139,7 +156,7 @@ public sealed class Mesh
     /// Это сетка четырёхугольников, изогнутая по дуге: плоский прямоугольник за
     /// спиной читался бы как доска, а не как ткань.
     /// </summary>
-    public void AddCape(double top, double height, double halfWidth, double depth, int segments = 7)
+    public void AddCape(double top, double height, double halfWidth, double depth, int segments = 8)
     {
         var rows = segments;
         var columns = segments;
@@ -150,17 +167,20 @@ public sealed class Mesh
             var t = (double)row / rows;
             var y = top + height * t;
 
-            // Книзу плащ расходится, а его нижний край слегка отходит назад —
-            // так он выглядит висящим, а не приклеенным.
-            var spread = halfWidth * (0.62 + 0.38 * t);
-            var back = depth * (0.35 + 0.65 * t);
+            // Книзу плащ расходится, а его нижний край отходит назад — так он
+            // выглядит висящим и тяжёлым, а не приклеенным к спине.
+            var spread = halfWidth * (0.55 + 0.45 * t * t);
+            var back = depth * (0.3 + 0.7 * t);
 
             for (var column = 0; column <= columns; column++)
             {
                 var u = (double)column / columns * 2 - 1;
 
-                // Дуга поперёк: середина ближе к спине, края отходят вперёд.
-                var curve = (1 - u * u) * depth * 0.45;
+                // Дуга поперёк: середина ближе к спине, края отходят вперёд,
+                // будто плащ облегает плечи. Заворот небольшой намеренно —
+                // ткань не должна выходить перед грудью, там ядро, и закрывать
+                // его нечем.
+                var curve = (1 - u * u) * depth * 0.28;
 
                 Vertices.Add(new Point3(u * spread, y, back - curve));
             }
@@ -177,7 +197,7 @@ public sealed class Mesh
 
                 // Вертикальные полосы разной яркости: так на ткани появляются
                 // складки, хотя геометрия у неё гладкая.
-                var fold = 0.82 + 0.18 * ((column % 2 == 0) ? 1 : 0);
+                var fold = 0.78 + 0.22 * ((column % 2 == 0) ? 1 : 0);
 
                 Faces.Add(new Face(new[] { a, b, c, d }, BodyPart.Cape) { Tint = fold });
             }
@@ -186,115 +206,90 @@ public sealed class Mesh
 }
 
 /// <summary>
-/// Костюм: какой фигурой Scott показывает состояние машины.
+/// Фигура, которой Scott показывает состояние машины.
 ///
-/// Два вида сделаны не ради разнообразия, а потому что это первое, что человек
-/// показывает другим, открыв программу. Оба собраны из собственных форм: тяжёлая
-/// броня и фигура в плаще — обычный язык фантастики, а не чей-то персонаж.
+/// Латный доспех с капюшоном, глухой маской и тяжёлым плащом. Это устоявшийся
+/// образ фантастики — закованный в броню человек в плаще, — а не чей-то
+/// персонаж: узнаваемых эмблем, имён и точных повторений чужих костюмов здесь
+/// нет намеренно. Программу предполагается продавать, и фигура на её главной
+/// странице должна принадлежать ей самой.
 /// </summary>
-public enum SuitKind
-{
-    /// <summary>Тяжёлая броня: широкие плечи, гранёные пластины, ядро в груди.</summary>
-    Armor,
-
-    /// <summary>Фигура в плаще: глухая маска, капюшон, полотнище за спиной.</summary>
-    Cloak,
-}
-
 public static class Suits
 {
-    /// <summary>Собрать фигуру выбранного вида.</summary>
-    public static Mesh Build(SuitKind kind) => kind switch
-    {
-        SuitKind.Cloak => BuildCloak(),
-        _ => BuildArmor(),
-    };
-
-    /// <summary>
-    /// Тяжёлая броня.
-    ///
-    /// Плечи намеренно шире бёдер: этот силуэт читается как «броня» даже когда
-    /// фигура размером с ноготь, а детали ещё неразличимы.
-    /// </summary>
-    private static Mesh BuildArmor()
+    /// <summary>Собрать фигуру.</summary>
+    public static Mesh Build()
     {
         var mesh = new Mesh();
 
-        // Голова заметно меньше корпуса: с крупной головой фигура читается как
-        // игрушка, а не как броня.
-        mesh.AddBox(new Point3(0, -84, 0), 19, 20, 19, BodyPart.Head, taper: 0.9);
-        mesh.AddBox(new Point3(0, -80, 10), 13, 5, 4, BodyPart.Head, tint: 1.4);   // забрало
-        mesh.AddBox(new Point3(0, -71, 0), 9, 6, 9, BodyPart.Trim);                // шея
+        // ==================== Плащ ====================
+        //
+        // Строится первым: при равной глубине грани рисуются в порядке
+        // добавления, и плащ должен оказаться позади фигуры, а не поверх неё.
+        // Уже плеч и выше ступней: плащ обрамляет фигуру, а не прячет её, и не
+        // должен пересекаться с кольцами проекции у ног.
+        mesh.AddCape(top: -66, height: 100, halfWidth: 31, depth: 24);
 
-        // Наплечники — то, по чему броню узнают с расстояния. Они шире груди и
-        // выступают вверх, иначе силуэт остаётся человеческим, а не броневым.
-        mesh.AddBox(new Point3(-30, -58, 0), 22, 16, 24, BodyPart.Arms, taper: 0.8);
-        mesh.AddBox(new Point3(30, -58, 0), 22, 16, 24, BodyPart.Arms, taper: 0.8);
+        // Воротник: высокий, стоячий, за головой. Именно он делает силуэт
+        // тяжёлым и «властным» — без него фигура просто человек в накидке.
+        mesh.AddBox(new Point3(-16, -80, -12), 10, 34, 10, BodyPart.Cape, tint: 1.12, lean: -6);
+        mesh.AddBox(new Point3(16, -80, -12), 10, 34, 10, BodyPart.Cape, tint: 1.12, lean: -6);
+        mesh.AddBox(new Point3(0, -74, -15), 34, 22, 8, BodyPart.Cape, tint: 0.96);
 
-        // Грудь широкая, пояс узкий: это и есть весь силуэт.
-        mesh.AddBox(new Point3(0, -54, 0), 42, 26, 24, BodyPart.Torso, taper: 0.88);
-        mesh.AddBox(new Point3(0, -30, 0), 34, 26, 20, BodyPart.Torso, taper: 0.72);
+        // ==================== Голова ====================
+        //
+        // Капюшон закрывает череп целиком, из-под него выступает глухая маска.
+        mesh.AddBox(new Point3(0, -86, -2), 23, 25, 24, BodyPart.Cape, tint: 0.94, taper: 1.06);
+        mesh.AddBox(new Point3(0, -84, 10), 17, 22, 8, BodyPart.Head, taper: 0.94);
+
+        // Прорезь для глаз — единственная яркая деталь на лице.
+        mesh.AddBox(new Point3(0, -88, 14), 12, 3, 3, BodyPart.Head, tint: 1.7);
+
+        // Скулы маски: две пластины по бокам, чтобы лицо не было плоским.
+        mesh.AddBox(new Point3(-8, -82, 11), 4, 16, 6, BodyPart.Head, tint: 1.15);
+        mesh.AddBox(new Point3(8, -82, 11), 4, 16, 6, BodyPart.Head, tint: 1.15);
+
+        mesh.AddBox(new Point3(0, -69, 0), 11, 7, 11, BodyPart.Trim);
+
+        // ==================== Плечи и руки ====================
+        //
+        // Наплечники широкие и приподнятые: силуэт должен читаться как доспех
+        // даже когда фигура размером с ноготь и деталей ещё не видно.
+        mesh.AddBox(new Point3(-28, -60, 0), 21, 14, 23, BodyPart.Arms, tint: 1.05, taper: 0.76);
+        mesh.AddBox(new Point3(28, -60, 0), 21, 14, 23, BodyPart.Arms, tint: 1.05, taper: 0.76);
+
+        mesh.AddBox(new Point3(-30, -44, 0), 12, 22, 12, BodyPart.Arms, taper: 0.88);
+        mesh.AddBox(new Point3(30, -44, 0), 12, 22, 12, BodyPart.Arms, taper: 0.88);
+
+        // Наручи
+        mesh.AddBox(new Point3(-30, -26, 0), 11, 16, 11, BodyPart.Arms, tint: 1.08);
+        mesh.AddBox(new Point3(30, -26, 0), 11, 16, 11, BodyPart.Arms, tint: 1.08);
+
+        // ==================== Кираса ====================
+        mesh.AddBox(new Point3(0, -54, 0), 36, 26, 22, BodyPart.Torso, taper: 0.9);
+        mesh.AddBox(new Point3(0, -31, 0), 31, 24, 19, BodyPart.Torso, taper: 0.76);
 
         // Ядро в груди
-        mesh.AddBox(new Point3(0, -54, 12), 11, 11, 4, BodyPart.Core, tint: 1.6);
+        mesh.AddBox(new Point3(0, -54, 11), 10, 10, 4, BodyPart.Core, tint: 1.7);
 
-        // Руки вынесены за корпус, чтобы не сливаться с ним.
-        mesh.AddBox(new Point3(-32, -38, 0), 12, 26, 12, BodyPart.Arms, taper: 0.85);
-        mesh.AddBox(new Point3(32, -38, 0), 12, 26, 12, BodyPart.Arms, taper: 0.85);
-        mesh.AddBox(new Point3(-32, -18, 0), 10, 16, 10, BodyPart.Arms);
-        mesh.AddBox(new Point3(32, -18, 0), 10, 16, 10, BodyPart.Arms);
+        // Пояс и набедренные пластины
+        mesh.AddBox(new Point3(0, -16, 0), 27, 8, 17, BodyPart.Trim, tint: 1.1);
+        mesh.AddBox(new Point3(-11, -8, 0), 12, 12, 14, BodyPart.Trim, taper: 0.85);
+        mesh.AddBox(new Point3(11, -8, 0), 12, 12, 14, BodyPart.Trim, taper: 0.85);
 
-        mesh.AddBox(new Point3(0, -14, 0), 26, 7, 17, BodyPart.Trim);
+        // ==================== Ноги ====================
+        mesh.AddBox(new Point3(-10, 8, 0), 13, 30, 13, BodyPart.Legs, taper: 0.88);
+        mesh.AddBox(new Point3(10, 8, 0), 13, 30, 13, BodyPart.Legs, taper: 0.88);
 
-        // Ноги
-        mesh.AddBox(new Point3(-10, 8, 0), 14, 36, 14, BodyPart.Legs, taper: 0.85);
-        mesh.AddBox(new Point3(10, 8, 0), 14, 36, 14, BodyPart.Legs, taper: 0.85);
-        mesh.AddBox(new Point3(-10, 34, 0), 12, 20, 13, BodyPart.Legs, taper: 0.9);
-        mesh.AddBox(new Point3(10, 34, 0), 12, 20, 13, BodyPart.Legs, taper: 0.9);
-        mesh.AddBox(new Point3(-10, 46, 3), 12, 6, 18, BodyPart.Legs);
-        mesh.AddBox(new Point3(10, 46, 3), 12, 6, 18, BodyPart.Legs);
+        // Наколенники
+        mesh.AddBox(new Point3(-10, 24, 1), 12, 8, 13, BodyPart.Legs, tint: 1.12);
+        mesh.AddBox(new Point3(10, 24, 1), 12, 8, 13, BodyPart.Legs, tint: 1.12);
 
-        mesh.Center();
-        return mesh;
-    }
+        mesh.AddBox(new Point3(-10, 36, 0), 11, 18, 12, BodyPart.Legs, taper: 0.9);
+        mesh.AddBox(new Point3(10, 36, 0), 11, 18, 12, BodyPart.Legs, taper: 0.9);
 
-    /// <summary>
-    /// Фигура в плаще.
-    ///
-    /// Силуэт противоположен броне: узкие плечи, глухая маска, тяжёлое
-    /// полотнище за спиной. Плащ строится первым, чтобы при равной глубине
-    /// оказаться позади фигуры, а не поверх неё.
-    /// </summary>
-    private static Mesh BuildCloak()
-    {
-        var mesh = new Mesh();
-
-        mesh.AddCape(top: -66, height: 112, halfWidth: 34, depth: 24);
-
-        // Капюшон закрывает голову целиком, маска выступает вперёд.
-        mesh.AddBox(new Point3(0, -86, -2), 24, 26, 25, BodyPart.Cape, tint: 0.92, taper: 1.1);
-        mesh.AddBox(new Point3(0, -83, 11), 15, 19, 7, BodyPart.Head, taper: 0.92);
-        mesh.AddBox(new Point3(0, -86, 15), 11, 4, 3, BodyPart.Head, tint: 1.5);   // прорезь глаз
-        mesh.AddBox(new Point3(0, -70, 0), 10, 6, 10, BodyPart.Trim);
-
-        // Наплечники плаща: узнаваемы в профиль, но уже, чем у брони.
-        mesh.AddBox(new Point3(-23, -60, 0), 17, 11, 20, BodyPart.Cape, tint: 1.06, taper: 0.78);
-        mesh.AddBox(new Point3(23, -60, 0), 17, 11, 20, BodyPart.Cape, tint: 1.06, taper: 0.78);
-
-        mesh.AddBox(new Point3(0, -54, 0), 32, 26, 20, BodyPart.Torso, taper: 0.92);
-        mesh.AddBox(new Point3(0, -30, 0), 29, 26, 18, BodyPart.Torso, taper: 0.78);
-        mesh.AddBox(new Point3(0, -54, 10), 9, 9, 4, BodyPart.Core, tint: 1.6);
-
-        // Руки прижаты к телу — из-под плаща торчать нечему.
-        mesh.AddBox(new Point3(-21, -40, 0), 10, 26, 10, BodyPart.Arms, taper: 0.88);
-        mesh.AddBox(new Point3(21, -40, 0), 10, 26, 10, BodyPart.Arms, taper: 0.88);
-
-        mesh.AddBox(new Point3(0, -14, 0), 24, 6, 16, BodyPart.Trim);
-
-        mesh.AddBox(new Point3(-9, 8, 0), 13, 36, 13, BodyPart.Legs, taper: 0.85);
-        mesh.AddBox(new Point3(9, 8, 0), 13, 36, 13, BodyPart.Legs, taper: 0.85);
-        mesh.AddBox(new Point3(-9, 34, 0), 11, 20, 12, BodyPart.Legs, taper: 0.9);
-        mesh.AddBox(new Point3(9, 34, 0), 11, 20, 12, BodyPart.Legs, taper: 0.9);
+        // Сабатоны
+        mesh.AddBox(new Point3(-10, 47, 3), 11, 6, 17, BodyPart.Legs);
+        mesh.AddBox(new Point3(10, 47, 3), 11, 6, 17, BodyPart.Legs);
 
         mesh.Center();
         return mesh;

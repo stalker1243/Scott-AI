@@ -105,9 +105,9 @@
         </StackPanel>
 
         <!-- ==================== Сама фигура ==================== -->
-        <Grid Grid.Column="1" Classes="figure" Width="260" Height="440" RowDefinitions="*,Auto">
+        <Grid Grid.Column="1" Classes="figure" Width="260" Height="450">
 
-            <Grid Grid.Row="0">
+            <Grid>
                 <!-- Свечение вокруг фигуры: без него она выглядит наклейкой, а не
                      проекцией в воздухе. -->
                 <Ellipse Width="230" Height="360" VerticalAlignment="Center" Opacity="0.10"
@@ -125,7 +125,6 @@
                                      Cpu="{Binding CpuPercent}"
                                      Ram="{Binding RamPercent}"
                                      Disk="{Binding DiskPercent}"
-                                     Suit="{Binding Suit}"
                                      ToolTip.Tip="Потяните мышью, чтобы повернуть" />
 
                 <!-- Луч развёртки поверх фигуры -->
@@ -156,17 +155,6 @@
                 </Grid>
             </Grid>
 
-            <!-- Выбор костюма. Два вида — не ради разнообразия: это первое, что
-                 человек показывает другим, открыв программу. -->
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8"
-                        HorizontalAlignment="Center" Margin="0,8,0,0">
-                <Button Content="Броня" Classes="tab" FontSize="11" Padding="12,5"
-                        Command="{Binding SetSuitCommand}" CommandParameter="Armor"
-                        Classes.tabactive="{Binding IsArmorSuit}" />
-                <Button Content="Плащ" Classes="tab" FontSize="11" Padding="12,5"
-                        Command="{Binding SetSuitCommand}" CommandParameter="Cloak"
-                        Classes.tabactive="{Binding !IsArmorSuit}" />
-            </StackPanel>
         </Grid>
 
         <!-- ==================== Подписи справа ==================== -->

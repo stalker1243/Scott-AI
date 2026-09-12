@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using ScottAI.Avalonia.Hologram;
 using Xunit;
@@ -46,12 +47,10 @@ public class HologramTests
         Assert.True(низ < верх, "низ не уже верха — сужение не сработало");
     }
 
-    [Theory]
-    [InlineData(SuitKind.Armor)]
-    [InlineData(SuitKind.Cloak)]
-    public void Обе_фигуры_собираются(SuitKind kind)
+    [Fact]
+    public void Фигура_собирается()
     {
-        var mesh = Suits.Build(kind);
+        var mesh = Suits.Build();
 
         Assert.NotEmpty(mesh.Vertices);
         Assert.NotEmpty(mesh.Faces);
@@ -63,23 +62,19 @@ public class HologramTests
     }
 
     [Fact]
-    public void У_плаща_есть_полотнище_а_у_брони_нет()
+    public void У_фигуры_есть_плащ()
     {
-        var плащ = Suits.Build(SuitKind.Cloak);
-        var броня = Suits.Build(SuitKind.Armor);
-
-        Assert.Contains(плащ.Faces, f => f.Part == BodyPart.Cape);
-        Assert.DoesNotContain(броня.Faces, f => f.Part == BodyPart.Cape);
+        // Плащ — половина силуэта: без него остаётся просто доспех, и фигура
+        // теряет то, по чему её узнают.
+        Assert.Contains(Suits.Build().Faces, f => f.Part == BodyPart.Cape);
     }
 
-    [Theory]
-    [InlineData(SuitKind.Armor)]
-    [InlineData(SuitKind.Cloak)]
-    public void Каждая_подсистема_чем_то_показана(SuitKind kind)
+    [Fact]
+    public void Каждая_подсистема_чем_то_показана()
     {
         // Фигура — это показания приборов. Подсистема без своей части просто
         // исчезла бы с экрана, и человек не заметил бы пропажи.
-        var mesh = Suits.Build(kind);
+        var mesh = Suits.Build();
 
         foreach (var part in new[] { BodyPart.Head, BodyPart.Core, BodyPart.Torso, BodyPart.Legs })
         {
@@ -103,23 +98,38 @@ public class HologramTests
         Assert.Equal(0, Середина(mesh, v => v.Z), precision: 6);
     }
 
-    [Theory]
-    [InlineData(SuitKind.Armor)]
-    [InlineData(SuitKind.Cloak)]
-    public void Готовые_фигуры_отцентрованы(SuitKind kind)
+    [Fact]
+    public void Готовая_фигура_отцентрована_по_доспеху()
     {
         // Ровно то, на чём обжигались: фигура вращалась вокруг пояса и уезжала
-        // из кадра. Плащ отдельно опасен — он висит за спиной и смещает
-        // середину по глубине.
-        var mesh = Suits.Build(kind);
+        // из кадра.
+        //
+        // Центровка считается по доспеху, а не по всей модели: плащ висит за
+        // спиной и свисает ниже пояса, и по нему середина приходится не туда,
+        // где человек видит фигуру.
+        var mesh = Suits.Build();
+        var доспех = ВершиныДоспеха(mesh);
 
-        Assert.Equal(0, Середина(mesh, v => v.X), precision: 6);
-        Assert.Equal(0, Середина(mesh, v => v.Y), precision: 6);
-        Assert.Equal(0, Середина(mesh, v => v.Z), precision: 6);
+        Assert.Equal(0, Середина(доспех, v => v.X), precision: 6);
+        Assert.Equal(0, Середина(доспех, v => v.Y), precision: 6);
+        Assert.Equal(0, Середина(доспех, v => v.Z), precision: 6);
+    }
+
+    private static List<Point3> ВершиныДоспеха(Mesh mesh)
+    {
+        var indices = mesh.Faces
+            .Where(f => f.Part != BodyPart.Cape)
+            .SelectMany(f => f.Indices)
+            .Distinct();
+
+        return indices.Select(i => mesh.Vertices[i]).ToList();
     }
 
     private static double Середина(Mesh mesh, Func<Point3, double> ось)
-        => (mesh.Vertices.Min(ось) + mesh.Vertices.Max(ось)) / 2;
+        => Середина(mesh.Vertices, ось);
+
+    private static double Середина(IReadOnlyCollection<Point3> вершины, Func<Point3, double> ось)
+        => (вершины.Min(ось) + вершины.Max(ось)) / 2;
 
     // ==================== Поворот ====================
 
@@ -160,7 +170,7 @@ public class HologramTests
         // На этом порядке держится вся отрисовка: рисуя от дальних к ближним,
         // ближние закрывают дальние сами собой. Перепутанный порядок вывернул
         // бы фигуру наизнанку.
-        var mesh = Suits.Build(SuitKind.Armor);
+        var mesh = Suits.Build();
         var грани = Projector.Project(mesh, 0.5, 0.2, 2, 100, 100);
 
         for (var i = 1; i < грани.Count; i++)
@@ -184,18 +194,19 @@ public class HologramTests
 
     // ==================== Размещение в кадре ====================
 
-    [Theory]
-    [InlineData(SuitKind.Armor)]
-    [InlineData(SuitKind.Cloak)]
-    public void Фигура_помещается_в_кадр_при_любом_повороте(SuitKind kind)
+    [Fact]
+    public void Фигура_помещается_в_кадр_при_любом_повороте()
     {
         // Дважды проваленное требование. Проверяется не формула, а итог: при
         // всех углах поворота ни одна точка не должна оказаться за краями.
         const double width = 240;
         const double height = 400;
 
-        var mesh = Suits.Build(kind);
+        var mesh = Suits.Build();
         var scale = Projector.FitScale(mesh, width, height);
+        // Тот же расчёт, что и при отрисовке: считать посадку отдельно значило
+        // бы проверять не то, что показывают человеку.
+        var centerY = Projector.GroundedCenterY(mesh, scale, height);
 
         for (var шаг = 0; шаг < 24; шаг++)
         {
@@ -203,7 +214,7 @@ public class HologramTests
 
             foreach (var pitch in new[] { -0.55, 0.0, 0.55 })
             {
-                var грани = Projector.Project(mesh, yaw, pitch, scale, width / 2, height / 2);
+                var грани = Projector.Project(mesh, yaw, pitch, scale, width / 2, centerY);
 
                 foreach (var грань in грани)
                 {

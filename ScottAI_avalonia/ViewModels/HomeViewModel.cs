@@ -5,7 +5,6 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ScottAI.Avalonia.Models;
-using ScottAI.Avalonia.Hologram;
 using ScottAI.Avalonia.Services;
 
 namespace ScottAI.Avalonia.ViewModels;
@@ -50,28 +49,6 @@ public partial class HomeViewModel : ViewModelBase
     /// <summary>Загрузка видеокарты. Ноль означает и «свободна», и «её нет».</summary>
     [ObservableProperty]
     private double _gpuPercent;
-
-    /// <summary>
-    /// Какой костюм носит голограмма.
-    ///
-    /// Выбор запоминается: это первое, что человек показывает другим, открыв
-    /// программу, и сбрасывать его при каждом запуске было бы обидно.
-    /// </summary>
-    [ObservableProperty]
-    private SuitKind _suit = SettingsStore.Current.Suit == "cloak" ? SuitKind.Cloak : SuitKind.Armor;
-
-    public bool IsArmorSuit => Suit == SuitKind.Armor;
-
-    partial void OnSuitChanged(SuitKind value)
-    {
-        OnPropertyChanged(nameof(IsArmorSuit));
-        SettingsStore.Current.Suit = value == SuitKind.Cloak ? "cloak" : "armor";
-        SettingsStore.SaveCurrent();
-    }
-
-    [RelayCommand]
-    private void SetSuit(string kind)
-        => Suit = kind == "Cloak" ? SuitKind.Cloak : SuitKind.Armor;
 
     /// <summary>Заполненность системного диска.</summary>
     [ObservableProperty]

@@ -39,21 +39,16 @@ public class HologramCanvas : Control
     public static readonly StyledProperty<double> DiskProperty =
         AvaloniaProperty.Register<HologramCanvas, double>(nameof(Disk));
 
-    public static readonly StyledProperty<SuitKind> SuitProperty =
-        AvaloniaProperty.Register<HologramCanvas, SuitKind>(nameof(Suit));
-
     public double Gpu { get => GetValue(GpuProperty); set => SetValue(GpuProperty, value); }
     public double Cpu { get => GetValue(CpuProperty); set => SetValue(CpuProperty, value); }
     public double Ram { get => GetValue(RamProperty); set => SetValue(RamProperty, value); }
     public double Disk { get => GetValue(DiskProperty); set => SetValue(DiskProperty, value); }
-    public SuitKind Suit { get => GetValue(SuitProperty); set => SetValue(SuitProperty, value); }
 
     static HologramCanvas()
     {
         // Перерисовываем на любое изменение: показания меняются раз в три
         // секунды, а смена костюма — вообще по нажатию.
-        AffectsRender<HologramCanvas>(GpuProperty, CpuProperty, RamProperty, DiskProperty, SuitProperty);
-        SuitProperty.Changed.AddClassHandler<HologramCanvas>((c, _) => c._mesh = null);
+        AffectsRender<HologramCanvas>(GpuProperty, CpuProperty, RamProperty, DiskProperty);
     }
 
     // ==================== Поворот ====================
@@ -183,15 +178,21 @@ public class HologramCanvas : Control
         var height = Bounds.Height;
         if (width < 20 || height < 20) return;
 
-        _mesh ??= Suits.Build(Suit);
+        _mesh ??= Suits.Build();
 
         // Снизу оставлено место под кольца проекции: фигура должна стоять над
         // ними, а не пересекаться с ними ногами.
-        const double pedestal = 46;
+        const double pedestal = 26;
 
         var scale = Projector.FitScale(_mesh, width, height - pedestal);
-        var faces = Projector.Project(
-            _mesh, _yaw, _pitch, scale, width / 2, (height - pedestal) / 2);
+
+        // Фигура ставится ногами на кольца, а не вешается серединой в середину.
+        // Второе казалось очевидным и выглядело плохо: между ступнями и
+        // кольцами оставался просвет в палец, и фигура висела в воздухе вместо
+        // того, чтобы стоять в проекции.
+        var centerY = Projector.GroundedCenterY(_mesh, scale, height - pedestal);
+
+        var faces = Projector.Project(_mesh, _yaw, _pitch, scale, width / 2, centerY);
 
         foreach (var face in faces)
         {
@@ -212,8 +213,15 @@ public class HologramCanvas : Control
             // дальние, и вместо брони получается стопка стеклянных ящиков.
             // Небольшой просвет остаётся — ровно настолько, чтобы фигура
             // читалась как проекция, а не как вырезанная из картона.
-            var fill = new SolidColorBrush(color, 0.88 * face.Light);
-            var edge = new SolidColorBrush(color, Math.Min(1.0, 1.15 * face.Light));
+            // Ткань полупрозрачнее доспеха. Латы — тело фигуры, они и должны
+            // быть плотными; у ткани своя задача, и спорить с показаниями
+            // приборов за внимание ей незачем. Без этого плащ накрывал фигуру
+            // целиком, и из-под него лишь что-то просвечивало.
+            var cloth = face.Part == BodyPart.Cape;
+
+            var fill = new SolidColorBrush(color, (cloth ? 0.42 : 0.88) * face.Light);
+            var edge = new SolidColorBrush(color,
+                Math.Min(1.0, (cloth ? 0.7 : 1.15) * face.Light));
 
             var geometry = new StreamGeometry();
             using (var sink = geometry.Open())
