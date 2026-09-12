@@ -261,4 +261,177 @@ public class HologramTests
 
         Assert.True(scale > 0);
     }
+
+    // ==================== Куда смотрит фигура ====================
+
+    [Fact]
+    public void Фигура_повёрнута_лицом_к_зрителю()
+    {
+        // Перспектива считается как D / (D + z): чем больше Z, тем точка
+        // дальше. Значит перёд фигуры — со стороны отрицательного Z.
+        //
+        // Ровно это и было перепутано: в AddBox стороны коробки были подписаны
+        // наоборот, по этим подписям собралась вся модель, и фигура стояла к
+        // человеку спиной — вместе с плащом, оттого он и проходил сквозь тело.
+        var mesh = Suits.Build();
+
+        var лицо = ВершиныЧасти(mesh, BodyPart.Head);
+        var корпус = ВершиныЧасти(mesh, BodyPart.Torso);
+
+        Assert.True(Середина(лицо, v => v.Z) < Середина(корпус, v => v.Z),
+                    "маска должна выступать в сторону зрителя, а не от него");
+
+        // Ядро светится на груди, а не между лопаток.
+        Assert.True(Середина(ВершиныЧасти(mesh, BodyPart.Core), v => v.Z) < 0);
+    }
+
+    [Fact]
+    public void Плащ_висит_за_спиной_а_не_сквозь_тело()
+    {
+        // Замечание с живого просмотра: полотнище проходило сквозь фигуру.
+        //
+        // Проверяется по соседству: для каждой точки плаща берутся точки
+        // доспеха рядом — по высоте и вбок, — и плащ обязан быть за ними,
+        // то есть глубже. Сравнивать одни только крайние значения бесполезно:
+        // плащ шире фигуры и ниже её, и общие границы пересечения не покажут.
+        var mesh = Suits.Build();
+
+        var доспех = ВершиныЧасти(mesh, BodyPart.Torso)
+            .Concat(ВершиныЧасти(mesh, BodyPart.Arms))
+            .Concat(ВершиныЧасти(mesh, BodyPart.Head))
+            .Concat(ВершиныЧасти(mesh, BodyPart.Core))
+            .ToList();
+
+        foreach (var точка in Полотнище(mesh))
+        {
+            var рядом = доспех
+                .Where(v => Math.Abs(v.Y - точка.Y) < 7 && Math.Abs(v.X - точка.X) < 7)
+                .ToList();
+
+            if (рядом.Count == 0) continue;
+
+            var глубжеВсех = рядом.Max(v => v.Z);
+
+            Assert.True(точка.Z >= глубжеВсех,
+                        $"плащ вошёл в доспех на высоте {точка.Y:F0}: " +
+                        $"ткань на глубине {точка.Z:F1}, металл на {глубжеВсех:F1}");
+        }
+    }
+
+    /// <summary>
+    /// Само полотнище плаща — без капюшона и воротника.
+    ///
+    /// Они тоже помечены как Cape (красятся тканью), но капюшон облегает
+    /// голову, и по нему любая проверка на пересечение с доспехом сработает
+    /// впустую. Полотнище строится первым, и это его вершины идут в начале.
+    /// </summary>
+    private static List<Point3> Полотнище(Mesh mesh)
+    {
+        var сетка = new Mesh();
+        сетка.AddCape(top: 0, height: 1, halfWidth: 1, depth: 1);
+
+        return mesh.Vertices.Take(сетка.Vertices.Count).ToList();
+    }
+
+    private static List<Point3> ВершиныЧасти(Mesh mesh, BodyPart часть)
+    {
+        var indices = mesh.Faces
+            .Where(f => f.Part == часть)
+            .SelectMany(f => f.Indices)
+            .Distinct();
+
+        return indices.Select(i => mesh.Vertices[i]).ToList();
+    }
+
+    [Fact]
+    public void Плащ_виден_с_обеих_сторон()
+    {
+        // Отрисовщик пропускает грани, отвёрнутые от зрителя. Для замкнутых
+        // форм это верно, но у ткани нет толщины, и полотнище просто исчезало:
+        // спереди плаща не было видно вообще, только воротник.
+        var mesh = Suits.Build();
+
+        foreach (var yaw in new[] { 0.0, Math.PI })
+        {
+            var ткань = Projector
+                .Project(mesh, yaw, 0, 1, 0, 0)
+                .Where(f => f.Part == BodyPart.Cape && f.Facing)
+                .ToList();
+
+            Assert.True(ткань.Count > 20,
+                        $"при повороте {yaw:F2} видно всего {ткань.Count} кусков ткани");
+        }
+    }
+
+    // ==================== Округлость ====================
+
+    [Fact]
+    public void Труба_натягивается_на_кольца_сечений()
+    {
+        var mesh = new Mesh();
+        mesh.AddTube(BodyPart.Torso, new[]
+        {
+            (0.0, 10.0, 6.0),
+            (20.0, 4.0, 4.0),
+        }, sides: 8);
+
+        // Восемь точек на кольцо, два кольца.
+        Assert.Equal(16, mesh.Vertices.Count);
+
+        // Восемь боковых граней плюс две крышки: без крышек труба
+        // просвечивает насквозь, и внутри видны её же задние грани.
+        Assert.Equal(10, mesh.Faces.Count);
+
+        // Сечение приплюснутое: поперёк шире, чем в глубину.
+        var верх = mesh.Vertices.Take(8).ToList();
+        Assert.True(верх.Max(v => v.X) > верх.Max(v => v.Z));
+    }
+
+    [Fact]
+    public void Одного_кольца_мало_для_трубы()
+    {
+        var mesh = new Mesh();
+        mesh.AddTube(BodyPart.Torso, new[] { (0.0, 10.0, 10.0) });
+
+        Assert.Empty(mesh.Faces);
+    }
+
+    [Fact]
+    public void Корпус_и_конечности_не_квадратные()
+    {
+        // Замечание с живого просмотра: фигура выглядела набором ящиков.
+        //
+        // У коробки всего шесть направлений граней, и сколько коробок ни
+        // ставь рядом, больше их не станет. Округлая форма узнаётся именно по
+        // числу разных направлений.
+        var mesh = Suits.Build();
+
+        foreach (var часть in new[] { BodyPart.Torso, BodyPart.Arms, BodyPart.Legs })
+        {
+            Assert.True(НаправленийГраней(mesh, часть) > 6,
+                        $"{часть}: направлений всего {НаправленийГраней(mesh, часть)}, " +
+                        "форма собрана коробками");
+        }
+    }
+
+    private static int НаправленийГраней(Mesh mesh, BodyPart часть)
+    {
+        var направления = new HashSet<(int, int, int)>();
+
+        foreach (var грань in mesh.Faces.Where(f => f.Part == часть))
+        {
+            var a = mesh.Vertices[грань.Indices[0]];
+            var b = mesh.Vertices[грань.Indices[1]];
+            var c = mesh.Vertices[грань.Indices[2]];
+
+            var n = (b - a).Cross(c - a);
+            if (n.Length < 0.0001) continue;
+
+            направления.Add(((int)Math.Round(n.X / n.Length * 10),
+                             (int)Math.Round(n.Y / n.Length * 10),
+                             (int)Math.Round(n.Z / n.Length * 10)));
+        }
+
+        return направления.Count;
+    }
 }
