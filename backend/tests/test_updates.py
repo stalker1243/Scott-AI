@@ -240,3 +240,47 @@ def test_windows_still_gets_exe(upd, monkeypatch):
         {"name": "ScottAI-1.0.7-setup.exe"},
     ]
     assert upd._pick_installer(assets)["name"].endswith(".exe")
+
+
+def test_macos_gets_disk_image(upd, monkeypatch):
+    """На Mac предлагается образ диска, а не установщик Windows и не архив."""
+    monkeypatch.setattr(upd.sys, "platform", "darwin")
+    monkeypatch.setattr(upd.platform, "machine", lambda: "arm64")
+
+    assets = [
+        {"name": "ScottAI-1.0.7-setup.exe"},
+        {"name": "ScottAI-1.0.7-linux-x64.tar.gz"},
+        {"name": "ScottAI-1.0.7-macos-arm64.dmg"},
+    ]
+    assert upd._pick_installer(assets)["name"].endswith(".dmg")
+
+
+def test_apple_silicon_gets_its_own_build(upd, monkeypatch):
+    """
+    На процессорах Apple нужна сборка arm64 — та самая, которую на Windows и
+    Linux мы намеренно отсеиваем.
+
+    Обратное правило стоило бы дорого: машине с процессором Apple предложили бы
+    сборку для старых Intel. Она запустится через Rosetta, но медленнее, а
+    главное — это молчаливая подмена, о которой человек не узнает.
+    """
+    monkeypatch.setattr(upd.sys, "platform", "darwin")
+    monkeypatch.setattr(upd.platform, "machine", lambda: "arm64")
+
+    assets = [
+        {"name": "ScottAI-1.0.7-macos-x86_64.dmg"},
+        {"name": "ScottAI-1.0.7-macos-arm64.dmg"},
+    ]
+    assert "arm64" in upd._pick_installer(assets)["name"]
+
+
+def test_intel_mac_gets_intel_build(upd, monkeypatch):
+    """Пара к предыдущему: на прежних Mac — сборка x86_64."""
+    monkeypatch.setattr(upd.sys, "platform", "darwin")
+    monkeypatch.setattr(upd.platform, "machine", lambda: "x86_64")
+
+    assets = [
+        {"name": "ScottAI-1.0.7-macos-arm64.dmg"},
+        {"name": "ScottAI-1.0.7-macos-x86_64.dmg"},
+    ]
+    assert "x86_64" in upd._pick_installer(assets)["name"]

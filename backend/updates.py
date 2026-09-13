@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import platform
 import sys
 import time
 from dataclasses import dataclass, asdict
@@ -143,31 +144,60 @@ def _write_cache(data: Dict) -> None:
 
 # ==================== Запрос к GitHub ====================
 
+def _wanted_extension() -> str:
+    """
+    Какой файл выпуска подходит этой системе.
+
+    На Windows это установщик .exe, на macOS — образ диска .dmg, на остальных
+    — архив. Собирает их installer/: build.py, build_macos.py и build_linux.py
+    соответственно. Раньше выбирался только .exe, и человеку на Linux
+    предлагали скачать программу, которую он всё равно не запустит.
+    """
+    if sys.platform == "win32":
+        return ".exe"
+    if sys.platform == "darwin":
+        return ".dmg"
+    return ".tar.gz"
+
+
+def _wrong_architecture(name: str) -> bool:
+    """
+    Файл собран под другой процессор.
+
+    На Windows и Linux сборки под x64, и arm64-файл человеку предлагать нельзя
+    — проверено на живом выпуске PowerToys, где он лежит в списке первым.
+
+    А вот на Mac всё наоборот: с 2020 года там стоят собственные процессоры
+    Apple, и отсеивать arm64 значило бы подсовывать этим машинам сборку для
+    старых Intel. Поэтому там смотрим, на чём работаем: `platform.machine()`
+    отвечает «arm64» на Apple Silicon и «x86_64» на прежних.
+    """
+    if sys.platform != "darwin":
+        return "arm64" in name
+
+    apple_silicon = platform.machine().lower() in ("arm64", "aarch64")
+    чужая = "x86_64" if apple_silicon else "arm64"
+    return чужая in name or ("intel" in name if apple_silicon else False)
+
+
 def _pick_installer(assets: List[Dict]) -> Optional[Dict]:
     """
-    Выбрать из вложений релиза установщик для Windows.
+    Выбрать из вложений выпуска то, что подходит этой машине.
 
-    Берётся .exe, потому что именно его собирает installer/build.py. Если в
-    релиз положили только исходники, обновление всё равно покажется — просто
-    со ссылкой на страницу выпуска.
+    Если подходящего файла нет — например, в выпуск положили только исходники,
+    — обновление всё равно покажется, просто со ссылкой на страницу выпуска.
     """
-    # Расширение зависит от системы: на Windows — установщик .exe, на Linux —
-    # архив. Раньше выбирался только .exe, и человеку на Linux предлагали
-    # скачать программу, которую он всё равно не запустит.
-    wanted = ".exe" if sys.platform == "win32" else ".tar.gz"
+    wanted = _wanted_extension()
 
     def suitable(asset: Dict) -> bool:
         name = (asset.get("name") or "").lower()
-        # arm64 отсеивается: сборки под x64, и предлагать человеку файл под
-        # другую архитектуру нельзя. Проверено на живом релизе PowerToys, где
-        # arm64-файл лежит в списке первым.
-        return name.endswith(wanted) and "arm64" not in name
+        return name.endswith(wanted) and not _wrong_architecture(name)
 
     candidates = [asset for asset in assets if suitable(asset)]
 
     for asset in candidates:
         name = (asset.get("name") or "").lower()
-        if "setup" in name or "linux" in name:
+        if "setup" in name or "linux" in name or "macos" in name:
             return asset
 
     return candidates[0] if candidates else None

@@ -32,6 +32,7 @@ from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
 
 IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
 
 # winreg существует только на Windows: на Linux безусловный импорт уронил бы
 # весь модуль, а с ним и запуск приложений целиком.
@@ -57,6 +58,28 @@ DESKTOP_DIRS = [
     os.path.expanduser("~/.local/share/flatpak/exports/share/applications"),
     "/var/lib/snapd/desktop/applications",
 ]
+
+# Где macOS держит приложения. Программы там — не файлы, а папки с суффиксом
+# .app: внутри лежит всё сразу, от исполняемого файла до значка.
+#
+# Системные приложения с Catalina живут на отдельном разделе только для чтения
+# (/System/Applications), а не вместе с остальными, поэтому оба места нужны:
+# без второго не найдётся ни «Почта», ни «Календарь», ни «Терминал».
+MAC_APP_DIRS = [
+    "/Applications",
+    "/Applications/Utilities",
+    "/System/Applications",
+    "/System/Applications/Utilities",
+    os.path.expanduser("~/Applications"),
+]
+
+# На сколько уровней вглубь искать бандлы.
+#
+# Двух хватает: Adobe, Microsoft и им подобные складывают программы в свою
+# подпапку внутри /Applications. Глубже лезть нельзя — внутри самого .app
+# лежат вложенные бандлы вспомогательных программ (автообновление, отчёты о
+# сбоях), и они замусорили бы каталог именами, которых человек не знает.
+MAC_SEARCH_DEPTH = 2
 
 START_MENU_DIRS = [
     os.path.expandvars(r"%ProgramData%\Microsoft\Windows\Start Menu\Programs"),
@@ -343,6 +366,146 @@ def _get_desktop_index() -> Dict[str, str]:
     return _desktop_index_cache
 
 
+def _build_bundle_index() -> Dict[str, str]:
+    """
+    Каталог приложений macOS: {нормализованное_имя: путь_к_бандлу}.
+
+    Имя берётся из названия папки (Safari.app → «safari») и, если оно там есть,
+    из CFBundleDisplayName в Info.plist. Второе важно для локализованных
+    программ: на русской системе человек говорит «Просмотр», а папка называется
+    Preview.app — по имени папки такое не найдётся.
+
+    Info.plist читается только текстовый: бинарный вариант требует plistlib с
+    разбором двоичного формата, и ради необязательного уточнения имени
+    затевать это незачем — папка всё равно уже в каталоге.
+    """
+    index: Dict[str, str] = {}
+
+    def добавить(имя: str, путь: str) -> None:
+        ключ = _normalize(имя)
+        if ключ and ключ not in index:
+            index[ключ] = путь
+
+    for directory in MAC_APP_DIRS:
+        if not os.path.isdir(directory):
+            continue
+
+        # Каждый уровень вложенности — свой шаблон: рекурсивный обход зашёл бы
+        # внутрь самих бандлов, где лежат служебные программы.
+        шаблоны = [os.path.join(directory, *(["*"] * depth), "*.app")
+                   for depth in range(MAC_SEARCH_DEPTH)]
+
+        for шаблон in шаблоны:
+            for path in glob.glob(шаблон):
+                добавить(os.path.splitext(os.path.basename(path))[0], path)
+
+                try:
+                    plist = os.path.join(path, "Contents", "Info.plist")
+                    with open(plist, "r", encoding="utf-8", errors="ignore") as файл:
+                        текст = файл.read()
+                except OSError:
+                    continue
+
+                # Ищем значение, стоящее сразу за ключом. Полноценный разбор XML
+                # здесь лишний: нужна одна строка, а битый или двоичный plist не
+                # должен мешать остальному каталогу.
+                маркер = "<key>CFBundleDisplayName</key>"
+                позиция = текст.find(маркер)
+                if позиция == -1:
+                    continue
+                начало = текст.find("<string>", позиция)
+                конец = текст.find("</string>", начало)
+                if начало != -1 and конец != -1:
+                    добавить(текст[начало + len("<string>"):конец], path)
+
+    return index
+
+
+_bundle_index_cache: Optional[Dict[str, str]] = None
+
+
+def _get_bundle_index() -> Dict[str, str]:
+    global _bundle_index_cache
+    if _bundle_index_cache is None:
+        _bundle_index_cache = _build_bundle_index()
+    return _bundle_index_cache
+
+
+def _spotlight_lookup(name: str) -> Optional[str]:
+    """
+    Спросить приложение у Spotlight — для того, что лежит не в /Applications.
+
+    Стандартные папки покрывают почти всё, но не всё: программу можно запустить
+    откуда угодно, хоть из папки загрузок. Spotlight знает о них, потому что
+    ведёт свой указатель по всему диску.
+
+    Пустой ответ здесь — обычное дело, а не поломка: указатель может быть
+    отключён, а на свежей системе ещё и не достроен. Тогда просто остаёмся с
+    тем, что нашлось в папках.
+    """
+    if not shutil.which("mdfind"):
+        return None
+
+    запрос = f"kMDItemContentType == 'com.apple.application-bundle' && kMDItemFSName == '*{name}*'c"
+    try:
+        готово = subprocess.run(["mdfind", запрос], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    for строка in (готово.stdout or "").splitlines():
+        путь = строка.strip()
+        if путь.endswith(".app") and os.path.isdir(путь):
+            return путь
+    return None
+
+
+def _resolve_macos(search_name: str) -> Optional[ResolvedApp]:
+    """
+    Найти приложение среди бандлов: точное совпадение, нечёткое, затем Spotlight.
+
+    Порядок тот же, что и на других системах, и по той же причине: точное
+    совпадение дёшево и не ошибается, нечёткое выручает, когда человек назвал
+    программу своими словами, а Spotlight — последняя попытка для того, что
+    стоит вне обычных папок.
+    """
+    index = _get_bundle_index()
+
+    if search_name in index:
+        return ResolvedApp(matched_name=search_name, target=index[search_name],
+                           kind="bundle", source="applications")
+
+    best_key, best_score = None, 0.0
+    for key in index:
+        score = _similarity(search_name, key)
+        if score > best_score:
+            best_score, best_key = score, key
+
+    if best_key and best_score >= MIN_FUZZY_SCORE:
+        return ResolvedApp(matched_name=best_key, target=index[best_key],
+                           kind="bundle", source="applications")
+
+    найдено = _spotlight_lookup(search_name)
+    if найдено:
+        return ResolvedApp(matched_name=os.path.splitext(os.path.basename(найдено))[0],
+                           target=найдено, kind="bundle", source="spotlight")
+    return None
+
+
+def _launch_bundle(path: str) -> None:
+    """
+    Запустить приложение macOS.
+
+    Через `open`, а не напрямую исполняемым файлом внутри бандла: так программа
+    запускается как обычное приложение — со своим значком в Dock, правами и
+    окружением. Прямой запуск даёт процесс без всего этого, и часть программ
+    так просто не работает.
+
+    Уже запущенное приложение `open` не поднимает вторым экземпляром, а выводит
+    вперёд — ровно то, чего человек и ждёт от «открой Safari».
+    """
+    subprocess.Popen(["open", path], start_new_session=True)
+
+
 def _launch_desktop_entry(path: str) -> None:
     """
     Запустить приложение по его .desktop-файлу.
@@ -388,8 +551,23 @@ def _get_shortcut_index() -> Dict[str, str]:
 
 
 def refresh_index() -> Dict[str, int]:
-    """Пересобрать оба индекса (например, после установки новых программ)."""
-    global _startapps_index_cache, _shortcut_index_cache
+    """
+    Пересобрать каталог приложений — например, после установки новых программ.
+
+    Пересобирается тот, который на этой системе вообще используется: на Mac
+    строить каталог меню «Пуск» не из чего, и попытка кончилась бы пустотой в
+    ответе вместо честного числа найденных программ.
+    """
+    global _startapps_index_cache, _shortcut_index_cache, _bundle_index_cache, _desktop_index_cache
+
+    if IS_MACOS:
+        _bundle_index_cache = _build_bundle_index()
+        return {"applications": len(_bundle_index_cache)}
+
+    if not IS_WINDOWS:
+        _desktop_index_cache = _build_desktop_index()
+        return {"desktop": len(_desktop_index_cache)}
+
     _startapps_index_cache = _build_startapps_index()
     _shortcut_index_cache = _build_shortcut_index()
     return {"startapps": len(_startapps_index_cache), "shortcuts": len(_shortcut_index_cache)}
@@ -431,6 +609,11 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
 
     alias = ALIASES.get(normalized)
     search_name = alias or normalized
+
+    if IS_MACOS:
+        # Алиасы вида «блокнот» → «notepad» здесь тоже мимо, поэтому исходное
+        # имя проверяется наравне с ними.
+        return _resolve_macos(search_name) or _resolve_macos(normalized)
 
     if not IS_WINDOWS:
         # На Linux алиасы вида «блокнот» → «notepad.exe» бессмысленны, поэтому
@@ -502,6 +685,23 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
     return None
 
 
+def _not_found_message(name: str) -> str:
+    """
+    Почему приложение не нашлось — словами про эту систему.
+
+    Перечислять Linux-овые каталоги человеку на Mac бессмысленно: он пойдёт их
+    искать и не найдёт. Названо то место, куда действительно стоит заглянуть.
+    """
+    if IS_WINDOWS:
+        return (f'Не нашёл установленное приложение «{name}» — ни в каталоге Windows, '
+                'ни в App Paths, ни среди ярлыков меню "Пуск".')
+    if IS_MACOS:
+        return (f'Не нашёл приложение «{name}» — ни в /Applications, ни среди системных, '
+                'ни через Spotlight.')
+    return (f'Не нашёл установленное приложение «{name}» среди .desktop-файлов '
+            '(/usr/share/applications, ~/.local/share/applications, flatpak, snap).')
+
+
 def launch_app(name: str) -> Dict:
     """
     Найти и запустить приложение по имени.
@@ -513,21 +713,21 @@ def launch_app(name: str) -> Dict:
             "success": False,
             "matched_name": None,
             "source": None,
-            "error": (
-                f'Не нашёл установленное приложение «{name}» — ни в каталоге Windows, '
-                'ни в App Paths, ни среди ярлыков меню "Пуск".'
-                if IS_WINDOWS else
-                f'Не нашёл установленное приложение «{name}» среди .desktop-файлов '
-                '(/usr/share/applications, ~/.local/share/applications, flatpak, snap).'
-            ),
+            "error": _not_found_message(name),
         }
 
     try:
-        if resolved.kind == "desktop":
+        if resolved.kind == "bundle":
+            _launch_bundle(resolved.target)
+        elif resolved.kind == "desktop":
             _launch_desktop_entry(resolved.target)
-        elif resolved.kind == "appid":
+        elif IS_WINDOWS and resolved.kind == "appid":
+            # Проверка системы стоит явно, хотя «appid» и так встречается
+            # только на Windows: os.startfile на других системах не существует
+            # вовсе, и полагаться на то, что сюда не дойдут, значит держать
+            # падение в одной опечатке от себя.
             os.startfile(f"shell:appsFolder\\{resolved.target}")
-        elif resolved.target.lower().endswith(".lnk"):
+        elif IS_WINDOWS and resolved.target.lower().endswith(".lnk"):
             # os.startfile сам разворачивает .lnk в целевую программу — как двойной клик.
             os.startfile(resolved.target)
         else:

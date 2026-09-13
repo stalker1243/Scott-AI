@@ -30,7 +30,14 @@ from typing import Dict, List
 
 CONFIG_PATH = Path(__file__).resolve().parent / "data" / "device_config.json"
 
-VALID_CHOICES = ("auto", "cuda", "cpu")
+VALID_CHOICES = ("auto", "cuda", "mps", "cpu")
+
+# Движки, умеющие считать на графике Apple.
+#
+# Silero — это обычный PyTorch, и Metal ему доступен. А вот faster-whisper
+# построен на CTranslate2, который Metal не поддерживает вовсе: там остаётся
+# процессор, и просьбу о графике для него придётся вежливо не выполнить.
+MPS_CAPABLE = ("silero",)
 
 # Какому движку какая переменная окружения соответствует.
 ENV_VARS = {
@@ -85,6 +92,24 @@ def cuda_available() -> bool:
         return False
 
 
+def mps_available() -> bool:
+    """
+    Доступна ли графика Apple (Metal Performance Shaders).
+
+    Есть на машинах с процессорами Apple — с 2020 года это все новые Mac. На
+    прежних, с процессорами Intel, ответ отрицательный, и работа идёт на
+    процессоре.
+    """
+    try:
+        import torch
+
+        return bool(torch.backends.mps.is_available())
+    except Exception:
+        # На torch без поддержки Metal самого атрибута может не быть — это не
+        # ошибка, а просто «нет».
+        return False
+
+
 def get_choice(engine: str) -> str:
     """Что выбрано для движка: auto, cuda или cpu (без учёта того, что доступно)."""
     forced = os.getenv(ENV_VARS.get(engine, ""), "").strip().lower()
@@ -109,9 +134,24 @@ def resolve_device(engine: str) -> str:
     choice = get_choice(engine)
     if choice == "cpu":
         return "cpu"
+
     if choice == "cuda":
         return "cuda" if cuda_available() else "cpu"
-    return "cuda" if cuda_available() else "cpu"
+
+    if choice == "mps":
+        return "mps" if engine in MPS_CAPABLE and mps_available() else "cpu"
+
+    # Автоматика: видеокарта NVIDIA, затем графика Apple, затем процессор.
+    #
+    # Порядок не спорный — на одной машине доступно что-то одно. Важнее другое:
+    # на Mac процессор для синтеза заметно медленнее, а Metal там есть у всех
+    # машин с процессорами Apple, и не пользоваться им значило бы отдать
+    # человеку заведомо худшую работу без причины.
+    if cuda_available():
+        return "cuda"
+    if engine in MPS_CAPABLE and mps_available():
+        return "mps"
+    return "cpu"
 
 
 def set_choice(engine: str, choice: str) -> Dict:
@@ -132,6 +172,16 @@ def set_choice(engine: str, choice: str) -> Dict:
 
     if choice == "cuda" and not cuda_available():
         return {"success": False, "message": "Видеокарта недоступна: CUDA не найдена"}
+
+    if choice == "mps":
+        if engine not in MPS_CAPABLE:
+            return {
+                "success": False,
+                "message": "Распознавание речи на графике Apple не работает — "
+                           "библиотека, которая его считает, поддерживает только процессор",
+            }
+        if not mps_available():
+            return {"success": False, "message": "Графика Apple недоступна: Metal не найден"}
 
     config = _load_config()
     config[engine] = choice
