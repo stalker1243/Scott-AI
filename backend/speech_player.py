@@ -215,9 +215,38 @@ class SpeechPlayer:
         if volume < 0.999:
             data = data * volume
 
+        # Отдаём тот же звук эхоподавлению: оно вычтет его из того, что
+        # услышит микрофон. В этом наше преимущество перед обычным
+        # эхоподавлением — ему приходится перехватывать звук с устройства
+        # вывода, а мы знаем его заранее.
+        #
+        # Сообщаем ровно перед sd.play: отсюда и отсчитывается время, и лишние
+        # миллисекунды между «сказали» и «заиграло» станут ошибкой выравнивания.
+        try:
+            self._echo_reference().start(data, rate)
+        except Exception:
+            # Эхоподавление — улучшение, а не условие того, что Scott говорит.
+            pass
+
         self._playing = True
-        sd.play(data, rate, device=_output_device())
-        sd.wait()
+        try:
+            sd.play(data, rate, device=_output_device())
+            sd.wait()
+        finally:
+            try:
+                self._echo_reference().stop()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _echo_reference():
+        """Хранилище опорного сигнала. Импорт внутри — ради порядка загрузки."""
+        try:
+            from . import echo_reference
+        except ImportError:
+            import echo_reference
+
+        return echo_reference.get_reference()
 
 
 # Один проигрыватель на весь backend: две очереди означали бы ровно ту
