@@ -68,6 +68,11 @@ from timing import stage as timing_stage, snapshot as timing_snapshot, reset as 
 from speech_text import shorten_for_speech
 import understanding
 import protocols as protocols_module
+# Под своим именем: обработчик эндпоинта /speech_to_text называется так же
+# и затирает модуль при определении. Распознавание из-за этого молча уходило
+# на запасной путь через сеть, а в логе стояло «'function' object has no
+# attribute 'Recognizer'».
+import speech_to_text as stt_engine
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -305,14 +310,8 @@ def _warmup_silero_in_thread(barrier: threading.Barrier) -> None:
 
 
 def _warmup_whisper_sync() -> None:
-    """Загрузить Whisper и прогнать через него секунду тишины."""
-    import numpy as np
-    model = _get_whisper_model()
-    model.transcribe(
-        np.zeros(16000, dtype=np.float32),
-        language="ru",
-        fp16=(_whisper_device == "cuda"),
-    )
+    """Загрузить распознаватель и прогнать через него секунду тишины."""
+    _get_whisper_model().warmup()
 
 
 def _watch_parent() -> None:
@@ -1242,8 +1241,7 @@ def _listener_transcribe(audio) -> str:
     """
     model = _get_whisper_model()
     with timing_stage("01.распознавание.whisper"):
-        result = model.transcribe(audio, language="ru", fp16=(_whisper_device == "cuda"))
-    return (result.get("text") or "").strip()
+        return model.transcribe(audio, language="ru")
 
 
 # Через сколько секунд молчания Scott подаёт голос. Меньше — и короткая
@@ -1593,30 +1591,28 @@ scott_device_settings.register_reset_hook(_unload_whisper_model)
 
 def _get_whisper_model():
     """
-    Загрузить модель Whisper один раз и переиспользовать между запросами —
-    раньше whisper.load_model() вызывался заново на КАЖДОЕ голосовое сообщение
-    (лишние секунды на каждый запрос, особенно заметно в hands-free режиме,
-    где распознавание идёт часто). Имя модели берётся из .env (WHISPER_MODEL).
+    Загрузить распознаватель один раз и переиспользовать между запросами.
+
+    Раньше whisper.load_model() вызывался заново на КАЖДОЕ голосовое сообщение
+    — лишние секунды на каждый запрос, особенно заметно там, где Scott слушает
+    непрерывно.
+
+    Какую из двух реализаций Whisper брать, решает stt_engine: быстрая
+    заметно шустрее, но тянет за собой CTranslate2 и свой формат модели, и
+    если её нет, Scott должен продолжать слышать.
     """
     global _whisper_model_cache, _whisper_device
+
     if _whisper_model_cache is None:
-        import whisper
         model_name = os.getenv("WHISPER_MODEL", "small")
         device = _resolve_whisper_device()
-        print(f"🔊 Загружаю модель Whisper «{model_name}» на {device.upper()} (один раз, кэшируется)...")
-        try:
-            _whisper_model_cache = whisper.load_model(model_name, device=device)
-            _whisper_device = device
-        except Exception as e:
-            # Не хватило видеопамяти, битый драйвер и т.п. — распознавание не
-            # должно отваливаться целиком, спокойно откатываемся на процессор.
-            if device != "cpu":
-                print(f"⚠️ Не удалось загрузить модель на {device.upper()} ({e}); откатываюсь на CPU")
-                _whisper_model_cache = whisper.load_model(model_name, device="cpu")
-                _whisper_device = "cpu"
-            else:
-                raise
-        print(f"✅ Модель Whisper «{model_name}» загружена на {_whisper_device.upper()}")
+
+        recognizer = stt_engine.Recognizer(model_name, device)
+        recognizer.load()
+
+        _whisper_model_cache = recognizer
+        _whisper_device = recognizer.device
+
     return _whisper_model_cache
 
 
@@ -1625,10 +1621,7 @@ def _transcribe_audio_file(file_path: str) -> str:
     # Попробуем Whisper, если он доступен
     try:
         model = _get_whisper_model()
-        # fp16 имеет смысл только на видеокарте; на CPU он не поддерживается и
-        # whisper иначе сыплет предупреждением на каждое распознавание.
-        result = model.transcribe(file_path, language="ru", fp16=(_whisper_device == "cuda"))
-        text = result.get("text", "").strip()
+        text = model.transcribe(file_path, language="ru")
         if text:
             print(f"✅ Whisper распознал: {text}")
         return text
