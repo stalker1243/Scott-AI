@@ -31,11 +31,22 @@ except ImportError:  # pragma: no cover — запуск из корня реп�
 
 
 class Ответ:
-    """Подделка ответа сети."""
+    """
+    Подделка ответа сети.
+
+    Поле `text` здесь не для красоты: причина отказа читается именно из тела,
+    а не из текста исключения. Первая версия подделки его не имела, и проверки
+    падали с «object has no attribute text» — ровно там, где код и должен был
+    достать объяснение.
+    """
 
     def __init__(self, payload, code=200):
         self._payload = payload
         self.status_code = code
+
+    @property
+    def text(self):
+        return json.dumps(self._payload, ensure_ascii=False)
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -60,6 +71,15 @@ def отвечающий():
     помощник.last_connect_error = ""
     помощник.memory = ia.ConversationMemory(max_history=6)
     помощник.system_prompt = "Ты Scott AI."
+
+    # Связка ключей шлюза. Обычно её заводит конструктор, но здесь объект
+    # создан в обход него — чтобы не лезть в сеть при каждом создании.
+    try:
+        import key_ring
+    except ImportError:  # pragma: no cover
+        from backend import key_ring
+
+    помощник.openrouter_ring = key_ring.KeyRing(["ключ"])
     return помощник
 
 
@@ -445,3 +465,149 @@ def test_key_is_taken_from_either_name(monkeypatch):
     monkeypatch.setenv("CLAUDE_API_KEY", "ключ-под-вторым-именем")
 
     assert (os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"))         == "ключ-под-вторым-именем"
+
+# ==================== Перебор ключей шлюза ====================
+
+def test_gateway_switches_to_spare_key_on_rate_limit(отвечающий, monkeypatch):
+    """
+    Упёрлись в предел — берём следующий ключ и повторяем запрос.
+
+    Это и есть смысл нескольких ключей: без перебора второй и третий лежали бы
+    мёртвым грузом, а человеку пришлось бы править настройки и перезапускать
+    backend посреди работы.
+    """
+    try:
+        import key_ring
+    except ImportError:  # pragma: no cover
+        from backend import key_ring
+
+    отвечающий.api_provider = "OpenRouter"
+    отвечающий.client = {"api_key": "первый", "base_url": ia.OPENROUTER_BASE}
+    отвечающий.model = "какая-то/модель"
+    отвечающий.enabled = True
+    отвечающий.openrouter_ring = key_ring.KeyRing(["первый", "второй"])
+
+    использованные = []
+
+    def запрос(url, headers=None, json=None, timeout=None):
+        ключ = headers["Authorization"].removeprefix("Bearer ")
+        использованные.append(ключ)
+
+        if ключ == "первый":
+            return Ответ({"error": {"message": "Rate limit exceeded"}}, code=429)
+
+        return Ответ({"choices": [{"message": {"content": "Ответ со второго ключа."}}]})
+
+    monkeypatch.setattr(ia.requests, "post", запрос)
+
+    ответ, успех = отвечающий.answer("вопрос", use_memory=False)
+
+    assert успех
+    assert ответ == "Ответ со второго ключа."
+    assert использованные == ["первый", "второй"]
+
+
+def test_gateway_does_not_cycle_on_other_troubles(отвечающий, monkeypatch):
+    """
+    Смена ключа помогает не от всякой беды, и перебирать связку впустую нельзя.
+
+    Кончившиеся деньги не появятся от другого ключа того же счёта. Ходить по
+    кругу здесь значит тратить запросы и время человека.
+    """
+    try:
+        import key_ring
+    except ImportError:  # pragma: no cover
+        from backend import key_ring
+
+    отвечающий.api_provider = "OpenRouter"
+    отвечающий.client = {"api_key": "первый", "base_url": ia.OPENROUTER_BASE}
+    отвечающий.model = "какая-то/модель"
+    отвечающий.enabled = True
+    отвечающий.openrouter_ring = key_ring.KeyRing(["первый", "второй", "третий"])
+
+    попыток = []
+
+    def запрос(url, headers=None, json=None, timeout=None):
+        попыток.append(1)
+        return Ответ({"error": {"message": "Your credit balance is too low"}}, code=400)
+
+    monkeypatch.setattr(ia.requests, "post", запрос)
+
+    ответ, успех = отвечающий.answer("вопрос", use_memory=False)
+
+    assert not успех
+    assert len(попыток) == 1, "связка перебиралась там, где это не помогает"
+    assert "средства" in ответ
+
+
+def test_gateway_gives_up_when_all_keys_are_limited(отвечающий, monkeypatch):
+    """Когда все ключи упёрлись в предел, Scott говорит об этом, а не молчит."""
+    try:
+        import key_ring
+    except ImportError:  # pragma: no cover
+        from backend import key_ring
+
+    отвечающий.api_provider = "OpenRouter"
+    отвечающий.client = {"api_key": "первый", "base_url": ia.OPENROUTER_BASE}
+    отвечающий.model = "какая-то/модель"
+    отвечающий.enabled = True
+    отвечающий.openrouter_ring = key_ring.KeyRing(["первый", "второй"])
+
+    попыток = []
+
+    def запрос(url, headers=None, json=None, timeout=None):
+        попыток.append(headers["Authorization"])
+        return Ответ({"error": {"message": "Rate limit exceeded"}}, code=429)
+
+    monkeypatch.setattr(ia.requests, "post", запрос)
+
+    ответ, успех = отвечающий.answer("вопрос", use_memory=False)
+
+    assert not успех
+    assert len(попыток) == 2, "каждый ключ должен быть испробован ровно раз"
+    assert "ограничил запросы" in ответ or "лимит" in ответ.lower()
+
+# ==================== Молчание модели ====================
+
+def test_empty_answer_does_not_crash():
+    """
+    Пустой ответ модели не должен ронять разбор.
+
+    Найдено живой проверкой: часть бесплатных моделей на запрос с картинкой
+    отвечает кодом 200, но кладёт в content пустоту — null вместо текста.
+    Прямое обращение по цепочке падало с «NoneType has no attribute strip», и
+    человек видел внутреннюю ошибку Scott вместо честного «модель не
+    ответила». Молчание модели — это не поломка Scott.
+    """
+    assert ia.first_message({"choices": [{"message": {"content": None}}]}) == ""
+    assert ia.first_message({"choices": [{"message": {}}]}) == ""
+    assert ia.first_message({"choices": [{}]}) == ""
+    assert ia.first_message({"choices": []}) == ""
+    assert ia.first_message({}) == ""
+
+
+def test_normal_answer_is_taken_and_trimmed():
+    payload = {"choices": [{"message": {"content": "  Ответ модели.  "}}]}
+
+    assert ia.first_message(payload) == "Ответ модели."
+
+
+def test_silent_gateway_model_is_reported(отвечающий, monkeypatch):
+    """
+    Промолчавшая модель шлюза не выдаётся за успешный ответ.
+
+    Притвориться, что ответ получен, и показать пустоту — худшее из
+    возможного: человек решит, что сломался Scott.
+    """
+    отвечающий.api_provider = "OpenRouter"
+    отвечающий.client = {"api_key": "ключ", "base_url": ia.OPENROUTER_BASE}
+    отвечающий.model = "молчаливая/модель"
+    отвечающий.enabled = True
+
+    monkeypatch.setattr(ia.requests, "post",
+                        lambda *a, **k: Ответ({"choices": [{"message": {"content": None}}]}))
+
+    ответ, успех = отвечающий.answer("вопрос", use_memory=False)
+
+    assert not успех
+    assert "пустой ответ" in ответ or "молчаливая/модель" in ответ

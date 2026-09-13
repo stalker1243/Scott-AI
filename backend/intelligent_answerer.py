@@ -184,6 +184,12 @@ def list_openrouter_models(api_key: str = "") -> List[Dict]:
         print(f"⚠️ Не удалось получить список моделей OpenRouter: {e}")
         return []
 
+try:
+    from . import key_ring as key_ring_module
+except ImportError:
+    import key_ring as key_ring_module
+
+
 AI_CONFIG_PATH = Path("data/ai_config.json")
 
 
@@ -212,6 +218,24 @@ def _looks_like_bad_key(reason: str) -> bool:
         "invalid api key", "invalid_api_key", "unauthorized", "401",
         "authentication", "no auth credentials",
     ))
+
+
+def first_message(payload: dict) -> str:
+    """
+    Достать текст ответа из обычного для OpenAI устройства ответа.
+
+    Каждый шаг здесь защищён, и это не перестраховка. Живая проверка показала:
+    часть бесплатных моделей отвечает кодом 200, но кладёт в content пустоту —
+    null вместо текста. Прямое обращение по цепочке падало с «NoneType has no
+    attribute strip», и человек видел внутреннюю ошибку Scott вместо честного
+    «модель не ответила».
+    """
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+
+    message = choices[0].get("message") or {}
+    return (message.get("content") or "").strip()
 
 
 def raise_with_body(response) -> None:
@@ -417,6 +441,22 @@ class IntelligentAnswerer:
             "Anthropic": os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"),
             "OpenRouter": os.getenv("OPENROUTER_API_KEY"),
         }
+
+        # Связка ключей шлюза.
+        #
+        # Бесплатные модели ограничены числом запросов, и один ключ упирается
+        # в предел быстро. Запасные подхватываются сами: иначе человеку
+        # пришлось бы править настройки и перезапускать backend посреди
+        # работы, хотя он всего лишь задал вопрос.
+        self.openrouter_ring = key_ring_module.KeyRing([
+            os.getenv("OPENROUTER_API_KEY") or "",
+            os.getenv("OPENROUTER_API_KEY_2") or "",
+            os.getenv("OPENROUTER_API_KEY_3") or "",
+        ])
+
+        if len(self.openrouter_ring) > 1:
+            print(f"🔑 Ключей OpenRouter: {len(self.openrouter_ring)} "
+                  "(запасные подхватятся при исчерпании предела)")
         # Ключи, явно введённые пользователем через Настройки (в приоритете над .env)
         self.custom_keys: Dict[str, str] = {}
 
@@ -593,6 +633,14 @@ class IntelligentAnswerer:
                 if not REQUESTS_AVAILABLE:
                     self.last_connect_error = "библиотека requests не установлена"
                     return False
+
+                # Ключ, введённый руками в Настройках, встаёт первым в связке:
+                # человек только что его выбрал, и пробовать сначала прежние
+                # было бы странно.
+                if api_key not in self.openrouter_ring.all:
+                    self.openrouter_ring = key_ring_module.KeyRing(
+                        [api_key] + self.openrouter_ring.all)
+
                 self.client = {"api_key": api_key, "base_url": OPENROUTER_BASE}
                 self.enabled = True
                 self.api_provider = "OpenRouter"
@@ -854,8 +902,7 @@ class IntelligentAnswerer:
                     timeout=30,
                 )
                 raise_with_body(response)
-                data = response.json()
-                answer = data["choices"][0]["message"]["content"].strip()
+                answer = first_message(response.json())
                 print(f"✅ DeepSeek ответ получен ({len(answer)} символов)")
             
             # Claude: у него другой разговорный формат.
@@ -894,22 +941,12 @@ class IntelligentAnswerer:
             # Шлюз к сотням моделей: формат тот же, что у OpenAI.
             elif self.api_provider == "OpenRouter":
                 print(f"🌐 OpenRouter запрос ({self.model})...")
-                response = requests.post(
-                    f"{OPENROUTER_BASE}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.client['api_key']}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "temperature": self.temperature,
-                        "max_tokens": max_tokens,
-                    },
-                    timeout=REQUEST_TIMEOUT_SECONDS,
-                )
-                raise_with_body(response)
-                answer = response.json()["choices"][0]["message"]["content"].strip()
+                answer = self._ask_openrouter({
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": self.temperature,
+                    "max_tokens": max_tokens,
+                })
                 print(f"✅ OpenRouter ответ получен ({len(answer)} символов)")
 
             # Используем Groq если доступен
@@ -925,7 +962,7 @@ class IntelligentAnswerer:
                     ),
                     provider="Groq",
                 )
-                answer = response.choices[0].message.content.strip()
+                answer = (response.choices[0].message.content or "").strip()
                 print(f"✅ Groq ответ получен ({len(answer)} символов)")
             
             # Fallback на OpenAI
@@ -944,7 +981,7 @@ class IntelligentAnswerer:
                     ),
                     provider="OpenAI",
                 )
-                answer = response.choices[0].message.content.strip()
+                answer = (response.choices[0].message.content or "").strip()
                 print(f"✅ OpenAI ответ получен ({len(answer)} символов)")
             
             else:
@@ -974,6 +1011,64 @@ class IntelligentAnswerer:
             print(f"⚠️ {понятно}")
             return f"❌ {понятно}", False
     
+    def _ask_openrouter(self, payload: dict) -> str:
+        """
+        Запрос к шлюзу с перебором ключей.
+
+        Ключ, упёршийся в предел запросов, откладывается, и запрос повторяется
+        следующим. Это и есть смысл нескольких ключей: без перебора второй и
+        третий лежали бы мёртвым грузом.
+
+        Перебор не бесконечен — каждый ключ пробуется один раз. Иначе при
+        общей беде вроде недоступной модели Scott ходил бы по кругу, пока не
+        кончится терпение у человека.
+        """
+        ring = self.openrouter_ring
+        последняя = None
+
+        for _ in range(max(1, len(ring))):
+            key = ring.current() or (self.client or {}).get("api_key")
+            if not key:
+                raise RuntimeError("нет ни одного ключа OpenRouter")
+
+            response = requests.post(
+                f"{OPENROUTER_BASE}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+
+            if response.status_code < 400:
+                answer = first_message(response.json())
+
+                if not answer:
+                    # Модель промолчала. Менять ключ бессмысленно — дело не в
+                    # нём, — а притворяться, что ответ получен, тем более.
+                    raise RuntimeError(
+                        f"модель «{payload.get('model')}» вернула пустой ответ")
+
+                return answer
+
+            последняя = f"{response.status_code}: {(response.text or '')[:500]}"
+            причина = key_ring_module.why_refused(последняя)
+
+            if причина is None:
+                # Менять ключ бессмысленно: беда не в нём.
+                break
+
+            есть_запасной = ring.set_aside(key, причина)
+            подпись = "предел запросов" if причина == "rate" else "ключ не принят"
+            print(f"🔁 OpenRouter: {подпись}, "
+                  f"{'беру следующий ключ' if есть_запасной else 'запасных больше нет'}")
+
+            if not есть_запасной:
+                break
+
+        raise RuntimeError(последняя or "OpenRouter не ответил")
+
     def sees_images(self) -> bool:
         """Умеет ли смотреть картинки нынешняя связка провайдера и модели."""
         return bool(self.enabled) and provider_sees_images(self.api_provider or "")
@@ -1056,22 +1151,14 @@ class IntelligentAnswerer:
             ]
 
             if self.api_provider == "OpenRouter":
-                response = requests.post(
-                    f"{OPENROUTER_BASE}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self.client['api_key']}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "messages": messages,
-                        "max_tokens": self.max_tokens,
-                    },
-                    timeout=REQUEST_TIMEOUT_SECONDS * 2,
-                )
-                raise_with_body(response)
-                answer = response.json()["choices"][0]["message"]["content"].strip()
+                answer = self._ask_openrouter({
+                    "model": self.model,
+                    "messages": messages,
+                    "max_tokens": self.max_tokens,
+                })
                 return answer, bool(answer)
+
+            # Дальше — OpenAI через собственную библиотеку.
 
             # OpenAI через собственную библиотеку.
             result = self.client.chat.completions.create(
@@ -1080,7 +1167,7 @@ class IntelligentAnswerer:
                 max_tokens=self.max_tokens,
                 timeout=REQUEST_TIMEOUT_SECONDS * 2,
             )
-            answer = result.choices[0].message.content.strip()
+            answer = (result.choices[0].message.content or "").strip()
             return answer, bool(answer)
 
         except Exception as e:
