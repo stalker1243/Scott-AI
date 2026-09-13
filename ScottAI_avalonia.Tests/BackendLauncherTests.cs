@@ -24,18 +24,33 @@ namespace ScottAI.Avalonia.Tests;
 public class BackendLauncherTests
 {
     // ==================== Проба ====================
+    //
+    // Команды для пробы берутся по системе. Раньше здесь всюду стоял cmd, и на
+    // macOS-раннере две проверки легли: такой программы там нет, а проба честно
+    // ответила «не запустилось». Проверялось, выходит, не поведение пробы, а то,
+    // что её запустили на Windows.
+
+    private static (string File, string Args) Оболочка(string команда) =>
+        OperatingSystem.IsWindows()
+            ? ("cmd", "/c " + команда)
+            : ("/bin/sh", "-c \"" + команда + "\"");
+
+    private static bool Проба(string команда)
+    {
+        var (file, args) = Оболочка(команда);
+        return BackendLauncher.Probe(file, args);
+    }
 
     [Fact]
     public void Проба_видит_успешную_команду()
     {
-        var успех = BackendLauncher.Probe("cmd", "/c exit 0");
-        Assert.True(успех, "проба не признала успешно завершившуюся команду");
+        Assert.True(Проба("exit 0"), "проба не признала успешно завершившуюся команду");
     }
 
     [Fact]
     public void Проба_видит_неудачную_команду()
     {
-        Assert.False(BackendLauncher.Probe("cmd", "/c exit 1"));
+        Assert.False(Проба("exit 1"));
     }
 
     [Fact]
@@ -53,8 +68,13 @@ public class BackendLauncherTests
         // проба ждала бы вечно, а лаунчер объявил бы, что Python не найден.
         //
         // Здесь команда печатает заметно больше четырёх килобайт.
+        var строка = new string('x', 60);
+        var многословная = OperatingSystem.IsWindows()
+            ? $"for /L %i in (1,1,400) do @echo {строка}"
+            : $"for i in $(seq 400); do echo {строка}; done";
+
         var начало = Stopwatch.StartNew();
-        var успех = BackendLauncher.Probe("cmd", "/c for /L %i in (1,1,400) do @echo " + new string('x', 60));
+        var успех = Проба(многословная);
         начало.Stop();
 
         Assert.True(успех, "проба не дождалась многословной команды");
