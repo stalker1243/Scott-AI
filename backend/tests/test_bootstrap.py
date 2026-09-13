@@ -64,6 +64,11 @@ def test_explanation_is_honest_about_speed(boot, monkeypatch):
     Четыре гигабайта загрузки — это выбор, который стоит сделать осознанно;
     равно как и согласие на шесть секунд ожидания каждой фразы.
     """
+    # Система задаётся явно: на Mac объяснение своё, и про шесть секунд там
+    # речи нет. Без этой строки проверка падала на macOS-раннере, проверяя не
+    # текст, а то, где её запустили.
+    monkeypatch.setattr(boot.sys, "platform", "win32")
+
     with_gpu(boot, monkeypatch, True)
     _, gpu_text = boot.torch_requirement()
 
