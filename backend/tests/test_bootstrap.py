@@ -74,6 +74,25 @@ def test_explanation_is_honest_about_speed(boot, monkeypatch):
     assert "секунд" in cpu_text.lower(), "не сказано, чем обернётся работа на процессоре"
 
 
+def test_mac_is_told_about_metal_not_about_missing_nvidia(boot, monkeypatch):
+    """
+    На Mac ставится та же обычная сборка, но объясняется иначе.
+
+    «Видеокарта NVIDIA не найдена» прозвучало бы там как поломка: её на Mac не
+    бывает вовсе. И это не единственная неточность — работа не сводится к
+    процессору: графика Apple приходит в обычной сборке с PyPI, и синтез речи
+    ею пользуется.
+    """
+    with_gpu(boot, monkeypatch, False)
+    monkeypatch.setattr(boot.sys, "platform", "darwin")
+
+    args, explanation = boot.torch_requirement()
+
+    assert args == [boot.TORCH_CPU], "на Mac нужна обычная сборка, без индекса CUDA"
+    assert "NVIDIA" not in explanation
+    assert "Apple" in explanation
+
+
 def test_gpu_detection_without_nvidia_smi(boot, monkeypatch):
     """
     Без nvidia-smi считаем, что видеокарты нет.
