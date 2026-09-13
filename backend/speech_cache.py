@@ -57,13 +57,19 @@ def stock_phrases() -> List[str]:
         pass
 
     # Короткие реплики «секунду», которыми Scott отзывается, пока думает.
+    #
+    # Берутся из speech_text, а не из main. Раньше сюда шло «import main», и
+    # при запуске «python main.py» это заводило вторую копию backend: тот же
+    # файл выполнялся ещё раз под другим именем, со своим набором глобальных
+    # переменных. Слушатель после этого сидел в одной копии, главный цикл — в
+    # другой, и услышанные команды молча пропадали.
     try:
         try:
-            from . import main as scott_main
+            from .speech_text import THINKING_CUES
         except ImportError:
-            import main as scott_main
+            from speech_text import THINKING_CUES
 
-        phrases.extend(getattr(scott_main, "THINKING_CUES", ()))
+        phrases.extend(THINKING_CUES)
     except Exception:
         pass
 

@@ -71,3 +71,41 @@ async def stop() -> Dict:
 async def devices() -> Dict:
     """Микрофоны, доступные в системе, — чтобы выбрать нужный, если их несколько."""
     return {"success": True, "devices": listener_module.list_input_devices()}
+
+@router.post("/say")
+async def say_as_heard(request: Dict) -> Dict:
+    """
+    Пропустить фразу так, будто её услышал микрофон.
+
+    Нужно для разбора самого частого вопроса — «слышит, но не отвечает».
+    Голосовой путь состоит из полудюжины звеньев: запись, распознавание,
+    проверка обращения, исполнение, синтез, воспроизведение. Любое из них
+    может молча ничего не сделать, и понять какое, имея только микрофон и
+    тишину в ответ, нельзя.
+
+    Здесь первые два звена пропускаются, а остальные проходятся по-настоящему
+    — с исполнением команды и ответом вслух. Если отсюда Scott отвечает, а с
+    микрофона нет, дело в распознавании; если и отсюда молчит — дальше по
+    цепочке.
+    """
+    if scott_runtime.listener is None:
+        return _unavailable()
+
+    text = (request.get("text") or "").strip()
+    if not text:
+        return {"success": False, "error": "Нужен текст фразы"}
+
+    listener = scott_runtime.listener
+
+    # Тот же путь, которым идут настоящие услышанные фразы.
+    listener._dispatch(text)
+
+    состояние = listener.status()
+
+    return {
+        "success": True,
+        "heard": text,
+        "dispatch": состояние.get("last_dispatch"),
+        "command": состояние.get("last_command"),
+        "error": состояние.get("last_error"),
+    }

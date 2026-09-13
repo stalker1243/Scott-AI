@@ -20,6 +20,20 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+# Одно имя на один модуль.
+#
+# При запуске «python main.py» этот файл выполняется под именем __main__, но
+# соседи обращаются к нему как «import main» — и Python честно выполняет его
+# ВТОРОЙ раз, заводя отдельный набор всех глобальных переменных. Снаружи это
+# выглядело как «Scott слышит, но молчит»: слушателя регистрировала одна копия,
+# а главный цикл поднимался в другой, так что _main_loop в обработчике навсегда
+# оставался None и каждая команда молча терялась.
+#
+# Псевдоним ставится до первого импорта соседей, чтобы «import main» вернул
+# уже выполняющуюся копию.
+if __name__ == "__main__":
+    sys.modules.setdefault("main", sys.modules["__main__"])
+
 
 def _ensure_data_dir(base: str) -> str:
     """
@@ -65,8 +79,9 @@ load_dotenv()
 from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException, Form, Request, Depends
 from security import require_scott_token, check_rate_limit
 from timing import stage as timing_stage, snapshot as timing_snapshot, reset as timing_reset
-from speech_text import shorten_for_speech
+from speech_text import shorten_for_speech, THINKING_CUES
 import understanding
+
 import protocols as protocols_module
 # Под своим именем: обработчик эндпоинта /speech_to_text называется так же
 # и затирает модуль при определении. Распознавание из-за этого молча уходило
@@ -1250,8 +1265,6 @@ def _listener_transcribe(audio) -> str:
 THINKING_CUE_AFTER_SECONDS = 2.5
 
 # Варианты нарочно короткие: это не ответ, а знак «слышу, работаю».
-THINKING_CUES = ("Секунду", "Минуту", "Сейчас посмотрю")
-
 _thinking_cue_index = 0
 
 
@@ -1313,6 +1326,13 @@ def _listener_handle(text: str) -> None:
     нельзя дольше разумного: пока поток занят, следующая фраза не разбирается.
     """
     if _main_loop is None:
+        # Состояние, которое снаружи ни на что не похоже: Scott слышит,
+        # распознаёт, узнаёт своё имя — и молчит. Теперь об этом видно и в
+        # состоянии прослушивания, а не только в логе, куда никто не смотрит.
+        listening = scott_runtime.listener
+        if listening is not None:
+            listening.stats.last_dispatch = "цикл не готов"
+            listening.stats.last_error = "главный цикл ещё не поднят"
         print("⚠️ Главный цикл ещё не готов — команда пропущена")
         return
 

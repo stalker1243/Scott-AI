@@ -149,6 +149,15 @@ class ListenerStats:
 
     phrases_heard: int = 0
     triggered: int = 0
+
+    # Что ушло на исполнение и чем кончилось.
+    #
+    # Без этого на вопрос «слышит, но не отвечает» ответить нечем: счётчик
+    # обращений растёт и когда команда выполнена, и когда позвали по имени,
+    # ничего не попросив.
+    last_command: str = ""
+    last_command_at: float = 0.0
+    last_dispatch: str = ""      # 'выполнена' | 'имя без команды' | 'мимо' | 'ошибка'
     ignored: int = 0
     last_text: str = ""
     last_error: str = ""
@@ -404,6 +413,14 @@ class VoiceListener:
             "noise_floor": round(self._noise_floor, 5),
             "phrases_heard": self.stats.phrases_heard,
             "triggered": self.stats.triggered,
+
+            # Чем кончилась последняя услышанная фраза. По одному счётчику
+            # обращений этого не понять: он растёт и при выполненной команде,
+            # и при «позвали, но ничего не попросили».
+            "last_command": self.stats.last_command,
+            "last_dispatch": self.stats.last_dispatch,
+            "since_command_sec": (round(time.time() - self.stats.last_command_at, 1)
+                                  if self.stats.last_command_at else None),
             "ignored": self.stats.ignored,
             "last_text": self.stats.last_text,
             "last_error": self.stats.last_error,
@@ -823,20 +840,27 @@ class VoiceListener:
             result = self.check_trigger(text)
             if not getattr(result, "has_trigger", False):
                 self.stats.ignored += 1
+                self.stats.last_dispatch = "мимо"
                 print(f"🔇 Мимо: «{text}»")
                 return
             command = (getattr(result, "command_text", "") or "").strip()
             if not command:
                 # Позвали по имени, но ничего не попросили.
                 self.stats.triggered += 1
+                self.stats.last_dispatch = "имя без команды"
                 print("🎧 Scott слышит своё имя, но команды не было")
                 return
 
         self.stats.triggered += 1
+        self.stats.last_command = command
+        self.stats.last_command_at = time.time()
+        self.stats.last_dispatch = "выполнена"
+
         print(f"🎤 Команда: «{command}»")
         try:
             self.handle_command(command)
         except Exception as e:
+            self.stats.last_dispatch = "ошибка"
             self.stats.last_error = f"Команда не выполнена: {e}"
             print(f"⚠️ {self.stats.last_error}")
 
