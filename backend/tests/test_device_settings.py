@@ -140,3 +140,72 @@ def test_broken_config_falls_back_to_auto(devices):
     devices.CONFIG_PATH.write_text("{это не json", encoding="utf-8")
 
     assert devices.get_choice("whisper") == "auto"
+
+
+# ==================== Графика Apple ====================
+#
+# На Mac видеокарты NVIDIA нет, а считать на процессоре медленно. Metal
+# доступен всем машинам с процессорами Apple — с 2020 года это все новые Mac,
+# и не пользоваться им значило бы без причины отдать человеку худшую работу.
+#
+# Но доступен он не всем движкам: faster-whisper построен на CTranslate2,
+# который Metal не поддерживает вовсе.
+
+def test_auto_takes_apple_gpu_for_synthesis(devices, monkeypatch):
+    monkeypatch.setattr(devices, "cuda_available", lambda: False)
+    monkeypatch.setattr(devices, "mps_available", lambda: True)
+
+    assert devices.resolve_device("silero") == "mps"
+
+
+def test_recognition_stays_on_cpu_even_with_apple_gpu(devices, monkeypatch):
+    """
+    Распознавание на Metal не считается — и просить его бесполезно.
+
+    Молчаливая попытка кончилась бы не ошибкой, а падением при загрузке модели:
+    CTranslate2 о таком устройстве не знает.
+    """
+    monkeypatch.setattr(devices, "cuda_available", lambda: False)
+    monkeypatch.setattr(devices, "mps_available", lambda: True)
+
+    assert devices.resolve_device("whisper") == "cpu"
+
+
+def test_apple_gpu_cannot_be_chosen_for_recognition(devices, monkeypatch):
+    monkeypatch.setattr(devices, "mps_available", lambda: True)
+
+    ответ = devices.set_choice("whisper", "mps")
+
+    assert not ответ["success"]
+    assert "процессор" in ответ["message"]
+
+
+def test_apple_gpu_can_be_chosen_for_synthesis(devices, monkeypatch):
+    monkeypatch.setattr(devices, "mps_available", lambda: True)
+
+    assert devices.set_choice("silero", "mps")["success"]
+    assert devices.resolve_device("silero") == "mps"
+
+
+def test_stale_apple_choice_degrades_quietly(devices, monkeypatch):
+    """
+    Выбор мог достаться от другой машины: настройки переживают переустановку и
+    переезд. Падать из-за этого нельзя — уходим на процессор.
+    """
+    monkeypatch.setattr(devices, "mps_available", lambda: True)
+    devices.set_choice("silero", "mps")
+
+    monkeypatch.setattr(devices, "mps_available", lambda: False)
+
+    assert devices.resolve_device("silero") == "cpu"
+
+
+def test_nvidia_still_wins_where_it_exists(devices, monkeypatch):
+    """
+    Порядок не спорный — обе видеокарты на одной машине не встречаются, — но
+    записан явно: перепутать его значит на Windows тихо уйти на процессор.
+    """
+    monkeypatch.setattr(devices, "cuda_available", lambda: True)
+    monkeypatch.setattr(devices, "mps_available", lambda: True)
+
+    assert devices.resolve_device("silero") == "cuda"

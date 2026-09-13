@@ -78,7 +78,7 @@ public partial class MainWindowViewModel : ViewModelBase
     public HomeViewModel Home { get; }
     public ChatViewModel Chat { get; }
     public SystemViewModel SystemPage { get; }
-    public AutomationViewModel AutomationPage { get; }
+    public ProtocolsViewModel ProtocolsPage { get; }
     public AnalyticsViewModel AnalyticsPage { get; }
     public SettingsViewModel SettingsPage { get; }
     public ProfileViewModel ProfilePage { get; } = new();
@@ -90,7 +90,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Chat = new ChatViewModel(_client);
         SystemPage = new SystemViewModel(_client);
         LogsPage = new LogsViewModel(_client);
-        AutomationPage = new AutomationViewModel(_client);
+        ProtocolsPage = new ProtocolsViewModel(_client);
         AnalyticsPage = new AnalyticsViewModel(_client);
         SettingsPage = new SettingsViewModel(_client);
 
@@ -284,11 +284,16 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void NavigateAutomation()
+    private void NavigateProtocols()
     {
-        CurrentPage = AutomationPage;
-        PageTitle = "Автоматизация";
-        ActivePage = "automation";
+        CurrentPage = ProtocolsPage;
+        PageTitle = "Протоколы";
+        ActivePage = "protocols";
+
+        // Список перечитывается при каждом заходе: протокол можно завести и
+        // голосом, и из другого места — иначе он не появился бы в списке до
+        // перезапуска лаунчера.
+        ProtocolsPage.RefreshCommand.Execute(null);
     }
 
     [RelayCommand]

@@ -124,3 +124,38 @@ def test_no_sudo_in_backend():
                     offenders.append(f"{path.name}:{number}")
 
     assert not offenders, f"вызов sudo: {offenders}"
+
+
+# ==================== macOS ====================
+#
+# На Mac проект оказался в положении хуже, чем на Linux: ветка «не Windows»
+# означала «Linux» буквально — Scott искал .desktop-файлы, описания программ,
+# которых там не бывает вовсе. Ни одна команда «открой такое-то приложение» не
+# сработала бы, и без единой ошибки в логе.
+
+def test_app_resolver_knows_macos():
+    """
+    Поиск приложений различает три системы, а не две.
+
+    Дословно: на Mac должна выбираться своя ветка, а не линуксовая. Проверка
+    статическая, потому что подменить платформу целиком при импорте нельзя —
+    признаки вычисляются один раз.
+    """
+    source = source_of("app_resolver.py")
+
+    assert "IS_MACOS" in source, "app_resolver не отличает macOS от Linux"
+    assert "_resolve_macos" in source, "нет ветки поиска приложений для macOS"
+    assert "MAC_APP_DIRS" in source, "не перечислено, где macOS держит приложения"
+
+
+def test_macos_launches_through_open():
+    """
+    Приложения на Mac поднимаются командой open.
+
+    Прямой запуск исполняемого файла внутри бандла даёт процесс без значка в
+    Dock, без прав и без окружения — часть программ так попросту не работает.
+    """
+    source = source_of("app_resolver.py")
+
+    assert '"open"' in source or "'open'" in source, (
+        "запуск приложений macOS идёт мимо open")

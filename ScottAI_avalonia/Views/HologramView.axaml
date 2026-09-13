@@ -1,4 +1,4 @@
-<UserControl xmlns="https://github.com/avaloniaui"
+﻿<UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:conv="using:ScottAI.Avalonia.Converters"
@@ -79,105 +79,57 @@
         </Style>
     </UserControl.Styles>
 
-    <Grid ColumnDefinitions="*,Auto,*" MinHeight="440">
+    <Grid MinHeight="460">
 
-        <!-- ==================== Подписи слева ==================== -->
-        <StackPanel Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Right"
-                    Spacing="52" Margin="0,0,18,0">
+        <!-- Свечение вокруг фигуры: без него она выглядит наклейкой, а не
+             проекцией в воздухе. -->
+        <Ellipse Width="260" Height="380" VerticalAlignment="Center" HorizontalAlignment="Center"
+                 Opacity="0.10" IsHitTestVisible="False">
+            <Ellipse.Fill>
+                <RadialGradientBrush>
+                    <GradientStop Offset="0" Color="#22D3EE" />
+                    <GradientStop Offset="1" Color="Transparent" />
+                </RadialGradientBrush>
+            </Ellipse.Fill>
+        </Ellipse>
 
-            <StackPanel Spacing="2" HorizontalAlignment="Right">
-                <TextBlock Text="ВИДЕОКАРТА" Classes="caption" HorizontalAlignment="Right" />
-                <TextBlock Classes="reading" HorizontalAlignment="Right"
-                           Text="{Binding GpuPercent, StringFormat={}{0:0}%}"
-                           Foreground="{Binding GpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                <TextBlock Text="голова · распознавание и синтез речи" FontSize="10"
-                           Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Right" />
-            </StackPanel>
+        <!-- Фигура вместе с выносками занимает всю ширину.
 
-            <StackPanel Spacing="2" HorizontalAlignment="Right">
-                <TextBlock Text="ПАМЯТЬ" Classes="caption" HorizontalAlignment="Right" />
-                <TextBlock Classes="reading" HorizontalAlignment="Right"
-                           Text="{Binding RamPercent, StringFormat={}{0:0}%}"
-                           Foreground="{Binding RamPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                <TextBlock Text="корпус" FontSize="10"
-                           Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Right" />
-            </StackPanel>
-        </StackPanel>
+             Подписи раньше стояли двумя столбцами по бокам, и какая из них к
+             какой части относится, приходилось угадывать по порядку. Линия от
+             части к числу снимает вопрос, а два набора подписей на одной
+             странице означали бы, что одно и то же сказано дважды. -->
+        <Grid Classes="figure">
+            <holo:HologramCanvas Name="Figure"
+                                 Gpu="{Binding GpuPercent}"
+                                 Cpu="{Binding CpuPercent}"
+                                 Ram="{Binding RamPercent}"
+                                 Disk="{Binding DiskPercent}"
+                                 Processes="{Binding ProcessCount}"
+                                 DiskUsage="{Binding DiskUsagePercent}" />
 
-        <!-- ==================== Сама фигура ==================== -->
-        <Grid Grid.Column="1" Classes="figure" Width="260" Height="450">
+            <!-- Луч развёртки поверх фигуры -->
+            <Rectangle Classes="scanline" Height="2" VerticalAlignment="Top"
+                       Margin="20,0" IsHitTestVisible="False">
+                <Rectangle.Fill>
+                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
+                        <GradientStop Offset="0" Color="Transparent" />
+                        <GradientStop Offset="0.5" Color="#7DD3FC" />
+                        <GradientStop Offset="1" Color="Transparent" />
+                    </LinearGradientBrush>
+                </Rectangle.Fill>
+                <Rectangle.RenderTransform>
+                    <TranslateTransform />
+                </Rectangle.RenderTransform>
+            </Rectangle>
 
-            <Grid>
-                <!-- Свечение вокруг фигуры: без него она выглядит наклейкой, а не
-                     проекцией в воздухе. -->
-                <Ellipse Width="230" Height="360" VerticalAlignment="Center" Opacity="0.10"
-                         IsHitTestVisible="False">
-                    <Ellipse.Fill>
-                        <RadialGradientBrush>
-                            <GradientStop Offset="0" Color="#22D3EE" />
-                            <GradientStop Offset="1" Color="Transparent" />
-                        </RadialGradientBrush>
-                    </Ellipse.Fill>
-                </Ellipse>
-
-                <holo:HologramCanvas Name="Figure"
-                                     Gpu="{Binding GpuPercent}"
-                                     Cpu="{Binding CpuPercent}"
-                                     Ram="{Binding RamPercent}"
-                                     Disk="{Binding DiskPercent}"
-                                     ToolTip.Tip="Потяните мышью, чтобы повернуть" />
-
-                <!-- Луч развёртки поверх фигуры -->
-                <Rectangle Classes="scanline" Height="2" VerticalAlignment="Top"
-                           Margin="20,0" IsHitTestVisible="False">
-                    <Rectangle.Fill>
-                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,0%">
-                            <GradientStop Offset="0" Color="Transparent" />
-                            <GradientStop Offset="0.5" Color="#7DD3FC" />
-                            <GradientStop Offset="1" Color="Transparent" />
-                        </LinearGradientBrush>
-                    </Rectangle.Fill>
-                    <Rectangle.RenderTransform>
-                        <TranslateTransform />
-                    </Rectangle.RenderTransform>
-                </Rectangle>
-
-                <!-- Кольца проекции у ног.
-
-                     Выравниваются по центру, а не по абсолютным координатам:
-                     фигура центрируется по своему полю, и зашитые числа
-                     оставляли её стоящей рядом с кольцом, а не в нём. -->
-                <Grid IsHitTestVisible="False" VerticalAlignment="Bottom" Margin="0,0,0,6">
-                    <Ellipse Width="144" Height="34" HorizontalAlignment="Center" Fill="Transparent"
-                             StrokeThickness="1.2" Opacity="0.45" Stroke="#22D3EE" />
-                    <Ellipse Classes="pedestal" Width="188" Height="50" HorizontalAlignment="Center"
-                             Fill="Transparent" StrokeThickness="1" Stroke="#22D3EE" />
-                </Grid>
+            <!-- Кольца проекции у ног -->
+            <Grid IsHitTestVisible="False" VerticalAlignment="Bottom" Margin="0,0,6,0">
+                <Ellipse Width="144" Height="34" HorizontalAlignment="Center" Fill="Transparent"
+                         StrokeThickness="1.2" Opacity="0.45" Stroke="#22D3EE" />
+                <Ellipse Classes="pedestal" Width="188" Height="50" HorizontalAlignment="Center"
+                         Fill="Transparent" StrokeThickness="1" Stroke="#22D3EE" />
             </Grid>
-
         </Grid>
-
-        <!-- ==================== Подписи справа ==================== -->
-        <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Left"
-                    Spacing="52" Margin="18,0,0,0">
-
-            <StackPanel Spacing="2">
-                <TextBlock Text="ПРОЦЕССОР" Classes="caption" />
-                <TextBlock Classes="reading"
-                           Text="{Binding CpuPercent, StringFormat={}{0:0}%}"
-                           Foreground="{Binding CpuPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                <TextBlock Text="{Binding ProcessCount, StringFormat={}ядро · {0} процессов}" FontSize="10"
-                           Foreground="{DynamicResource TextMuted}" />
-            </StackPanel>
-
-            <StackPanel Spacing="2">
-                <TextBlock Text="ДИСК" Classes="caption" />
-                <TextBlock Classes="reading"
-                           Text="{Binding DiskPercent, StringFormat={}{0:0}%}"
-                           Foreground="{Binding DiskPercent, Converter={x:Static conv:LoadToBrushConverter.Instance}}" />
-                <TextBlock Text="ноги · занято на системном" FontSize="10"
-                           Foreground="{DynamicResource TextMuted}" />
-            </StackPanel>
-        </StackPanel>
     </Grid>
 </UserControl>

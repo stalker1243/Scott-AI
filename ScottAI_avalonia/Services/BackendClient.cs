@@ -1,9 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading;
 using System.Threading.Tasks;
 using ScottAI.Avalonia.Models;
 
@@ -227,6 +230,111 @@ public class BackendClient
     {
         var res = await _http.PostAsJsonAsync("/ifttt/delete-rule", new { name });
         var body = await res.Content.ReadFromJsonAsync<SimpleResponse>();
+        return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
+    }
+
+    // ---------- Вложения ----------
+
+    /// <summary>
+    /// Спросить о прикреплённом файле.
+    ///
+    /// Файл уходит целиком, а не путём на диске: путь имеет смысл только на
+    /// той же машине, а лаунчер и backend — вообще говоря, разные программы.
+    ///
+    /// Ждём долго: разбор снимка экрана моделью со зрением занимает заметно
+    /// больше времени, чем обычный вопрос, и обычного срока не хватает.
+    /// </summary>
+    public async Task<(bool Success, string Answer, string Note)> AskAboutFileAsync(
+        string path, string question)
+    {
+        try
+        {
+            using var form = new MultipartFormDataContent();
+            using var bytes = new ByteArrayContent(await File.ReadAllBytesAsync(path));
+
+            bytes.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            form.Add(bytes, "file", Path.GetFileName(path));
+            form.Add(new StringContent(question ?? "", Encoding.UTF8), "question");
+
+            using var patience = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            var res = await _http.PostAsync("/attachments/ask", form, patience.Token);
+
+            var body = await res.Content.ReadFromJsonAsync<AttachmentAnswer>(
+                cancellationToken: patience.Token);
+
+            if (body is null)
+            {
+                return (false, $"Backend ответил HTTP {(int)res.StatusCode}", "");
+            }
+
+            return body.Success
+                ? (true, body.Answer ?? "", body.Note ?? "")
+                : (false, body.Error ?? "Не удалось разобрать файл", "");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message, "");
+        }
+    }
+
+    /// <summary>
+    /// Умеет ли выбранная модель смотреть картинки.
+    ///
+    /// Спрашивается до отправки: сказать заранее, что модель работает только с
+    /// текстом, лучше, чем принять снимок и вернуть ответ ни о чём.
+    /// </summary>
+    public async Task<bool> ModelSeesImagesAsync()
+    {
+        try
+        {
+            var body = await _http.GetFromJsonAsync<VisionAbility>("/attachments/ability");
+            return body?.SeesImages ?? false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    // ---------- Протоколы ----------
+
+    public async Task<List<Protocol>> ListProtocolsAsync()
+    {
+        var body = await _http.GetFromJsonAsync<ProtocolListResponse>("/protocols");
+        return body?.Protocols ?? new List<Protocol>();
+    }
+
+    public async Task<(bool Success, string Message)> AddProtocolAsync(
+        string name, List<ProtocolStep> steps, List<string> phrases, string description)
+    {
+        var res = await _http.PostAsJsonAsync("/protocols", new { name, steps, phrases, description });
+        var body = await res.Content.ReadFromJsonAsync<SimpleResponse>();
+        return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
+    }
+
+    public async Task<(bool Success, string Message)> DeleteProtocolAsync(string name)
+    {
+        var res = await _http.DeleteAsync($"/protocols/{Uri.EscapeDataString(name)}");
+        var body = await res.Content.ReadFromJsonAsync<SimpleResponse>();
+        return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
+    }
+
+    /// <summary>
+    /// Выполнить протокол прямо сейчас.
+    ///
+    /// Ответ ждём долго: протокол из нескольких шагов открывает программы, и
+    /// каждая из них отвечает не мгновенно. Обычного срока ожидания на это не
+    /// хватает.
+    /// </summary>
+    public async Task<(bool Success, string Message)> RunProtocolAsync(string name)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post, $"/protocols/{Uri.EscapeDataString(name)}/run");
+
+        using var patience = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        var res = await _http.SendAsync(request, patience.Token);
+
+        var body = await res.Content.ReadFromJsonAsync<SimpleResponse>(cancellationToken: patience.Token);
         return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
     }
 
@@ -495,8 +603,22 @@ public class MetricsInner
     [JsonPropertyName("gpu")]
     public double Gpu { get; set; }
 
+    /// <summary>
+    /// Нагрузка на диск в процентах — доля времени, когда он был занят
+    /// работой. То же, что показывает диспетчер задач.
+    ///
+    /// Раньше сюда приходила доля занятого МЕСТА, и лаунчер показывал восемьдесят
+    /// процентов при полном бездействии диска. Величины разные: на забитом
+    /// диске, к которому никто не обращается, место занято почти целиком, а
+    /// нагрузки нет вовсе. Рядом с процессором, памятью и видеокартой должна
+    /// стоять именно нагрузка, иначе четыре числа означают не одно и то же.
+    /// </summary>
     [JsonPropertyName("disk")]
     public double Disk { get; set; }
+
+    /// <summary>Сколько места на системном диске занято, в процентах.</summary>
+    [JsonPropertyName("disk_usage")]
+    public double DiskUsage { get; set; }
 
     [JsonPropertyName("processes")]
     public int Processes { get; set; }
@@ -560,6 +682,24 @@ public class V33Envelope<T>
 public class IftttListResponse
 {
     [JsonPropertyName("rules")] public List<IftttRule>? Rules { get; set; }
+}
+
+public class AttachmentAnswer
+{
+    [JsonPropertyName("success")] public bool Success { get; set; }
+    [JsonPropertyName("answer")] public string? Answer { get; set; }
+    [JsonPropertyName("error")] public string? Error { get; set; }
+    [JsonPropertyName("note")] public string? Note { get; set; }
+}
+
+public class VisionAbility
+{
+    [JsonPropertyName("sees_images")] public bool SeesImages { get; set; }
+}
+
+public class ProtocolListResponse
+{
+    [JsonPropertyName("protocols")] public List<Protocol>? Protocols { get; set; }
 }
 
 public class RecommendationsResponse

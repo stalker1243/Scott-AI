@@ -1,264 +1,169 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
+using Avalonia;
+using Avalonia.Media;
 using ScottAI.Avalonia.Hologram;
 using Xunit;
 
 namespace ScottAI.Avalonia.Tests;
 
 /// <summary>
-/// Объёмная фигура на главной странице: построение и проекция.
+/// Фигура на главной странице: силуэт и цвет.
 ///
-/// Своего трёхмерного движка у Avalonia нет, а тащить ради одной фигуры OpenGL
-/// значило бы получить вторую цепочку сборки и новый класс поломок на чужих
-/// машинах — там и без того хватало «не запускается». Поэтому отрисовщик свой,
-/// в сотню строк.
+/// Здесь была объёмная фигура со своим программным отрисовщиком, и проверки
+/// ловили в нём настоящие ошибки — перепутанные перёд и зад, свет снизу,
+/// фигуру, уезжавшую из кадра при наклоне, кисть, висевшую в стороне от
+/// предплечья. Фигура стала плоской, отрисовщик исчез целиком, и проверять
+/// теперь надо другое: пропорции силуэта и то, что цвет по-прежнему означает
+/// нагрузку.
 ///
-/// Своё — значит проверяемое обычными тестами, и это оказалось нужным сразу.
-/// Фигура дважды уезжала из кадра: модель строится с головой на отметке минус
-/// девяносто и ногами на плюс шестьдесят, а вращение и перспектива считаются
-/// вокруг нуля. Середина приходилась ниже пояса, и чем сильнее перспектива, тем
-/// дальше фигура выпадала за край.
+/// Пропорции — не придирка. Именно на них дважды ломалась объёмная фигура: с
+/// головой в шестую часть роста и ногами короче трёх голов она читалась куклой,
+/// сколько ни улучшай всё остальное.
+///
+/// Ключевые ширины силуэта — плечи, талия, бёдра — вынесены в именованные
+/// величины, и проверка смотрит на них. Первая попытка мерила сам контур,
+/// пересекая его с узкой полосой, но пересечение фигур Avalonia считает через
+/// графическую подсистему, которой в проверках нет: результат молча выходил
+/// пустым.
 /// </summary>
+[Collection("avalonia")]
 public class HologramTests
 {
-    // ==================== Построение ====================
+    // ==================== Пропорции ====================
 
     [Fact]
-    public void Коробка_даёт_восемь_вершин_и_шесть_граней()
+    public void Фигура_укладывается_в_свои_границы()
     {
-        var mesh = new Mesh();
-        mesh.AddBox(new Point3(0, 0, 0), 10, 20, 30, BodyPart.Torso);
-
-        Assert.Equal(8, mesh.Vertices.Count);
-        Assert.Equal(6, mesh.Faces.Count);
-        Assert.All(mesh.Faces, f => Assert.Equal(4, f.Indices.Length));
-    }
-
-    [Fact]
-    public void Сужение_книзу_делает_из_ящика_торс()
-    {
-        var mesh = new Mesh();
-        mesh.AddBox(new Point3(0, 0, 0), 40, 20, 40, BodyPart.Torso, taper: 0.5);
-
-        var верх = mesh.Vertices.Take(4).Max(v => Math.Abs(v.X));
-        var низ = mesh.Vertices.Skip(4).Max(v => Math.Abs(v.X));
-
-        Assert.True(низ < верх, "низ не уже верха — сужение не сработало");
-    }
-
-    [Fact]
-    public void Фигура_собирается()
-    {
-        var mesh = Suits.Build();
-
-        Assert.NotEmpty(mesh.Vertices);
-        Assert.NotEmpty(mesh.Faces);
-
-        // Все грани ссылаются на существующие вершины: иначе отрисовка падает
-        // с выходом за границы, и вместо фигуры остаётся пустое место.
-        Assert.All(mesh.Faces, face =>
-            Assert.All(face.Indices, i => Assert.InRange(i, 0, mesh.Vertices.Count - 1)));
-    }
-
-    [Fact]
-    public void У_фигуры_есть_плащ()
-    {
-        // Плащ — половина силуэта: без него остаётся просто доспех, и фигура
-        // теряет то, по чему её узнают.
-        Assert.Contains(Suits.Build().Faces, f => f.Part == BodyPart.Cape);
-    }
-
-    [Fact]
-    public void Каждая_подсистема_чем_то_показана()
-    {
-        // Фигура — это показания приборов. Подсистема без своей части просто
-        // исчезла бы с экрана, и человек не заметил бы пропажи.
-        var mesh = Suits.Build();
-
-        foreach (var part in new[] { BodyPart.Head, BodyPart.Core, BodyPart.Torso, BodyPart.Legs })
+        // Силуэт описан в собственной сетке ростом в двести единиц, и
+        // отрисовка масштабирует именно её. Часть, вылезшая за объявленные
+        // границы, окажется обрезанной на любом размере окна.
+        foreach (var (part, shape) in Silhouette.Parts())
         {
-            Assert.Contains(mesh.Faces, f => f.Part == part);
-        }
-    }
+            var b = shape.Bounds;
 
-    // ==================== Центровка ====================
+            Assert.True(b.Top >= -0.5, $"{part}: верх на {b.Top:F1}");
+            Assert.True(b.Bottom <= Silhouette.Height + 0.5, $"{part}: низ на {b.Bottom:F1}");
 
-    [Fact]
-    public void Центровка_ставит_модель_серединой_в_ноль()
-    {
-        var mesh = new Mesh();
-        mesh.AddBox(new Point3(20, -90, 5), 10, 10, 10, BodyPart.Head);
-        mesh.AddBox(new Point3(20, 60, 5), 10, 10, 10, BodyPart.Legs);
-
-        mesh.Center();
-
-        Assert.Equal(0, Середина(mesh, v => v.X), precision: 6);
-        Assert.Equal(0, Середина(mesh, v => v.Y), precision: 6);
-        Assert.Equal(0, Середина(mesh, v => v.Z), precision: 6);
-    }
-
-    [Fact]
-    public void Готовая_фигура_отцентрована_по_доспеху()
-    {
-        // Ровно то, на чём обжигались: фигура вращалась вокруг пояса и уезжала
-        // из кадра.
-        //
-        // Центровка считается по доспеху, а не по всей модели: плащ висит за
-        // спиной и свисает ниже пояса, и по нему середина приходится не туда,
-        // где человек видит фигуру.
-        var mesh = Suits.Build();
-        var доспех = ВершиныДоспеха(mesh);
-
-        Assert.Equal(0, Середина(доспех, v => v.X), precision: 6);
-        Assert.Equal(0, Середина(доспех, v => v.Y), precision: 6);
-        Assert.Equal(0, Середина(доспех, v => v.Z), precision: 6);
-    }
-
-    private static List<Point3> ВершиныДоспеха(Mesh mesh)
-    {
-        var indices = mesh.Faces
-            .Where(f => f.Part != BodyPart.Cape)
-            .SelectMany(f => f.Indices)
-            .Distinct();
-
-        return indices.Select(i => mesh.Vertices[i]).ToList();
-    }
-
-    private static double Середина(Mesh mesh, Func<Point3, double> ось)
-        => Середина(mesh.Vertices, ось);
-
-    private static double Середина(IReadOnlyCollection<Point3> вершины, Func<Point3, double> ось)
-        => (вершины.Min(ось) + вершины.Max(ось)) / 2;
-
-    // ==================== Поворот ====================
-
-    [Fact]
-    public void Без_поворота_фигура_смотрит_прямо()
-    {
-        var mesh = new Mesh();
-        mesh.AddBox(new Point3(0, 0, 0), 20, 20, 20, BodyPart.Torso);
-
-        var грани = Projector.Project(mesh, yaw: 0, pitch: 0, scale: 1, centerX: 0, centerY: 0);
-
-        // Передняя и задняя грани есть всегда; к зрителю обращена ровно одна.
-        Assert.Contains(грани, f => f.Facing);
-        Assert.Contains(грани, f => !f.Facing);
-    }
-
-    [Fact]
-    public void Поворот_на_полкруга_меняет_видимую_сторону()
-    {
-        var mesh = new Mesh();
-        mesh.AddBox(new Point3(0, 0, 0), 20, 20, 20, BodyPart.Torso);
-
-        var спереди = Projector.Project(mesh, 0, 0, 1, 0, 0);
-        var сзади = Projector.Project(mesh, Math.PI, 0, 1, 0, 0);
-
-        // Ближайшая грань спереди и сзади — разные стороны коробки.
-        var ближняяСпереди = спереди.Last();
-        var ближняяСзади = сзади.Last();
-
-        Assert.NotEqual(
-            Math.Round(ближняяСпереди.Points[0].X, 3),
-            Math.Round(ближняяСзади.Points[0].X, 3));
-    }
-
-    [Fact]
-    public void Грани_упорядочены_от_дальних_к_ближним()
-    {
-        // На этом порядке держится вся отрисовка: рисуя от дальних к ближним,
-        // ближние закрывают дальние сами собой. Перепутанный порядок вывернул
-        // бы фигуру наизнанку.
-        var mesh = Suits.Build();
-        var грани = Projector.Project(mesh, 0.5, 0.2, 2, 100, 100);
-
-        for (var i = 1; i < грани.Count; i++)
-        {
-            Assert.True(грани[i].Depth <= грани[i - 1].Depth,
-                "грань оказалась дальше предыдущей — порядок нарушен");
+            Assert.True(Math.Abs(b.Left) <= Silhouette.HalfWidth + 0.5,
+                        $"{part}: левый край на {b.Left:F1}");
+            Assert.True(Math.Abs(b.Right) <= Silhouette.HalfWidth + 0.5,
+                        $"{part}: правый край на {b.Right:F1}");
         }
     }
 
     [Fact]
-    public void Свет_падает_сверху()
+    public void Голова_около_одной_восьмой_роста()
     {
-        // Не придирка к оттенкам: именно разница между верхними и нижними
-        // гранями и создаёт объём. Знаки у направления света легко перепутать —
-        // экранная ось Y смотрит вниз, — и в первой же версии доспех освещался
-        // снизу, отчего выглядел плоским.
-        var mesh = new Mesh();
-        mesh.AddBox(new Point3(0, 0, 0), 20, 20, 20, BodyPart.Torso);
+        // Канон восьми голов. С головой в шестую часть роста фигура читается
+        // куклой — это уже проверено на объёмной версии.
+        var head = Silhouette.Parts().First(p => p.Part == BodyPart.Head).Shape;
 
-        var грани = Projector.Project(mesh, 0, 0.5, 1, 0, 0);
+        Assert.True(head.Bounds.Top < 4, "макушка должна быть у верхнего края");
 
-        // Верхняя грань коробки выше остальных по экрану.
-        var верхняя = грани.OrderBy(f => f.Points.Average(p => p.Y)).First();
-        var нижняя = грани.OrderByDescending(f => f.Points.Average(p => p.Y)).First();
+        // Череп по ширине близок к своей высоте: голова человека почти
+        // круглая в фас, но чуть уже, чем высока.
+        var ширина = Silhouette.SkullHalf * 2;
+        var высота = 26.0;
 
-        Assert.True(верхняя.Light > нижняя.Light,
-            $"верх ({верхняя.Light:0.00}) не светлее низа ({нижняя.Light:0.00})");
+        Assert.InRange(Silhouette.Height / высота, 7.0, 8.6);
+        Assert.InRange(ширина / высота, 0.7, 1.0);
     }
 
     [Fact]
-    public void Отвёрнутая_грань_не_рисуется_как_обращённая()
+    public void Ноги_занимают_половину_роста()
     {
-        var mesh = new Mesh();
-        mesh.AddBox(new Point3(0, 0, 0), 20, 20, 20, BodyPart.Torso);
+        // Середина роста у человека приходится на пах. Пока ноги были короче
+        // трёх голов, фигура выглядела приземистой.
+        var legs = Silhouette.Parts().First(p => p.Part == BodyPart.Legs).Shape.Bounds;
 
-        // Угол взят косой намеренно. Если смотреть строго в лоб, боковые грани
-        // стоят ребром — их нормаль перпендикулярна взгляду, и отнести их к
-        // обращённым или отвёрнутым можно с равным правом. На таком угле
-        // проверка ничего бы не значила.
-        var грани = Projector.Project(mesh, 0.6, 0.4, 1, 0, 0);
+        Assert.True(legs.Height / Silhouette.Height > 0.45,
+                    $"ноги занимают {legs.Height / Silhouette.Height:P0} роста");
 
-        // У коробки с косого угла видно ровно три грани из шести.
-        Assert.Equal(3, грани.Count(f => f.Facing));
+        Assert.True(legs.Bottom > Silhouette.Height - 6, "фигура должна стоять на полу");
     }
 
-    // ==================== Размещение в кадре ====================
+    [Fact]
+    public void Плечи_шире_талии_и_бёдер()
+    {
+        // Три перегиба, без которых силуэт перестаёт быть человеческим. Без
+        // них получается мешок, и это первое, что выдаёт нарисованную наспех
+        // фигуру.
+        Assert.True(Silhouette.ShoulderHalf > Silhouette.WaistHalf,
+                    $"плечи {Silhouette.ShoulderHalf}, талия {Silhouette.WaistHalf}");
+
+        Assert.True(Silhouette.HipHalf > Silhouette.WaistHalf,
+                    $"бёдра {Silhouette.HipHalf}, талия {Silhouette.WaistHalf}");
+
+        Assert.True(Silhouette.ShoulderHalf > Silhouette.HipHalf,
+                    $"плечи {Silhouette.ShoulderHalf}, бёдра {Silhouette.HipHalf}");
+
+        // И всё это должно помещаться в объявленную ширину фигуры.
+        Assert.True(Silhouette.ShoulderHalf <= Silhouette.HalfWidth);
+    }
 
     [Fact]
-    public void Фигура_помещается_в_кадр_при_любом_повороте()
+    public void Руки_достают_до_середины_бедра()
     {
-        // Дважды проваленное требование. Проверяется не формула, а итог: при
-        // всех углах поворота ни одна точка не должна оказаться за краями.
-        const double width = 240;
-        const double height = 400;
+        // У человека опущенная кисть приходится на середину бедра. Рука,
+        // кончающаяся у пояса, выглядит куцей — на объёмной фигуре так и было.
+        var arm = Silhouette.Parts().First(p => p.Part == BodyPart.Arms).Shape.Bounds;
 
-        var mesh = Suits.Build();
-        var scale = Projector.FitScale(mesh, width, height);
-        // Тот же расчёт, что и при отрисовке: считать посадку отдельно значило
-        // бы проверять не то, что показывают человеку.
-        var centerY = Projector.GroundedCenterY(mesh, scale, height);
+        Assert.InRange(arm.Bottom, 112, 138);
+        Assert.True(arm.Top < 46, "рука должна начинаться у плеча");
+    }
 
-        for (var шаг = 0; шаг < 24; шаг++)
+    [Fact]
+    public void Свечение_приходится_на_грудь()
+    {
+        var torso = Silhouette.Parts().First(p => p.Part == BodyPart.Torso).Shape.Bounds;
+
+        Assert.True(Silhouette.Core.Y > torso.Top, "свечение выше корпуса");
+        Assert.True(Silhouette.Core.Y < torso.Top + torso.Height / 2,
+                    "свечение должно быть на груди, а не на животе");
+
+        Assert.Equal(0, Silhouette.Core.X);
+    }
+
+    [Fact]
+    public void Выноска_упирается_в_свою_часть()
+    {
+        // Линия, упирающаяся в пустоту рядом с фигурой, заставляет гадать, о
+        // чём речь. Точка привязки обязана лежать в пределах своей части.
+        foreach (var (part, shape) in Silhouette.Parts())
         {
-            var yaw = шаг * Math.PI / 12;
+            var anchor = Silhouette.Anchor(part);
+            var b = shape.Bounds;
 
-            foreach (var pitch in new[] { -0.55, 0.0, 0.55 })
-            {
-                var грани = Projector.Project(mesh, yaw, pitch, scale, width / 2, centerY);
-
-                foreach (var грань in грани)
-                {
-                    foreach (var (x, y) in грань.Points)
-                    {
-                        Assert.InRange(x, 0, width);
-                        Assert.InRange(y, 0, height);
-                    }
-                }
-            }
+            Assert.InRange(anchor.Y, b.Top, b.Bottom);
         }
     }
 
-    [Fact]
-    public void Пустая_модель_не_роняет_подбор_масштаба()
-    {
-        // Модель может оказаться пустой, если сборку фигуры когда-нибудь
-        // сломают. Делить на ноль при этом незачем.
-        var scale = Projector.FitScale(new Mesh(), 100, 100);
+    // ==================== Цвет ====================
 
-        Assert.True(scale > 0);
+    [Fact]
+    public void Нагрузка_меняет_цвет_тела()
+    {
+        // Ради этого фигура и нужна: состояние читается одним взглядом, без
+        // чтения цифр.
+        Assert.NotEqual(Palette.PlateFor(Substance.Body, 0),
+                        Palette.PlateFor(Substance.Body, 100));
+    }
+
+    [Fact]
+    public void Спокойная_машина_холодная_а_загруженная_тёплая()
+    {
+        var спокойно = Palette.PlateFor(Substance.Body, 5);
+        var загружено = Palette.PlateFor(Substance.Body, 95);
+
+        Assert.True(спокойно.B > спокойно.R, "на спокойной машине фигура холодная");
+        Assert.True(загружено.R > загружено.B, "на загруженной — тёплая");
+    }
+
+    [Fact]
+    public void Свечение_не_бликует()
+    {
+        // У светящегося нет поверхности, которая отражала бы чужой свет.
+        Assert.Equal(0, Palette.Gloss(Substance.Glow).Strength);
     }
 }

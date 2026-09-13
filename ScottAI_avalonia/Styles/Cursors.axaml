@@ -1,0 +1,52 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+        Рука над тем, на что можно нажать.
+
+        Windows оставляет над кнопкой обычную стрелку, и отличить нажимаемое от
+        подписи можно, только наведя и присмотревшись к подсветке. В лаунчере
+        это заметнее всего на боковых вкладках: они сделаны кнопками без рамок,
+        и стрелка над ними ничем не отличалась от стрелки над пустым местом
+        рядом.
+
+        Отдельным файлом, а не строками в App.axaml: там же объявлен значок в
+        области уведомлений, которому нужен рабочий стол, и проверке пришлось бы
+        поднимать его ради двух свойств.
+
+        Ползунок громкости намеренно не тронут: его тянут, а не нажимают, и рука
+        обещала бы не то движение.
+    -->
+    <Style Selector="Button">
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ToggleSwitch">
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="CheckBox">
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ComboBox">
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="ComboBoxItem">
+        <Setter Property="Cursor" Value="Hand" />
+    </Style>
+
+    <!--
+        Над недоступной кнопкой руки быть не должно: она обещает нажатие,
+        которого не произойдёт. Пока Scott думает над ответом, кнопка
+        «Отправить» выключена — там это сбивало бы с толку сильнее всего.
+    -->
+    <Style Selector="Button:disabled">
+        <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+    <Style Selector="ToggleSwitch:disabled">
+        <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+    <Style Selector="CheckBox:disabled">
+        <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+    <Style Selector="ComboBox:disabled">
+        <Setter Property="Cursor" Value="Arrow" />
+    </Style>
+</Styles>

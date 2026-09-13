@@ -53,11 +53,11 @@
                             <TextBlock Text="Система" HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding NavigateAutomationCommand}" Classes="nav" AutomationProperties.Name="Автомат."
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=automation}">
+                    <Button Command="{Binding NavigateProtocolsCommand}" Classes="nav" AutomationProperties.Name="Протоколы"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=protocols}">
                         <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="LightningBolt" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Автомат." HorizontalAlignment="Center" Classes="navlabel" />
+                            <mi:MaterialIcon Kind="FormatListNumbered" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Протоколы" HorizontalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateAnalyticsCommand}" Classes="nav" AutomationProperties.Name="Аналит."
@@ -503,7 +503,7 @@
             <Setter Property="RenderTransform" Value="scale(0.96)" />
         </Style>
 
-        <!-- Переключатель вкладок/режимов (используется в Автоматизации и Настройках) -->
+        <!-- Переключатель вкладок/режимов (используется в Настройках) -->
         <Style Selector="Button.tab">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />

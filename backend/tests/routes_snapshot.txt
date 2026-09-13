@@ -1,3 +1,4 @@
+DELETE /protocols/{name}
 GET /ai/memory-stats
 GET /ai/providers
 GET /ai/status
@@ -16,6 +17,7 @@ GET /api/version/installers
 GET /api/version/requirements
 GET /api/version/status
 GET /api/version/update-check
+GET /attachments/ability
 GET /audio/settings
 GET /code/instructions
 GET /code/tools
@@ -47,6 +49,8 @@ GET /profile
 GET /profiles/current
 GET /profiles/list
 GET /profiles/stats
+GET /protocols
+GET /protocols/{name}
 GET /reminders
 GET /settings/device
 GET /templates/categories
@@ -59,6 +63,7 @@ GET /versions/history
 GET /versions/items
 GET /versions/stats
 GET /voice/available
+PATCH /protocols/{name}
 POST /ai/clear-memory
 POST /ai/configure
 POST /ai/execute
@@ -68,6 +73,7 @@ POST /ai/toggle
 POST /analytics/export
 POST /api/version/update-settings
 POST /ask
+POST /attachments/ask
 POST /audio/quiet
 POST /audio/settings
 POST /chat
@@ -105,6 +111,7 @@ POST /ifttt/set-logic
 POST /ifttt/update-rule
 POST /internal/execute
 POST /kill-process
+POST /listen/say
 POST /listen/start
 POST /listen/stop
 POST /macros/cancel-recording
@@ -118,6 +125,8 @@ POST /profiles/create
 POST /profiles/delete
 POST /profiles/switch
 POST /profiles/update
+POST /protocols
+POST /protocols/{name}/run
 POST /reminders/add
 POST /reminders/cancel
 POST /reminders/clear

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Diagnostics;
@@ -224,21 +224,50 @@ public class BackendLauncher
     /// Лаунчер запускается из bin/Debug/net10.0, поэтому ищем вверх по дереву —
     /// тем же приёмом, которым EnvConfig находит .env.
     /// </summary>
-    internal static string? FindBackendDirectory()
+    internal static string? FindBackendDirectory(string? startFrom = null, bool? macOS = null)
     {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        // Признак системы можно задать явно — иначе ветку для macOS нельзя
+        // проверить ниоткуда, кроме самого Mac, а пишется она как раз не на нём.
+        var внутриБандла = macOS ?? OperatingSystem.IsMacOS();
+
+        var dir = new DirectoryInfo(startFrom ?? AppContext.BaseDirectory);
 
         while (dir != null)
         {
-            var candidate = Path.Combine(dir.FullName, "backend");
-            if (File.Exists(Path.Combine(candidate, "main.py")))
+            foreach (var candidate in BackendCandidates(dir.FullName, внутриБандла))
             {
-                return candidate;
+                if (File.Exists(Path.Combine(candidate, "main.py")))
+                {
+                    return candidate;
+                }
             }
             dir = dir.Parent;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Где искать backend на каждом уровне вверх от программы.
+    ///
+    /// На Windows и Linux он лежит просто рядом. На macOS программа — это не
+    /// файл, а папка-бандл со строгим устройством: исполняемый файл в
+    /// Contents/MacOS, всё остальное в Contents/Resources. Класть backend
+    /// рядом с исполняемым файлом там нельзя — подпись бандла считает
+    /// посторонние файлы в MacOS/ нарушением, и система откажется запускать
+    /// программу.
+    ///
+    /// Поэтому на пути наверх заглядываем ещё и в Resources соседнего уровня:
+    /// из Contents/MacOS путь ведёт в Contents, а оттуда — в Resources/backend.
+    /// </summary>
+    internal static IEnumerable<string> BackendCandidates(string level, bool macOS)
+    {
+        yield return Path.Combine(level, "backend");
+
+        if (macOS)
+        {
+            yield return Path.Combine(level, "Resources", "backend");
+        }
     }
 
     /// <summary>
@@ -306,18 +335,36 @@ public class BackendLauncher
         // проверкам: подсунуть им настоящее дерево каталогов иначе нечем.
         var dir = new DirectoryInfo(startFrom ?? AppContext.BaseDirectory);
 
+        var внутри = OperatingSystem.IsWindows() ? "python.exe" : Path.Combine("bin", "python3");
+
         while (dir != null)
         {
-            var candidate = Path.Combine(dir.FullName, "runtime",
-                OperatingSystem.IsWindows() ? "python.exe" : "bin/python3");
-            if (File.Exists(candidate))
+            foreach (var корень in RuntimeRoots(dir.FullName))
             {
-                return candidate;
+                var candidate = Path.Combine(корень, внутри);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
             }
             dir = dir.Parent;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Где может лежать положенный рядом Python — с той же поправкой на
+    /// устройство бандла macOS, что и для backend.
+    /// </summary>
+    private static IEnumerable<string> RuntimeRoots(string level)
+    {
+        yield return Path.Combine(level, "runtime");
+
+        if (OperatingSystem.IsMacOS())
+        {
+            yield return Path.Combine(level, "Resources", "runtime");
+        }
     }
 
     internal static bool Probe(string file, string args)

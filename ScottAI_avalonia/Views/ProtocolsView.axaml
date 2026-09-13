@@ -1,0 +1,101 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:myconv="using:ScottAI.Avalonia.Converters"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             x:DataType="vm:ProtocolsViewModel"
+             x:Class="ScottAI.Avalonia.Views.ProtocolsView">
+    <Grid Margin="32" RowDefinitions="Auto,Auto,Auto,Auto,*">
+        <TextBlock Grid.Row="0" Text="Протоколы" FontSize="24" FontWeight="Bold"
+                   Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,6" />
+
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,4">
+            <TextBlock Grid.Column="0" Text="Несколько шагов одной фразой: «протокол рабочий день» — и Scott выполнит их по порядку."
+                       Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                <Button Content="Обновить" Command="{Binding RefreshCommand}" Classes="soft" />
+                <Button Content="Новый протокол" Command="{Binding ToggleFormCommand}" Classes="accent" />
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="2" Margin="0,10,0,0" Background="{DynamicResource Danger}" Opacity="0.15"
+                CornerRadius="8" Padding="12,8"
+                IsVisible="{Binding Error, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+            <TextBlock Text="{Binding Error}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
+        </Border>
+
+        <Border Grid.Row="3" Margin="0,14,0,0" Background="{DynamicResource BgSurface}"
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="12" Padding="18"
+                IsVisible="{Binding ShowForm}">
+            <StackPanel Spacing="10">
+                <TextBox Text="{Binding NewName}" PlaceholderText="Имя протокола, например «рабочий день»" />
+
+                <TextBlock Text="Шаги — по одному на строку, теми же словами, какими вы сказали бы их голосом"
+                           Foreground="{DynamicResource TextMuted}" FontSize="12" />
+                <TextBox Text="{Binding NewSteps}" AcceptsReturn="True" MinHeight="120"
+                         TextWrapping="Wrap" VerticalContentAlignment="Top"
+                         PlaceholderText="открой браузер&#x0a;открой редактор кода&#x0a;приглуши звук" />
+
+                <TextBlock Text="Чем ещё его звать — по одной фразе на строку (необязательно)"
+                           Foreground="{DynamicResource TextMuted}" FontSize="12" />
+                <TextBox Text="{Binding NewPhrases}" AcceptsReturn="True" MinHeight="56"
+                         TextWrapping="Wrap" VerticalContentAlignment="Top"
+                         PlaceholderText="за работу&#x0a;начали" />
+
+                <TextBox Text="{Binding NewDescription}" PlaceholderText="Описание (необязательно)" />
+
+                <Button Content="Сохранить" Command="{Binding AddCommand}"
+                        HorizontalAlignment="Right" Classes="accent" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="4" Margin="0,14,0,0">
+            <Panel>
+                <ItemsControl Name="ProtocolsList" ItemsSource="{Binding Protocols}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:Protocol">
+                            <Border Classes="card" Margin="0,4" Background="{DynamicResource BgSurface}"
+                                    BorderBrush="{DynamicResource BorderColor}" BorderThickness="1" CornerRadius="10">
+                                <Grid ColumnDefinitions="*,Auto,Auto" Margin="16,12">
+                                    <StackPanel Grid.Column="0" Spacing="3">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimary}" />
+                                        <TextBlock Text="{Binding StepsLine}" Foreground="{DynamicResource TextSecondary}"
+                                                   FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding CallHint}" Foreground="{DynamicResource TextMuted}"
+                                                   FontSize="11" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Counter}" Foreground="{DynamicResource TextMuted}"
+                                                   FontSize="11" />
+                                    </StackPanel>
+
+                                    <Button Grid.Column="1" Content="Запустить" Classes="soft" Margin="0,0,8,0"
+                                            VerticalAlignment="Center"
+                                            Command="{Binding $parent[ItemsControl].((vm:ProtocolsViewModel)DataContext).RunCommand}"
+                                            CommandParameter="{Binding}" />
+
+                                    <Button Grid.Column="2" Content="Удалить" Classes="danger-text"
+                                            VerticalAlignment="Center"
+                                            Command="{Binding $parent[ItemsControl].((vm:ProtocolsViewModel)DataContext).DeleteCommand}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <StackPanel IsVisible="{Binding Protocols.Count, Converter={x:Static myconv:IsZeroConverter.Instance}}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" Margin="0,50">
+                    <mi:MaterialIcon Kind="FormatListNumbered" Width="38" Height="38"
+                                     Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Пока нет ни одного протокола" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Center" />
+                    <TextBlock Text="Протокол — это несколько шагов под одним именем: «открой браузер», «открой редактор», «приглуши звук»."
+                               FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               HorizontalAlignment="Center" TextWrapping="Wrap" MaxWidth="420" TextAlignment="Center" />
+                </StackPanel>
+            </Panel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

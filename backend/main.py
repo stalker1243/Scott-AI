@@ -20,6 +20,20 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+# Одно имя на один модуль.
+#
+# При запуске «python main.py» этот файл выполняется под именем __main__, но
+# соседи обращаются к нему как «import main» — и Python честно выполняет его
+# ВТОРОЙ раз, заводя отдельный набор всех глобальных переменных. Снаружи это
+# выглядело как «Scott слышит, но молчит»: слушателя регистрировала одна копия,
+# а главный цикл поднимался в другой, так что _main_loop в обработчике навсегда
+# оставался None и каждая команда молча терялась.
+#
+# Псевдоним ставится до первого импорта соседей, чтобы «import main» вернул
+# уже выполняющуюся копию.
+if __name__ == "__main__":
+    sys.modules.setdefault("main", sys.modules["__main__"])
+
 
 def _ensure_data_dir(base: str) -> str:
     """
@@ -65,8 +79,15 @@ load_dotenv()
 from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException, Form, Request, Depends
 from security import require_scott_token, check_rate_limit
 from timing import stage as timing_stage, snapshot as timing_snapshot, reset as timing_reset
-from speech_text import shorten_for_speech
+from speech_text import shorten_for_speech, THINKING_CUES
 import understanding
+
+import protocols as protocols_module
+# Под своим именем: обработчик эндпоинта /speech_to_text называется так же
+# и затирает модуль при определении. Распознавание из-за этого молча уходило
+# на запасной путь через сеть, а в логе стояло «'function' object has no
+# attribute 'Recognizer'».
+import speech_to_text as stt_engine
 from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
@@ -304,14 +325,8 @@ def _warmup_silero_in_thread(barrier: threading.Barrier) -> None:
 
 
 def _warmup_whisper_sync() -> None:
-    """Загрузить Whisper и прогнать через него секунду тишины."""
-    import numpy as np
-    model = _get_whisper_model()
-    model.transcribe(
-        np.zeros(16000, dtype=np.float32),
-        language="ru",
-        fp16=(_whisper_device == "cuda"),
-    )
+    """Загрузить распознаватель и прогнать через него секунду тишины."""
+    _get_whisper_model().warmup()
 
 
 def _watch_parent() -> None:
@@ -600,6 +615,26 @@ try:
 except ImportError as e:
     print(f"⚠️ Endpoints работы с кодом не подключены: {e}")
 
+# Протоколы: именованные последовательности шагов.
+try:
+    try:
+        from .protocol_endpoints import router as protocol_router
+    except ImportError:
+        from protocol_endpoints import router as protocol_router
+    app.include_router(protocol_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints протоколов не подключены: {e}")
+
+# Разбор прикреплённых картинок и документов.
+try:
+    try:
+        from .attachment_endpoints import router as attachment_router
+    except ImportError:
+        from attachment_endpoints import router as attachment_router
+    app.include_router(attachment_router)
+except ImportError as e:
+    print(f"⚠️ Endpoints вложений не подключены: {e}")
+
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
 try:
@@ -780,8 +815,24 @@ class ScottAI:
                     intent_engine=fast_intent_engine,
                     parser=command_parser,
                     answerer=question_answerer,
+                    find_protocol=(scott_runtime.protocols.match
+                                   if scott_runtime.protocols else None),
                 )
             print(f"🔎 Решение: {decision.kind} — {decision.reason}")
+
+            # ---------------------------------------------------- протокол
+            if decision.kind == 'protocol':
+                result = await self.run_protocol(
+                    decision.protocol, depth=getattr(self, '_protocol_depth', 0))
+                response = result.summary()
+                knowledge_base.add_conversation(text, response)
+                print(f"🤖 Scott: {response}")
+                return {
+                    "type": "protocol",
+                    "protocol": decision.protocol.name,
+                    "response": response,
+                    "quiet_mode": quiet_mode,
+                }
 
             # ---------------------------------------------------- сайты
             if decision.kind == 'web':
@@ -837,6 +888,38 @@ class ScottAI:
                 "response": error_msg,
                 "error": str(e)
             }
+
+    async def run_protocol(self, protocol, depth: int = 0):
+        """
+        Выполнить протокол: каждый шаг проходит тем же путём, что и фраза.
+
+        Именно поэтому шаги записаны словами, а не названиями действий:
+        протоколу достаётся весь уже отлаженный разбор, и всё, что Scott умеет
+        по голосу, работает в протоколе с первого дня.
+
+        Глубина считается от вложенности: шаг «запусти протокол ...» — обычная
+        фраза, и ничто не мешает написать её внутри самого протокола. Без
+        предела это был бы бесконечный цикл.
+        """
+        async def выполнить(шаг: str):
+            self._protocol_depth = depth + 1
+            try:
+                return await self._process_command_impl(шаг, quiet_mode=True)
+            finally:
+                self._protocol_depth = depth
+
+        result = await protocols_module.run_async(
+            protocol,
+            execute=выполнить,
+            sleep=asyncio.sleep,
+            depth=depth,
+        )
+
+        if result.ok and scott_runtime.protocols:
+            scott_runtime.protocols.mark_run(protocol)
+
+        print(f"📋 {result.summary()}")
+        return result
 
     async def _answer_as_question(self, text: str, quiet_mode: bool, decision,
                                   by_voice: bool = False) -> Dict:
@@ -1143,6 +1226,12 @@ class ScottAI:
 # Инициализируем Scott AI
 scott_ai = ScottAI()
 
+# Протоколы умеют хранить себя сами, но не умеют выполнять шаги: шаг — обычная
+# фраза, и разбирает её ассистент. Отдаём ему эту работу той же дорогой, что
+# голос и слушатель, — иначе роутеру протоколов пришлось бы импортировать
+# main.py, а импорты замкнулись бы в кольцо.
+scott_runtime.set_protocol_runner(scott_ai.run_protocol)
+
 
 # ============= ПРОСЛУШИВАНИЕ МИКРОФОНА =============
 # Scott слушает сам и выполняет только то, что сказано после его имени.
@@ -1167,8 +1256,7 @@ def _listener_transcribe(audio) -> str:
     """
     model = _get_whisper_model()
     with timing_stage("01.распознавание.whisper"):
-        result = model.transcribe(audio, language="ru", fp16=(_whisper_device == "cuda"))
-    return (result.get("text") or "").strip()
+        return model.transcribe(audio, language="ru")
 
 
 # Через сколько секунд молчания Scott подаёт голос. Меньше — и короткая
@@ -1177,8 +1265,6 @@ def _listener_transcribe(audio) -> str:
 THINKING_CUE_AFTER_SECONDS = 2.5
 
 # Варианты нарочно короткие: это не ответ, а знак «слышу, работаю».
-THINKING_CUES = ("Секунду", "Минуту", "Сейчас посмотрю")
-
 _thinking_cue_index = 0
 
 
@@ -1240,6 +1326,13 @@ def _listener_handle(text: str) -> None:
     нельзя дольше разумного: пока поток занят, следующая фраза не разбирается.
     """
     if _main_loop is None:
+        # Состояние, которое снаружи ни на что не похоже: Scott слышит,
+        # распознаёт, узнаёт своё имя — и молчит. Теперь об этом видно и в
+        # состоянии прослушивания, а не только в логе, куда никто не смотрит.
+        listening = scott_runtime.listener
+        if listening is not None:
+            listening.stats.last_dispatch = "цикл не готов"
+            listening.stats.last_error = "главный цикл ещё не поднят"
         print("⚠️ Главный цикл ещё не готов — команда пропущена")
         return
 
@@ -1518,30 +1611,28 @@ scott_device_settings.register_reset_hook(_unload_whisper_model)
 
 def _get_whisper_model():
     """
-    Загрузить модель Whisper один раз и переиспользовать между запросами —
-    раньше whisper.load_model() вызывался заново на КАЖДОЕ голосовое сообщение
-    (лишние секунды на каждый запрос, особенно заметно в hands-free режиме,
-    где распознавание идёт часто). Имя модели берётся из .env (WHISPER_MODEL).
+    Загрузить распознаватель один раз и переиспользовать между запросами.
+
+    Раньше whisper.load_model() вызывался заново на КАЖДОЕ голосовое сообщение
+    — лишние секунды на каждый запрос, особенно заметно там, где Scott слушает
+    непрерывно.
+
+    Какую из двух реализаций Whisper брать, решает stt_engine: быстрая
+    заметно шустрее, но тянет за собой CTranslate2 и свой формат модели, и
+    если её нет, Scott должен продолжать слышать.
     """
     global _whisper_model_cache, _whisper_device
+
     if _whisper_model_cache is None:
-        import whisper
         model_name = os.getenv("WHISPER_MODEL", "small")
         device = _resolve_whisper_device()
-        print(f"🔊 Загружаю модель Whisper «{model_name}» на {device.upper()} (один раз, кэшируется)...")
-        try:
-            _whisper_model_cache = whisper.load_model(model_name, device=device)
-            _whisper_device = device
-        except Exception as e:
-            # Не хватило видеопамяти, битый драйвер и т.п. — распознавание не
-            # должно отваливаться целиком, спокойно откатываемся на процессор.
-            if device != "cpu":
-                print(f"⚠️ Не удалось загрузить модель на {device.upper()} ({e}); откатываюсь на CPU")
-                _whisper_model_cache = whisper.load_model(model_name, device="cpu")
-                _whisper_device = "cpu"
-            else:
-                raise
-        print(f"✅ Модель Whisper «{model_name}» загружена на {_whisper_device.upper()}")
+
+        recognizer = stt_engine.Recognizer(model_name, device)
+        recognizer.load()
+
+        _whisper_model_cache = recognizer
+        _whisper_device = recognizer.device
+
     return _whisper_model_cache
 
 
@@ -1550,10 +1641,7 @@ def _transcribe_audio_file(file_path: str) -> str:
     # Попробуем Whisper, если он доступен
     try:
         model = _get_whisper_model()
-        # fp16 имеет смысл только на видеокарте; на CPU он не поддерживается и
-        # whisper иначе сыплет предупреждением на каждое распознавание.
-        result = model.transcribe(file_path, language="ru", fp16=(_whisper_device == "cuda"))
-        text = result.get("text", "").strip()
+        text = model.transcribe(file_path, language="ru")
         if text:
             print(f"✅ Whisper распознал: {text}")
         return text

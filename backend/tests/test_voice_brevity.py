@@ -10,8 +10,9 @@
 секунд. Поэтому краткость нужна только вслух, и вводится она в двух местах.
 
 Главное — попросить у модели сразу короткий ответ, когда вопрос задан голосом:
-тогда он и короткий, и целый. Обрезка остаётся страховкой на случай, когда
-модель просьбу не выполнила.
+тогда он и короткий, и целый. Обрезка по предложениям осталась только в речи,
+перед самим произнесением, и сообщает человеку, где остальное. Из самого ответа
+ничего не вырезается: текстом человек должен видеть всё.
 """
 
 import pytest
@@ -154,5 +155,74 @@ def test_brief_reaches_the_model(monkeypatch):
     ответ = отвечающий._ai_fallback("что такое фотосинтез", "normal", brief=True)
 
     assert полученные.get("brief") is True, "признак не дошёл до модели"
-    # Голосом — одно предложение, что бы ни стояло в подробности.
-    assert ответ == "Первое предложение."
+    # Что модель ответила, то и возвращаем. Длину речи ограничивает
+    # shorten_for_speech перед самим произнесением — там есть приписка про
+    # продолжение в чате, а здесь её нет, и обрезок выглядел бы обрывом на
+    # полуслове.
+    assert ответ == "Первое предложение. Второе предложение. Третье предложение."
+
+
+def test_chat_answer_is_not_cut(monkeypatch):
+    """
+    В чате ответ не обрезается.
+
+    Жалоба, названная дважды: Scott рассказывал далеко не всё важное. Причина
+    была не в модели — она писала развёрнуто, а готовый ответ обрезался по трём
+    первым предложениям, вместе со списками и примерами, которые шли дальше.
+    """
+    try:
+        import question_answerer as qa_module
+    except ImportError:  # pragma: no cover
+        from backend import question_answerer as qa_module
+
+    длинный = " ".join(f"Предложение номер {n}." for n in range(1, 13))
+    полученные = {}
+
+    class ЗаглушкаМодели:
+        enabled = True
+
+        def answer_question(self, question, brief=False):
+            полученные["brief"] = brief
+            return длинный
+
+    import sys
+    monkeypatch.setitem(sys.modules, "intelligent_answerer", ЗаглушкаМодели())
+    sys.modules["intelligent_answerer"].intelligent_answerer = ЗаглушкаМодели()
+
+    отвечающий = qa_module.QuestionAnswerer()
+    ответ = отвечающий._ai_fallback("что такое фотосинтез", "normal", brief=False)
+
+    assert ответ == длинный
+    assert полученные.get("brief") is False, "в чате краткость не нужна"
+
+
+def test_asking_for_short_answer_reaches_the_model(monkeypatch):
+    """
+    «Кратко», сказанное словами, доходит до запроса.
+
+    Раньше это делалось ножницами — бралось первое предложение развёрнутого
+    ответа, и оно часто оказывалось вступлением вроде «Хороший вопрос!».
+    Просьба к модели даёт короткий и целый ответ.
+    """
+    try:
+        import question_answerer as qa_module
+    except ImportError:  # pragma: no cover
+        from backend import question_answerer as qa_module
+
+    полученные = {}
+
+    class ЗаглушкаМодели:
+        enabled = True
+
+        def answer_question(self, question, brief=False):
+            полученные["brief"] = brief
+            return "Коротко и по делу."
+
+    import sys
+    monkeypatch.setitem(sys.modules, "intelligent_answerer", ЗаглушкаМодели())
+    sys.modules["intelligent_answerer"].intelligent_answerer = ЗаглушкаМодели()
+
+    отвечающий = qa_module.QuestionAnswerer()
+    отвечающий._ai_fallback("что такое фотосинтез кратко", "short", brief=False)
+
+    assert полученные.get("brief") is True

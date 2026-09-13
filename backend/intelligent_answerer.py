@@ -82,7 +82,113 @@ STATIC_PROVIDER_MODELS = {
         {"id": "deepseek-chat", "note": "Основная модель — быстрая, недорогая"},
         {"id": "deepseek-reasoner", "note": "С цепочкой рассуждений — сильнее в логике/математике, медленнее"},
     ],
+    # Здесь только то, в чём есть уверенность. Живой список Anthropic отдаёт
+    # сам, и он всегда точнее: модели появляются и снимаются чаще, чем выходят
+    # версии Scott.
+    "Anthropic": [
+        {"id": "claude-sonnet-5", "note": "Обычный выбор: сильная и не самая дорогая"},
+        {"id": "claude-opus-5", "note": "Самая способная, дороже и медленнее"},
+        {"id": "claude-haiku-4-5-20251001", "note": "Быстрая и дешёвая, для простого"},
+    ],
+    # У шлюза каталог живой по определению — здесь пусто не случайно: любой
+    # статический список устареет раньше, чем человек дочитает его до конца.
+    "OpenRouter": [
+        {"id": "anthropic/claude-sonnet-5", "note": "Claude через шлюз"},
+        {"id": "openai/gpt-4o", "note": "GPT через шлюз"},
+        {"id": "google/gemini-2.0-flash-001", "note": "Gemini через шлюз"},
+        {"id": "meta-llama/llama-3.3-70b-instruct", "note": "Llama через шлюз"},
+    ],
 }
+
+# Шлюзы, у которых список моделей запрашивается живым запросом. У каждого свой
+# адрес и свой способ назвать ключ.
+ANTHROPIC_BASE = "https://api.anthropic.com/v1"
+ANTHROPIC_VERSION = "2023-06-01"
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+
+def list_anthropic_models(api_key: str) -> List[Dict]:
+    """
+    Живой список моделей Claude.
+
+    Anthropic отдаёт его одним запросом и без лишнего: там только модели для
+    разговора, фильтровать нечего — в отличие от OpenAI, где в общий список
+    попадают и распознавание речи, и рисование.
+    """
+    if not REQUESTS_AVAILABLE:
+        return []
+
+    try:
+        response = requests.get(
+            f"{ANTHROPIC_BASE}/models",
+            headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+            timeout=10,
+        )
+        response.raise_for_status()
+
+        return [
+            {"id": item["id"], "note": item.get("display_name", "") or "Anthropic"}
+            for item in response.json().get("data", [])
+            if item.get("id")
+        ]
+    except Exception as e:
+        print(f"⚠️ Не удалось получить список моделей Anthropic: {e}")
+        return []
+
+
+def list_openrouter_models(api_key: str = "") -> List[Dict]:
+    """
+    Живой список моделей шлюза — сотни строк от разных поставщиков.
+
+    Ключ здесь не обязателен: каталог у шлюза открытый, и показать его можно
+    ещё до того, как человек ввёл ключ. Это ровно тот случай, ради которого
+    статические каталоги и заводились, — только здесь он решается честно.
+
+    Бесплатные модели вынесены наверх: с них разумно начинать знакомство, а в
+    списке на сотни строк их иначе не найти.
+    """
+    if not REQUESTS_AVAILABLE:
+        return []
+
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        response = requests.get(f"{OPENROUTER_BASE}/models", headers=headers, timeout=15)
+        response.raise_for_status()
+
+        модели = []
+        for item in response.json().get("data", []):
+            ident = item.get("id")
+            if not ident:
+                continue
+
+            # Шлюз отдаёт не только разговорные модели: там же рисование,
+            # музыка и распознавание речи. Для Scott годятся только те, что
+            # принимают текст и отвечают текстом, — остальные в списке выбора
+            # означали бы обещание, которое некому выполнить.
+            modality = (item.get("architecture") or {}).get("modality", "")
+            if modality and not modality.endswith("->text"):
+                continue
+
+            цена = (item.get("pricing") or {}).get("prompt")
+            бесплатно = цена in ("0", 0, "0.0")
+
+            модели.append({
+                "id": ident,
+                "note": item.get("name") or "OpenRouter",
+                "free": бесплатно,
+            })
+
+        модели.sort(key=lambda m: (not m.get("free"), m["id"]))
+        return модели
+    except Exception as e:
+        print(f"⚠️ Не удалось получить список моделей OpenRouter: {e}")
+        return []
+
+try:
+    from . import key_ring as key_ring_module
+except ImportError:
+    import key_ring as key_ring_module
+
 
 AI_CONFIG_PATH = Path("data/ai_config.json")
 
@@ -114,6 +220,41 @@ def _looks_like_bad_key(reason: str) -> bool:
     ))
 
 
+def first_message(payload: dict) -> str:
+    """
+    Достать текст ответа из обычного для OpenAI устройства ответа.
+
+    Каждый шаг здесь защищён, и это не перестраховка. Живая проверка показала:
+    часть бесплатных моделей отвечает кодом 200, но кладёт в content пустоту —
+    null вместо текста. Прямое обращение по цепочке падало с «NoneType has no
+    attribute strip», и человек видел внутреннюю ошибку Scott вместо честного
+    «модель не ответила».
+    """
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+
+    message = choices[0].get("message") or {}
+    return (message.get("content") or "").strip()
+
+
+def raise_with_body(response) -> None:
+    """
+    Проверить ответ и, если это отказ, бросить исключение с телом внутри.
+
+    `raise_for_status` кладёт в текст исключения только код и адрес, а
+    объяснение сервис пишет в теле. Так терялось самое нужное: на нулевом
+    балансе в теле прямым текстом стояло «credit balance is too low», а
+    человек видел «400 Client Error» и шёл перепроверять ключ.
+    """
+    if response.status_code < 400:
+        return
+
+    body = (response.text or "").strip()
+    raise RuntimeError(f"{response.status_code}: {body[:500]}" if body
+                       else f"{response.status_code}")
+
+
 def explain_connect_error(provider: str, model: str, reason: str) -> str:
     """
     Перевести отказ провайдера на человеческий язык.
@@ -132,6 +273,18 @@ def explain_connect_error(provider: str, model: str, reason: str) -> str:
                                          "name or service", "getaddrinfo", "ssl")):
         return (f"Не удалось связаться с {provider}. Проверьте интернет; "
                 "в некоторых странах доступ к этому сервису закрыт и нужен VPN")
+
+    # Кончились деньги. Отличать этот случай от прочих важно: ключ здесь
+    # верный, модель верная, интернет работает, и человек, читающий «не удалось
+    # подключиться», пойдёт перепроверять ключ вместо того, чтобы заглянуть в
+    # счёт. У Anthropic и OpenAI бесплатного тарифа нет вовсе, а у DeepSeek
+    # деньги просто кончаются.
+    if any(marker in text for marker in (
+            "credit balance", "insufficient", "quota", "payment required",
+            "402", "billing", "exceeded your current quota")):
+        return (f"У {provider} закончились средства на счету. Ключ рабочий — "
+                "пополните баланс в личном кабинете или выберите другого "
+                "провайдера: у OpenRouter есть бесплатные модели")
 
     if any(marker in text for marker in ("model", "does not exist", "not found", "404")):
         return (f"Модель «{model}» недоступна этому ключу — выберите другую в списке")
@@ -166,6 +319,19 @@ class ConversationMemory:
                 print(f"⚠️ Ошибка загрузки истории: {e}")
                 self.conversations = []
     
+    def drop_unanswered(self) -> None:
+        """
+        Убрать последний вопрос, на который не ответили.
+
+        Вопрос кладётся в память до запроса к модели, ответ — после удачного.
+        Когда запрос не удался, вопрос остаётся висеть, и со следующим их
+        оказывается два подряд. Anthropic такую переписку отвергает целиком:
+        два сообщения от человека без ответа между ними — нарушение формата.
+        Одна неудача ломала бы все последующие запросы, уже исправные.
+        """
+        while self.conversations and self.conversations[-1].get("role") == "user":
+            self.conversations.pop()
+
     def add_message(self, role: str, content: str):
         """Добавить сообщение в память"""
         message = {
@@ -228,6 +394,21 @@ BRIEF_SYSTEM_PROMPT = """Ты Scott AI — голосовой помощник. 
 BRIEF_MAX_TOKENS = 160
 
 
+# Провайдеры, чьи модели умеют смотреть картинки.
+#
+# Список именно провайдеров, а не моделей: у Anthropic и OpenAI зрение есть у
+# всех нынешних разговорных моделей, а у шлюза оно зависит от выбранной — но
+# проверить это заранее нельзя, и отказывать наперёд неправильно.
+#
+# Groq и DeepSeek сюда не входят: их модели работают только с текстом.
+VISION_PROVIDERS = ("Anthropic", "OpenAI", "OpenRouter")
+
+
+def provider_sees_images(provider: str) -> bool:
+    """Умеет ли провайдер принимать картинки вместе с вопросом."""
+    return provider in VISION_PROVIDERS
+
+
 class IntelligentAnswerer:
     """Полнофункциональный ИИ-ассистент на Groq + OpenAI fallback"""
     
@@ -252,7 +433,30 @@ class IntelligentAnswerer:
             "Groq": os.getenv("GROQ_API_KEY"),
             "DeepSeek": os.getenv("DEEPSEEK_API_KEY"),
             "OpenAI": os.getenv("OPENAI_API_KEY"),
+            # Оба имени, и это не прихоть. Компания называется Anthropic, а
+            # модель — Claude, и человек, заводящий ключ, пишет то, что видит
+            # у себя в личном кабинете. Ровно на этом ключ однажды и не
+            # подхватился: он лежал в .env под именем CLAUDE_API_KEY, а Scott
+            # искал ANTHROPIC_API_KEY и молча не находил ничего.
+            "Anthropic": os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"),
+            "OpenRouter": os.getenv("OPENROUTER_API_KEY"),
         }
+
+        # Связка ключей шлюза.
+        #
+        # Бесплатные модели ограничены числом запросов, и один ключ упирается
+        # в предел быстро. Запасные подхватываются сами: иначе человеку
+        # пришлось бы править настройки и перезапускать backend посреди
+        # работы, хотя он всего лишь задал вопрос.
+        self.openrouter_ring = key_ring_module.KeyRing([
+            os.getenv("OPENROUTER_API_KEY") or "",
+            os.getenv("OPENROUTER_API_KEY_2") or "",
+            os.getenv("OPENROUTER_API_KEY_3") or "",
+        ])
+
+        if len(self.openrouter_ring) > 1:
+            print(f"🔑 Ключей OpenRouter: {len(self.openrouter_ring)} "
+                  "(запасные подхватятся при исчерпании предела)")
         # Ключи, явно введённые пользователем через Настройки (в приоритете над .env)
         self.custom_keys: Dict[str, str] = {}
 
@@ -286,6 +490,14 @@ class IntelligentAnswerer:
 
         if not connected and self.env_keys["DeepSeek"] and REQUESTS_AVAILABLE:
             connected = self._connect_provider("DeepSeek", "deepseek-chat", self.env_keys["DeepSeek"])
+
+        if not connected and self.env_keys["Anthropic"] and REQUESTS_AVAILABLE:
+            connected = self._connect_provider(
+                "Anthropic", "claude-sonnet-5", self.env_keys["Anthropic"])
+
+        if not connected and self.env_keys["OpenRouter"] and REQUESTS_AVAILABLE:
+            connected = self._connect_provider(
+                "OpenRouter", "anthropic/claude-sonnet-5", self.env_keys["OpenRouter"])
 
         if not connected and self.env_keys["OpenAI"] and OPENAI_AVAILABLE:
             connected = self._connect_provider("OpenAI", "gpt-3.5-turbo", self.env_keys["OpenAI"])
@@ -388,6 +600,52 @@ class IntelligentAnswerer:
                 self.api_provider = "DeepSeek"
                 self.model = model
                 print(f"✅ DeepSeek API подключен (модель: {self.model})")
+            elif provider == "Anthropic":
+                if not REQUESTS_AVAILABLE:
+                    self.last_connect_error = "библиотека requests не установлена"
+                    return False
+
+                # Ключ проверяется сразу, списком моделей: запрос бесплатный, а
+                # узнать об опечатке в Настройках гораздо лучше, чем при первом
+                # заданном вопросе.
+                #
+                # Денег на счету он не проверяет — это выяснится только
+                # настоящим запросом. Зато когда выяснится, объяснение будет
+                # внятным, а не «400 Client Error».
+                probe = requests.get(
+                    f"{ANTHROPIC_BASE}/models",
+                    headers={"x-api-key": api_key, "anthropic-version": ANTHROPIC_VERSION},
+                    timeout=15,
+                )
+
+                if probe.status_code != 200:
+                    self.last_connect_error = explain_connect_error(
+                        "Anthropic", model, probe.text)
+                    print(f"⚠️ {self.last_connect_error}")
+                    return False
+
+                self.client = {"api_key": api_key, "base_url": ANTHROPIC_BASE}
+                self.enabled = True
+                self.api_provider = "Anthropic"
+                self.model = model
+                print(f"✅ Anthropic API подключен (модель: {self.model})")
+            elif provider == "OpenRouter":
+                if not REQUESTS_AVAILABLE:
+                    self.last_connect_error = "библиотека requests не установлена"
+                    return False
+
+                # Ключ, введённый руками в Настройках, встаёт первым в связке:
+                # человек только что его выбрал, и пробовать сначала прежние
+                # было бы странно.
+                if api_key not in self.openrouter_ring.all:
+                    self.openrouter_ring = key_ring_module.KeyRing(
+                        [api_key] + self.openrouter_ring.all)
+
+                self.client = {"api_key": api_key, "base_url": OPENROUTER_BASE}
+                self.enabled = True
+                self.api_provider = "OpenRouter"
+                self.model = model
+                print(f"✅ OpenRouter подключен (модель: {self.model})")
             elif provider == "OpenAI":
                 if not OPENAI_AVAILABLE:
                     self.last_connect_error = "библиотека openai не установлена"
@@ -540,14 +798,34 @@ class IntelligentAnswerer:
         provider_notes = {
             "OpenAI": "Высокое качество ответов, платно",
             "DeepSeek": "Сильна в логике/математике, недорого",
+            "Anthropic": "Claude: сильные ответы на русском, платно",
+            "OpenRouter": "Один ключ — сотни моделей разных поставщиков",
         }
+
+        # Провайдеры, у которых список моделей можно спросить живым запросом.
+        # Он всегда точнее статического: модели появляются и снимаются чаще,
+        # чем выходят версии Scott, и на этом уже обжигались — захардкоженная
+        # модель Groq оказалась снята с поддержки, и Scott замолчал.
+        live_lists = {
+            "Anthropic": lambda key: list_anthropic_models(key),
+
+            # У шлюза каталог открытый: его видно и без ключа, то есть до того,
+            # как человек что-либо ввёл. Это ровно тот случай, ради которого
+            # заводились статические каталоги, — здесь он решается честно.
+            "OpenRouter": lambda key: list_openrouter_models(key or ""),
+        }
+
         for provider_id, models in STATIC_PROVIDER_MODELS.items():
             key = self.custom_keys.get(provider_id) or self.env_keys.get(provider_id)
+
+            fetch = live_lists.get(provider_id)
+            live = fetch(key) if fetch and (key or provider_id == "OpenRouter") else []
+
             providers.append({
                 "id": provider_id,
                 "note": provider_notes.get(provider_id, ""),
                 "configured": bool(key),
-                "models": models,
+                "models": live or models,
             })
 
         return providers
@@ -623,11 +901,54 @@ class IntelligentAnswerer:
                     },
                     timeout=30,
                 )
-                response.raise_for_status()
-                data = response.json()
-                answer = data["choices"][0]["message"]["content"].strip()
+                raise_with_body(response)
+                answer = first_message(response.json())
                 print(f"✅ DeepSeek ответ получен ({len(answer)} символов)")
             
+            # Claude: у него другой разговорный формат.
+            elif self.api_provider == "Anthropic":
+                print(f"🟣 Anthropic API запрос ({self.model})...")
+
+                # Системная подсказка идёт отдельным полем, а не первым
+                # сообщением: Anthropic роли "system" в списке сообщений не
+                # принимает и отвечает отказом на весь запрос.
+                беседа = [m for m in messages if m["role"] != "system"]
+
+                response = requests.post(
+                    f"{ANTHROPIC_BASE}/messages",
+                    headers={
+                        "x-api-key": self.client["api_key"],
+                        "anthropic-version": ANTHROPIC_VERSION,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "system": instructions,
+                        "messages": беседа,
+                        "max_tokens": max_tokens,
+                        "temperature": self.temperature,
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                raise_with_body(response)
+
+                куски = response.json().get("content", [])
+                answer = "".join(
+                    кусок.get("text", "") for кусок in куски if кусок.get("type") == "text"
+                ).strip()
+                print(f"✅ Anthropic ответ получен ({len(answer)} символов)")
+
+            # Шлюз к сотням моделей: формат тот же, что у OpenAI.
+            elif self.api_provider == "OpenRouter":
+                print(f"🌐 OpenRouter запрос ({self.model})...")
+                answer = self._ask_openrouter({
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": self.temperature,
+                    "max_tokens": max_tokens,
+                })
+                print(f"✅ OpenRouter ответ получен ({len(answer)} символов)")
+
             # Используем Groq если доступен
             elif self.api_provider == "Groq":
                 print(f"⚡ Groq API запрос ({self.model})...")
@@ -641,7 +962,7 @@ class IntelligentAnswerer:
                     ),
                     provider="Groq",
                 )
-                answer = response.choices[0].message.content.strip()
+                answer = (response.choices[0].message.content or "").strip()
                 print(f"✅ Groq ответ получен ({len(answer)} символов)")
             
             # Fallback на OpenAI
@@ -660,7 +981,7 @@ class IntelligentAnswerer:
                     ),
                     provider="OpenAI",
                 )
-                answer = response.choices[0].message.content.strip()
+                answer = (response.choices[0].message.content or "").strip()
                 print(f"✅ OpenAI ответ получен ({len(answer)} символов)")
             
             else:
@@ -671,10 +992,189 @@ class IntelligentAnswerer:
             return answer, True
         
         except Exception as e:
-            error_msg = f"❌ Ошибка API: {str(e)}"
-            print(error_msg)
-            return error_msg, False
+            # Неотвеченный вопрос убирается из памяти разговора.
+            #
+            # Вопрос кладётся туда до запроса, ответ — после удачного. Если
+            # запрос не удался, в истории остаётся «висячий» вопрос, и со
+            # следующим их становится два подряд. Для Anthropic это прямое
+            # нарушение формата: два сообщения от человека без ответа между
+            # ними он отвергает целиком. То есть одна неудача — скажем,
+            # кончились деньги — ломала бы и все последующие запросы, уже
+            # после пополнения счёта.
+            self.memory.drop_unanswered()
+
+            # Разбор причины тот же, что в Настройках. Подключиться можно и с
+            # нулевым счётом — ключ верен, модель верна, а денег нет, — и
+            # сырое «400 Client Error» отправляет человека перепроверять ключ,
+            # который ни при чём.
+            понятно = explain_connect_error(self.api_provider or "", self.model, str(e))
+            print(f"⚠️ {понятно}")
+            return f"❌ {понятно}", False
     
+    def _ask_openrouter(self, payload: dict) -> str:
+        """
+        Запрос к шлюзу с перебором ключей.
+
+        Ключ, упёршийся в предел запросов, откладывается, и запрос повторяется
+        следующим. Это и есть смысл нескольких ключей: без перебора второй и
+        третий лежали бы мёртвым грузом.
+
+        Перебор не бесконечен — каждый ключ пробуется один раз. Иначе при
+        общей беде вроде недоступной модели Scott ходил бы по кругу, пока не
+        кончится терпение у человека.
+        """
+        ring = self.openrouter_ring
+        последняя = None
+
+        for _ in range(max(1, len(ring))):
+            key = ring.current() or (self.client or {}).get("api_key")
+            if not key:
+                raise RuntimeError("нет ни одного ключа OpenRouter")
+
+            response = requests.post(
+                f"{OPENROUTER_BASE}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=REQUEST_TIMEOUT_SECONDS,
+            )
+
+            if response.status_code < 400:
+                answer = first_message(response.json())
+
+                if not answer:
+                    # Модель промолчала. Менять ключ бессмысленно — дело не в
+                    # нём, — а притворяться, что ответ получен, тем более.
+                    raise RuntimeError(
+                        f"модель «{payload.get('model')}» вернула пустой ответ")
+
+                return answer
+
+            последняя = f"{response.status_code}: {(response.text or '')[:500]}"
+            причина = key_ring_module.why_refused(последняя)
+
+            if причина is None:
+                # Менять ключ бессмысленно: беда не в нём.
+                break
+
+            есть_запасной = ring.set_aside(key, причина)
+            подпись = "предел запросов" if причина == "rate" else "ключ не принят"
+            print(f"🔁 OpenRouter: {подпись}, "
+                  f"{'беру следующий ключ' if есть_запасной else 'запасных больше нет'}")
+
+            if not есть_запасной:
+                break
+
+        raise RuntimeError(последняя or "OpenRouter не ответил")
+
+    def sees_images(self) -> bool:
+        """Умеет ли смотреть картинки нынешняя связка провайдера и модели."""
+        return bool(self.enabled) and provider_sees_images(self.api_provider or "")
+
+    def answer_about_image(self, question: str, image_base64: str,
+                           media_type: str = "image/png") -> Tuple[str, bool]:
+        """
+        Ответить на вопрос о картинке.
+
+        Картинка передаётся отдельной частью сообщения, и форма записи у
+        провайдеров разная: Anthropic ждёт данные в поле source, остальные —
+        ссылку вида data:... в поле image_url.
+
+        Память здесь не используется намеренно: разговор о картинке начинается
+        с чистого листа, иначе модель принимается отвечать на предыдущий
+        вопрос, увидев знакомый контекст.
+        """
+        if not self.enabled:
+            return "ИИ не настроен: добавьте ключ в настройках", False
+
+        if not self.sees_images():
+            return (f"Выбранная модель ({self.api_provider}) не умеет смотреть "
+                    "картинки — она работает только с текстом. Переключитесь в "
+                    "настройках на Anthropic, OpenAI или OpenRouter с моделью, "
+                    "которая видит изображения."), False
+
+        ask = question.strip() or "Что на этом изображении? Опиши подробно."
+
+        try:
+            if self.api_provider == "Anthropic":
+                response = requests.post(
+                    f"{ANTHROPIC_BASE}/messages",
+                    headers={
+                        "x-api-key": self.client["api_key"],
+                        "anthropic-version": ANTHROPIC_VERSION,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "system": self.system_prompt,
+                        "max_tokens": self.max_tokens,
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": image_base64,
+                                    },
+                                },
+                                {"type": "text", "text": ask},
+                            ],
+                        }],
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS * 2,
+                )
+                raise_with_body(response)
+
+                pieces = response.json().get("content", [])
+                answer = "".join(
+                    p.get("text", "") for p in pieces if p.get("type") == "text"
+                ).strip()
+
+                return answer, bool(answer)
+
+            # OpenAI и шлюз говорят на одном языке.
+            content = [
+                {"type": "text", "text": ask},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{image_base64}"},
+                },
+            ]
+
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": content},
+            ]
+
+            if self.api_provider == "OpenRouter":
+                answer = self._ask_openrouter({
+                    "model": self.model,
+                    "messages": messages,
+                    "max_tokens": self.max_tokens,
+                })
+                return answer, bool(answer)
+
+            # Дальше — OpenAI через собственную библиотеку.
+
+            # OpenAI через собственную библиотеку.
+            result = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=self.max_tokens,
+                timeout=REQUEST_TIMEOUT_SECONDS * 2,
+            )
+            answer = (result.choices[0].message.content or "").strip()
+            return answer, bool(answer)
+
+        except Exception as e:
+            понятно = explain_connect_error(self.api_provider or "", self.model, str(e))
+            print(f"⚠️ Не удалось разобрать картинку: {понятно}")
+            return f"❌ {понятно}", False
+
     def answer_question(self, question: str, brief: bool = False) -> str:
         """
         Быстрый метод получить ответ (alias для answer)

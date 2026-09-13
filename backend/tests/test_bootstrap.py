@@ -64,6 +64,11 @@ def test_explanation_is_honest_about_speed(boot, monkeypatch):
     Четыре гигабайта загрузки — это выбор, который стоит сделать осознанно;
     равно как и согласие на шесть секунд ожидания каждой фразы.
     """
+    # Система задаётся явно: на Mac объяснение своё, и про шесть секунд там
+    # речи нет. Без этой строки проверка падала на macOS-раннере, проверяя не
+    # текст, а то, где её запустили.
+    monkeypatch.setattr(boot.sys, "platform", "win32")
+
     with_gpu(boot, monkeypatch, True)
     _, gpu_text = boot.torch_requirement()
 
@@ -72,6 +77,25 @@ def test_explanation_is_honest_about_speed(boot, monkeypatch):
 
     assert "гб" in gpu_text.lower(), "не сказано, сколько весит загрузка"
     assert "секунд" in cpu_text.lower(), "не сказано, чем обернётся работа на процессоре"
+
+
+def test_mac_is_told_about_metal_not_about_missing_nvidia(boot, monkeypatch):
+    """
+    На Mac ставится та же обычная сборка, но объясняется иначе.
+
+    «Видеокарта NVIDIA не найдена» прозвучало бы там как поломка: её на Mac не
+    бывает вовсе. И это не единственная неточность — работа не сводится к
+    процессору: графика Apple приходит в обычной сборке с PyPI, и синтез речи
+    ею пользуется.
+    """
+    with_gpu(boot, monkeypatch, False)
+    monkeypatch.setattr(boot.sys, "platform", "darwin")
+
+    args, explanation = boot.torch_requirement()
+
+    assert args == [boot.TORCH_CPU], "на Mac нужна обычная сборка, без индекса CUDA"
+    assert "NVIDIA" not in explanation
+    assert "Apple" in explanation
 
 
 def test_gpu_detection_without_nvidia_smi(boot, monkeypatch):

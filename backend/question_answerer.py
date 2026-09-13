@@ -482,34 +482,27 @@ class QuestionAnswerer:
 
             if ia and getattr(ia, 'enabled', False):
                 try:
-                    # Запрашиваем ответ у IA, учитывая требуемую подробность
+                    # Краткости просим у модели, а не отрезаем её ножницами.
+                    #
+                    # Раньше ответ брался целиком, а потом обрезался по трём
+                    # первым предложениям. Именно отсюда шла жалоба, что в чате
+                    # Scott рассказывает далеко не всё важное: модель писала
+                    # развёрнуто, а человек видел обрубок — часто на полуслове,
+                    # без списков и примеров, которые шли дальше.
+                    #
+                    # Вопрос голосом — кратко всегда: вслух ответ звучит вдвое
+                    # дольше, чем читается глазами. В чате кратко только тогда,
+                    # когда об этом попросили словами («кратко», «в двух словах»).
+                    want_brief = brief or verbosity == 'short'
+
                     with _timing_stage("ответ.llm"):
-                        ai_resp = ia.answer_question(clean_text, brief=brief)
+                        ai_resp = ia.answer_question(clean_text, brief=want_brief)
                     if ai_resp and isinstance(ai_resp, str):
-                        # Вернуть первые 1-2 предложения для краткости и ясности
-                        sentences = re.split(r'(?<=[.!?])\s+', ai_resp.strip())
-
-                        # Вопрос задан голосом — подробность короткая, что бы
-                        # ни стояло в самой фразе. Вслух ответ звучит вдвое
-                        # дольше, чем читается глазами, и перебить его нельзя:
-                        # микрофон приглушён, пока Scott говорит.
-                        if brief:
-                            verbosity = 'short'
-
-                        if verbosity == 'short':
-                            concise = sentences[0] if sentences else ai_resp
-                            print(f"🧠 Fallback IA ответ (short): {concise}")
-                            return concise
-                        elif verbosity == 'long':
-                            # Вернуть более развёрнутый ответ (до 5 предложений)
-                            concise = ' '.join(sentences[:5]) if sentences else ai_resp
-                            print(f"🧠 Fallback IA ответ (long): {concise[:200]}")
-                            return concise
-                        else:
-                            # По умолчанию — подробный ответ (до 3 предложений)
-                            concise = ' '.join(sentences[:3]) if sentences else ai_resp
-                            print(f"🧠 Fallback IA ответ (default detailed): {concise[:200]}")
-                            return concise
+                        answer = ai_resp.strip()
+                        print(f"🧠 Ответ IA "
+                              f"({'кратко' if want_brief else verbosity}, "
+                              f"{len(answer)} символов): {answer[:200]}")
+                        return answer
                 except Exception as e:
                     print(f"⚠️ Ошибка при вызове intelligent_answerer: {e}")
         except Exception:

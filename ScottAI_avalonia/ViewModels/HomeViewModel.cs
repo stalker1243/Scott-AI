@@ -38,13 +38,15 @@ public partial class HomeViewModel : ViewModelBase
     /// и чаще всего не говорит ничего. Список короткий намеренно: длинный никто
     /// не читает.
     /// </summary>
-    public ObservableCollection<HomeExample> Examples { get; } = new(new[]
-    {
-        new HomeExample("Открой браузер", "OpenInNew"),
-        new HomeExample("Что такое фотосинтез", "HelpCircleOutline"),
-        new HomeExample("Напомни через час позвонить маме", "BellOutline"),
-        new HomeExample("Введи в поиск браузера рецепт борща", "Magnify"),
-    });
+    /// <summary>
+    /// Что показать в разделе «попробуйте сказать».
+    ///
+    /// Четыре примера стояли здесь намертво, и после третьего открытия
+    /// лаунчера человек переставал их замечать. Между тем это единственное
+    /// место, где видно, что Scott вообще умеет, — и список из четырёх строк
+    /// создавал впечатление, что умеет он ровно четыре вещи.
+    /// </summary>
+    public ObservableCollection<HomeExample> Examples { get; } = new(HomeExamples.PickFour());
 
     /// <summary>Загрузка видеокарты. Ноль означает и «свободна», и «её нет».</summary>
     [ObservableProperty]
@@ -53,6 +55,14 @@ public partial class HomeViewModel : ViewModelBase
     /// <summary>Заполненность системного диска.</summary>
     [ObservableProperty]
     private double _diskPercent;
+
+    /// <summary>
+    /// Сколько места на диске занято.
+    ///
+    /// Величина медленная: она меняется не в такт остальным и плавного
+    /// подъезда к новому значению не требует, поэтому берётся как есть.
+    /// </summary>
+    [ObservableProperty] private double _diskUsagePercent;
 
     // ---- Прослушивание микрофона ----
     // Scott слушает непрерывно, но выполняет только то, что сказано после его
@@ -200,6 +210,7 @@ public partial class HomeViewModel : ViewModelBase
                 _ramTarget = metrics.Metrics.Ram;
                 _gpuTarget = metrics.Metrics.Gpu;
                 _diskTarget = metrics.Metrics.Disk;
+                DiskUsagePercent = metrics.Metrics.DiskUsage;
                 _processTarget = metrics.Metrics.Processes;
             }
             await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(3));
@@ -214,3 +225,76 @@ public partial class HomeViewModel : ViewModelBase
 /// <summary>Одна строка в списке примеров: что сказать и каким значком это
 /// отметить.</summary>
 public sealed record HomeExample(string Text, string Icon);
+
+/// <summary>
+/// Запас подсказок для главной страницы.
+///
+/// Примеры разложены по видам дел, и берётся по одному из каждого. Простой
+/// случайный выбор из общего мешка регулярно выдавал четыре вопроса подряд, и
+/// выходило, что Scott умеет только отвечать на вопросы, — а это ровно то
+/// впечатление, от которого здесь и уходят.
+/// </summary>
+public static class HomeExamples
+{
+    /// <summary>Запуск и закрытие программ.</summary>
+    private static readonly HomeExample[] Programs =
+    {
+        new("Открой браузер", "OpenInNew"),
+        new("Открой блокнот", "NotebookOutline"),
+        new("Закрой дискорд", "CloseCircleOutline"),
+        new("Открой проводник", "FolderOutline"),
+        new("Открой редактор кода", "CodeBraces"),
+        new("Заверши процесс chrome", "StopCircleOutline"),
+    };
+
+    /// <summary>Вопросы, на которые отвечает модель.</summary>
+    private static readonly HomeExample[] Questions =
+    {
+        new("Что такое фотосинтез", "HelpCircleOutline"),
+        new("Объясни, как работает кеш процессора", "HelpCircleOutline"),
+        new("Чем отличается HTTP от HTTPS", "HelpCircleOutline"),
+        new("Почему небо голубое", "HelpCircleOutline"),
+        new("Напиши функцию сортировки на Python", "CodeBraces"),
+        new("Переведи «как дела» на японский", "TranslateVariant"),
+    };
+
+    /// <summary>Файлы, папки и состояние машины.</summary>
+    private static readonly HomeExample[] System =
+    {
+        new("Сколько памяти занято", "Memory"),
+        new("Какие процессы запущены", "FormatListBulleted"),
+        new("Создай папку Отчёты на рабочем столе", "FolderPlusOutline"),
+        new("Сделай громче", "VolumeHigh"),
+        new("Сколько места на диске", "Harddisk"),
+        new("Открой загрузки", "DownloadOutline"),
+    };
+
+    /// <summary>Всё остальное: напоминания, поиск, протоколы.</summary>
+    private static readonly HomeExample[] Extras =
+    {
+        new("Напомни через час позвонить маме", "BellOutline"),
+        new("Введи в поиск браузера рецепт борща", "Magnify"),
+        new("Найди на ютубе как играть на гитаре", "Youtube"),
+        new("Зайди на гитхаб", "Github"),
+        new("Протокол рабочий день", "FormatListNumbered"),
+        new("Напомни завтра в девять про созвон", "BellOutline"),
+    };
+
+    /// <summary>
+    /// Четыре подсказки: по одной из каждого вида.
+    ///
+    /// Случайность берётся общая на всё приложение, а не создаётся заново на
+    /// каждый вызов: два генератора, созданные в одну миллисекунду, выдают
+    /// одинаковые числа, и подсказки повторялись бы.
+    /// </summary>
+    public static HomeExample[] PickFour() => new[]
+    {
+        Pick(Programs),
+        Pick(Questions),
+        Pick(System),
+        Pick(Extras),
+    };
+
+    private static HomeExample Pick(HomeExample[] from)
+        => from[Random.Shared.Next(from.Length)];
+}

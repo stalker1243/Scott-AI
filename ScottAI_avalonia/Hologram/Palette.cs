@@ -5,99 +5,84 @@ using ScottAI.Avalonia.Converters;
 namespace ScottAI.Avalonia.Hologram;
 
 /// <summary>
-/// Цвета костюма и то, как в них проступает нагрузка.
+/// Цвета фигуры и то, как в них проступает нагрузка.
 ///
-/// Сначала вся фигура красилась цветом метрики: голова — цветом видеокарты,
-/// кираса — цветом памяти, и так далее. Читалось это как схема, а не как
-/// костюм — сплошные бирюзовые и янтарные пятна, между которыми нет ничего
-/// общего.
+/// Голограмма нужна, чтобы с одного взгляда видеть состояние машины, и цвет —
+/// главное, что у неё для этого есть. Когда фигура была в доспехах, цвет
+/// нагрузки приходилось приглушать, иначе металл переставал быть металлом:
+/// показания читались хуже ради внешности. Без доспеха этот размен исчез.
 ///
-/// Теперь у доспеха свой цвет: вороненая сталь и тёмная ткань. Нагрузка
-/// проступает сквозь него — чем выше, тем сильнее металл отливает тревожным
-/// оттенком и ярче светятся кромки пластин. Так фигура остаётся фигурой, но
-/// по ней по-прежнему видно состояние машины: спокойная — холодная сталь,
-/// загруженная — раскалённый металл.
+/// Основной тон холодный и почти белый — по нему заметен любой оттенок
+/// нагрузки. Тёплое на фигуре означает ровно одно: часть машины загружена.
 /// </summary>
 public static class Palette
 {
-    /// <summary>Вороненая сталь: основной металл доспеха.</summary>
-    public static readonly Color Steel = Color.FromRgb(0x8A, 0x9B, 0xA8);
+    /// <summary>Тело голограммы на спокойной машине.</summary>
+    public static readonly Color Body = Color.FromRgb(0x8F, 0xC9, 0xDC);
 
-    /// <summary>Тёмный металл: наручи, пояс, набедренники.</summary>
-    public static readonly Color DarkSteel = Color.FromRgb(0x5E, 0x6E, 0x7A);
-
-    /// <summary>Сама маска — светлее корпуса, чтобы лицо читалось первым.</summary>
-    public static readonly Color Mask = Color.FromRgb(0xB4, 0xC2, 0xCC);
-
-    /// <summary>Ткань плаща и капюшона: глубокая зелень.</summary>
-    public static readonly Color Cloth = Color.FromRgb(0x2C, 0x5A, 0x43);
+    /// <summary>Свечение в груди — общая загрузка.</summary>
+    public static readonly Color Light = Color.FromRgb(0xE8, 0xF4, 0xFF);
 
     /// <summary>
-    /// Насколько сильно нагрузка перекрашивает металл.
+    /// Насколько сильно нагрузка перекрашивает тело.
     ///
-    /// Даже на полной загрузке металл остаётся металлом: полный переход в
-    /// красный вернул бы ту самую схему, от которой уходили. Простаивающая
-    /// часть подкрашена совсем чуть-чуть — иначе фигура выглядела бы
-    /// одинаково при любой нагрузке.
+    /// Заметно сильнее, чем на доспехе: там подкраска боролась с металлом,
+    /// здесь ей никто не мешает. Простаивающая часть всё же подкрашена — иначе
+    /// фигура выглядела бы одинаково при любой нагрузке.
     /// </summary>
-    public const double IdleTint = 0.12;
-    public const double BusyTint = 0.62;
+    public const double IdleTint = 0.3;
+    public const double BusyTint = 0.88;
 
-    /// <summary>Цвет пластины: металл, подкрашенный нагрузкой.</summary>
-    public static Color PlateFor(BodyPart part, double load)
+    /// <summary>Цвет части: тело, подкрашенное нагрузкой.</summary>
+    public static Color PlateFor(Substance substance, double load)
     {
-        var baseColor = BaseFor(part);
+        var baseColor = substance == Substance.Glow ? Light : Body;
 
-        // Плащ и отделка нагрузку не показывают: у них своя задача, и спорить
-        // с показаниями приборов за внимание им незачем.
-        if (part is BodyPart.Cape or BodyPart.Trim)
-        {
-            return baseColor;
-        }
-
-        // Ядро подкрашивается почти целиком: это единственная деталь, по
-        // которой состояние процессора видно цветом, а не свечением кромок.
-        var idle = part == BodyPart.Core ? 0.75 : IdleTint;
-        var busy = part == BodyPart.Core ? 0.95 : BusyTint;
+        var idle = substance == Substance.Glow ? 0.75 : IdleTint;
+        var busy = substance == Substance.Glow ? 0.95 : BusyTint;
 
         var strength = idle + (busy - idle) * Math.Clamp(load, 0, 100) / 100.0;
         return Blend(baseColor, LoadToBrushConverter.ColorFor(load), strength);
     }
 
     /// <summary>
-    /// Цвет кромки пластины.
+    /// Цвет кромки.
     ///
-    /// Кромки светятся цветом нагрузки заметно сильнее, чем сама пластина:
-    /// именно по ним состояние и читается с одного взгляда, а металл остаётся
-    /// металлом.
+    /// Кромка светится цветом нагрузки сильнее самой поверхности: по ней
+    /// состояние и читается с одного взгляда, а заодно она очерчивает силуэт,
+    /// который у полупрозрачной фигуры иначе расплывается.
     /// </summary>
-    public static Color EdgeFor(BodyPart part, double load)
+    public static Color EdgeFor(Substance substance, double load)
+        => Blend(LoadToBrushConverter.ColorFor(load), Colors.White, 0.3);
+
+    /// <summary>
+    /// Насколько вещество блестит: сила блика и его резкость.
+    ///
+    /// Резкость подобрана под восьмигранное сечение: грани стоят через сорок
+    /// пять градусов, и блик уже этого зазора не попадёт ни на одну из них.
+    /// Первая попытка с резкостью 28 именно так и пропала, вторая с 14 едва
+    /// дотягивала. Числа здесь не подобраны на глаз: их держит проверка,
+    /// которая строит трубу и требует заметного блика хотя бы на одной грани.
+    ///
+    /// Светящееся не бликует: у него нет поверхности, которая отражала бы
+    /// чужой свет.
+    /// </summary>
+    public static (double Strength, double Sharpness) Gloss(Substance substance) => substance switch
     {
-        if (part is BodyPart.Cape)
-        {
-            return Blend(Cloth, Color.FromRgb(0x9A, 0xE6, 0xC4), 0.35);
-        }
+        Substance.Glow => (0, 1),
+        _ => (0.45, 9),
+    };
 
-        if (part is BodyPart.Trim)
-        {
-            return Blend(DarkSteel, Color.FromRgb(0xE2, 0xE8, 0xF0), 0.4);
-        }
-
-        return Blend(LoadToBrushConverter.ColorFor(load), Colors.White, 0.25);
-    }
-
-    private static Color BaseFor(BodyPart part) => part switch
+    /// <summary>
+    /// Насколько вещество непрозрачно.
+    ///
+    /// Голограмма должна просвечивать чуть-чуть, а не насквозь: сквозь ближние
+    /// части угадываются дальние, но не читаются как отдельные фигуры.
+    /// </summary>
+    public static double Opacity(Substance substance) => substance switch
     {
-        BodyPart.Head => Mask,
-        // Ядро светится цветом своей подсистемы — ниже его подкрасят
-        // нагрузкой ещё раз, и оно выйдет ярче остальных пластин. Здесь стоял
-        // цвет полной загрузки: ядро горело тревожным красным на спокойной
-        // машине, и по нему нельзя было ничего понять.
-        BodyPart.Core => Color.FromRgb(0xE8, 0xF4, 0xFF),
-        BodyPart.Cape => Cloth,
-        BodyPart.Trim => DarkSteel,
-        BodyPart.Arms => DarkSteel,
-        _ => Steel,
+        Substance.Glow => 1.0,
+        _ => 0.88,
     };
 
     /// <summary>Смешать два цвета.</summary>

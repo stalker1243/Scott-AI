@@ -60,6 +60,13 @@ def resolver(tmp_path, monkeypatch):
 
     monkeypatch.setattr(app_resolver, "DESKTOP_DIRS", [str(apps)])
     monkeypatch.setattr(app_resolver, "IS_WINDOWS", False)
+
+    # Обе системы задаются явно, а не одна. «Не Windows» больше не означает
+    # «Linux»: на Mac эти проверки уходили в ветку поиска бандлов и падали с
+    # «assert 'bundle' == 'desktop'». Нашлось это на macOS-раннере — то есть
+    # ровно там, куда проверка и притворялась, будто умеет смотреть.
+    monkeypatch.setattr(app_resolver, "IS_MACOS", False)
+
     monkeypatch.setattr(app_resolver, "_desktop_index_cache", None)
     return app_resolver
 

@@ -131,7 +131,12 @@
                 </StackPanel>
             </Border>
 
-            <ScrollViewer Grid.Column="1" Name="Scroller">
+            <!-- Полоса прокрутки не наезжает на сообщения: по умолчанию она
+                 рисуется поверх содержимого, и у правого края пузыря её стрелка
+                 закрывала последние буквы. Место под неё резервируется отступом,
+                 а сама она остаётся исчезающей — постоянная полоса в тихом
+                 окне выглядит тяжелее, чем стоит. -->
+            <ScrollViewer Grid.Column="1" Name="Scroller" Padding="0,0,14,0">
                 <StackPanel>
                     <ItemsControl Name="MessagesList" ItemsSource="{Binding Messages}">
                         <ItemsControl.ItemTemplate>

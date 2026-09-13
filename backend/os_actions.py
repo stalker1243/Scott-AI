@@ -236,6 +236,12 @@ _WINDOWS_FOLDERS = {
     "videos": "Videos",
 }
 
+# На macOS почти все папки называются так же, кроме одной: видео лежит в
+# Movies, и слепое ~/Videos указало бы в пустоту.
+_MACOS_FOLDERS = {
+    "videos": "Movies",
+}
+
 _XDG_KEYS = {
     "downloads": "DOWNLOAD",
     "documents": "DOCUMENTS",
@@ -283,6 +289,10 @@ def user_folder(key: str) -> Optional[str]:
 
     if is_windows():
         name = _WINDOWS_FOLDERS.get(key)
+        return os.path.join(home, name) if name else None
+
+    if current_os() == MACOS:
+        name = _MACOS_FOLDERS.get(key) or _WINDOWS_FOLDERS.get(key)
         return os.path.join(home, name) if name else None
 
     if current_os() == LINUX and find_tool("xdg-user-dir"):
@@ -350,6 +360,30 @@ def shell_command(command: str) -> List[str]:
     return ["/bin/bash", "-c", command]
 
 
+def _tools() -> Dict:
+    """
+    Чем именно эта система делает то, что умеет.
+
+    На macOS всё перечисленное берёт на себя osascript — он есть всегда, и
+    искать ему замену незачем. Показывать при этом список Linux-программ было
+    бы враньём: их там нет, а управление звуком работает.
+    """
+    if current_os() == MACOS:
+        return {
+            "звук": "osascript",
+            "яркость": "osascript",
+            "открытие_файлов": "open",
+            "systemctl": None,
+        }
+
+    return {
+        "звук": find_tool("wpctl", "pactl", "amixer", "nircmd"),
+        "яркость": find_tool("brightnessctl", "light"),
+        "открытие_файлов": "startfile" if is_windows() else find_tool("xdg-open", "gio"),
+        "systemctl": find_tool("systemctl"),
+    }
+
+
 def describe_capabilities() -> Dict:
     """
     Что из управления железом доступно на этой машине.
@@ -362,10 +396,5 @@ def describe_capabilities() -> Dict:
         "громкость": bool(volume_command("up")),
         "яркость": bool(brightness_command("up")),
         "питание": bool(power_command("shutdown")),
-        "инструменты": {
-            "звук": find_tool("wpctl", "pactl", "amixer", "nircmd"),
-            "яркость": find_tool("brightnessctl", "light"),
-            "открытие_файлов": "startfile" if is_windows() else find_tool("xdg-open", "gio"),
-            "systemctl": find_tool("systemctl"),
-        },
+        "инструменты": _tools(),
     }

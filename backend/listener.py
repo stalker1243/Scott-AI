@@ -130,6 +130,16 @@ class ListenerConfig:
     # человека и переставала его слышать.
     interrupt_calibration: float = 0.35
 
+    # Вычитать ли из записи то, что Scott произносит сам.
+    #
+    # Микрофон слышит колонки, и собственный ответ возвращается как новая
+    # фраза. Пока этого не было, приходилось глушить микрофон почти наглухо и
+    # требовать от человека говорить громче колонок.
+    #
+    # Замерено на речи с моделью комнаты: эхо тише на 10-12 дБ, голос человека
+    # — на 0.8 дБ, расход времени около трёх процентов реального.
+    cancel_echo: bool = True
+
     device: Optional[int] = None
 
 
@@ -139,6 +149,15 @@ class ListenerStats:
 
     phrases_heard: int = 0
     triggered: int = 0
+
+    # Что ушло на исполнение и чем кончилось.
+    #
+    # Без этого на вопрос «слышит, но не отвечает» ответить нечем: счётчик
+    # обращений растёт и когда команда выполнена, и когда позвали по имени,
+    # ничего не попросив.
+    last_command: str = ""
+    last_command_at: float = 0.0
+    last_dispatch: str = ""      # 'выполнена' | 'имя без команды' | 'мимо' | 'ошибка'
     ignored: int = 0
     last_text: str = ""
     last_error: str = ""
@@ -204,6 +223,12 @@ class VoiceListener:
         self._lock = threading.Lock()
 
         self._noise_floor = self.config.absolute_floor
+
+        # Эхоподавление: вычитает из записи то, что звучит в колонках.
+        # Создаётся лениво — на машине без микрофона оно не понадобится.
+        self._echo = None
+        self._echo_ref = None
+
         # Пока Scott говорит, входящий звук не разбирается: иначе он слышит
         # собственный ответ из колонок и принимает его за новую фразу.
         self._suspended = False
@@ -388,6 +413,14 @@ class VoiceListener:
             "noise_floor": round(self._noise_floor, 5),
             "phrases_heard": self.stats.phrases_heard,
             "triggered": self.stats.triggered,
+
+            # Чем кончилась последняя услышанная фраза. По одному счётчику
+            # обращений этого не понять: он растёт и при выполненной команде,
+            # и при «позвали, но ничего не попросили».
+            "last_command": self.stats.last_command,
+            "last_dispatch": self.stats.last_dispatch,
+            "since_command_sec": (round(time.time() - self.stats.last_command_at, 1)
+                                  if self.stats.last_command_at else None),
             "ignored": self.stats.ignored,
             "last_text": self.stats.last_text,
             "last_error": self.stats.last_error,
@@ -436,6 +469,62 @@ class VoiceListener:
             if len(block) < BLOCK_SIZE:
                 block = np.pad(block, (0, BLOCK_SIZE - len(block)))
             self._blocks.put(block.astype(np.float32))
+
+    # ==================== Собственное эхо ====================
+
+    def _without_echo(self, block: np.ndarray) -> np.ndarray:
+        """
+        Убрать из блока то, что звучит в колонках.
+
+        Работает, только пока Scott говорит: в тишине вычитать нечего, а
+        гонять фильтр вхолостую значит расшатывать его настройку.
+
+        При любой беде возвращается исходный блок. Эхоподавление — улучшение,
+        а не условие того, что Scott слышит: если оно откажет, микрофон должен
+        продолжать работать, пусть и со старыми костылями.
+        """
+        if not self.config.cancel_echo:
+            return block
+
+        try:
+            if self._echo_ref is None:
+                try:
+                    from . import echo_cancel, echo_reference
+                except ImportError:
+                    import echo_cancel
+                    import echo_reference
+
+                self._echo_ref = echo_reference.get_reference()
+                self._echo = echo_cancel.EchoCanceller()
+
+            ссылка = self._echo_ref
+
+            if not ссылка.playing:
+                # Scott молчит. Сбрасываем фильтр: к следующему ответу
+                # громкость могли поменять, и прежняя настройка станет мешать.
+                if self._echo is not None and self._echo.blocks:
+                    self._echo.reset()
+                return block
+
+            # Задержка меряется один раз за ответ, по первым блокам. Пока она
+            # неизвестна, вычитать нельзя: невыровненный опорный сигнал не
+            # уберёт эхо, а добавит к нему свою копию.
+            if not ссылка.delay_known:
+                ссылка.learn_delay(block)
+                return block
+
+            опорный = ссылка.window(len(block))
+            if опорный.size != len(block):
+                return block
+
+            return self._echo.process(block, опорный)
+        except Exception as e:
+            # Один раз сообщим и больше не будем: если оно ломается, оно
+            # ломается на каждом блоке, и лог утонет.
+            if not getattr(self, "_echo_complained", False):
+                self._echo_complained = True
+                print(f"⚠️ Эхоподавление отключилось: {e}")
+            return block
 
     # ==================== Разбор на фразы ====================
 
@@ -488,6 +577,14 @@ class VoiceListener:
                 block = self._blocks.get(timeout=0.5)
             except queue.Empty:
                 continue
+
+            # Вычитаем из записи то, что Scott произносит сам.
+            #
+            # Делается до всего остального: и громкость, и порог, и фон должны
+            # считаться по звуку комнаты, а не по собственному ответу из
+            # колонок. Иначе планка уезжает вверх до громкости Scott, и
+            # человека рядом становится не слышно вовсе.
+            block = self._without_echo(block)
 
             level = self._level(block)
 
@@ -743,20 +840,27 @@ class VoiceListener:
             result = self.check_trigger(text)
             if not getattr(result, "has_trigger", False):
                 self.stats.ignored += 1
+                self.stats.last_dispatch = "мимо"
                 print(f"🔇 Мимо: «{text}»")
                 return
             command = (getattr(result, "command_text", "") or "").strip()
             if not command:
                 # Позвали по имени, но ничего не попросили.
                 self.stats.triggered += 1
+                self.stats.last_dispatch = "имя без команды"
                 print("🎧 Scott слышит своё имя, но команды не было")
                 return
 
         self.stats.triggered += 1
+        self.stats.last_command = command
+        self.stats.last_command_at = time.time()
+        self.stats.last_dispatch = "выполнена"
+
         print(f"🎤 Команда: «{command}»")
         try:
             self.handle_command(command)
         except Exception as e:
+            self.stats.last_dispatch = "ошибка"
             self.stats.last_error = f"Команда не выполнена: {e}"
             print(f"⚠️ {self.stats.last_error}")
 

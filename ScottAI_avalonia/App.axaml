@@ -31,6 +31,11 @@
     <Application.Styles>
         <FluentTheme />
         <mi:MaterialIconStyles />
+
+        <!-- Рука над тем, на что можно нажать. Лежит отдельным файлом:
+             здесь же объявлен значок в трее, которому нужен рабочий стол, и
+             проверке пришлось бы поднимать его ради двух свойств. -->
+        <StyleInclude Source="avares://ScottAI/Styles/Cursors.axaml" />
     </Application.Styles>
 
     <Application.Resources>

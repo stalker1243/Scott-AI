@@ -3,11 +3,11 @@ using ScottAI.Avalonia.Services;
 
 namespace ScottAI.Avalonia.Views;
 
-public partial class TemplatesView : UserControl
+public partial class ProtocolsView : UserControl
 {
-    public TemplatesView()
+    public ProtocolsView()
     {
         InitializeComponent();
-        ItemsStagger.Attach(TemplatesList);
+        ItemsStagger.Attach(ProtocolsList);
     }
 }

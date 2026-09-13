@@ -31,6 +31,14 @@ public partial class App : Application
             // фоновый режим: Scott продолжает слушать, а окно прячется в трей.
             // Выйти по-настоящему можно из меню иконки.
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+            // Меню значка достраивается здесь, а не в разметке: оно показывает
+            // состояние, которое живёт в модели главного окна, а значок
+            // создаётся раньше окна и ничего о нём не знает.
+            if (desktop.MainWindow.DataContext is MainWindowViewModel model)
+            {
+                TrayMenuService.Attach(TrayMenuService.IconOf(this), model);
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

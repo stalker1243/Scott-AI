@@ -17,11 +17,35 @@ namespace ScottAI.Avalonia.Tests;
 /// </summary>
 public sealed class AvaloniaFixture
 {
+    // Поднимается ровно один раз на процесс.
+    //
+    // xUnit обещает создать фикстуру коллекции однажды, и обычно так и есть.
+    // Но повторный вызов Setup роняет Avalonia, а вместе с ней — все проверки,
+    // которым нужен загрузчик ресурсов: двадцать пять разом, без внятного
+    // объяснения. Такое уже случалось дважды — один раз здесь, один на
+    // macOS-раннере, — и оба раза со следующего прогона проходило само, то
+    // есть выглядело случайностью, каковой не было.
+    //
+    // Дешевле сделать подъём идемпотентным, чем каждый раз разбираться, отчего
+    // именно в этот прогон он случился дважды.
+    private static readonly object Замок = new();
+    private static bool Поднята;
+
     public AvaloniaFixture()
     {
-        AppBuilder.Configure<Application>()
-            .UseHeadless(new AvaloniaHeadlessPlatformOptions())
-            .SetupWithoutStarting();
+        lock (Замок)
+        {
+            if (Поднята)
+            {
+                return;
+            }
+
+            AppBuilder.Configure<Application>()
+                .UseHeadless(new AvaloniaHeadlessPlatformOptions())
+                .SetupWithoutStarting();
+
+            Поднята = true;
+        }
     }
 }
 

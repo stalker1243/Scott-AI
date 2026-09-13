@@ -53,18 +53,28 @@ def test_version_comparison(upd, candidate, current, expected):
 
 
 # ==================== Выбор установщика ====================
+#
+# Выбор зависит от системы, и проверки ниже написаны про Windows. Система
+# задаётся явно: на macOS-раннере они разом легли, потому что «.exe» там не
+# подходит никому, — проверяли не выбор, а то, где их запустили.
 
-def test_picks_setup_exe(upd):
+@pytest.fixture
+def windows(upd, monkeypatch):
+    monkeypatch.setattr(upd.sys, "platform", "win32")
+    return upd
+
+
+def test_picks_setup_exe(windows):
     """Из вложений выбирается установщик, а не архив с исходниками."""
     assets = [
         {"name": "Source code.zip"},
         {"name": "ScottAI-1.1.0-setup.exe"},
         {"name": "checksums.txt"},
     ]
-    assert upd._pick_installer(assets)["name"] == "ScottAI-1.1.0-setup.exe"
+    assert windows._pick_installer(assets)["name"] == "ScottAI-1.1.0-setup.exe"
 
 
-def test_skips_arm64(upd):
+def test_skips_arm64(windows):
     """
     Установщик под другую архитектуру не предлагается.
 
@@ -75,13 +85,13 @@ def test_skips_arm64(upd):
         {"name": "AppSetup-1.0.0-arm64.exe"},
         {"name": "AppSetup-1.0.0-x64.exe"},
     ]
-    assert upd._pick_installer(assets)["name"] == "AppSetup-1.0.0-x64.exe"
+    assert windows._pick_installer(assets)["name"] == "AppSetup-1.0.0-x64.exe"
 
 
-def test_no_installer_is_not_a_crash(upd):
+def test_no_installer_is_not_a_crash(windows):
     """Релиз без .exe — не повод падать: обновление покажется со ссылкой на страницу."""
-    assert upd._pick_installer([{"name": "Source code.tar.gz"}]) is None
-    assert upd._pick_installer([]) is None
+    assert windows._pick_installer([{"name": "Source code.tar.gz"}]) is None
+    assert windows._pick_installer([]) is None
 
 
 # ==================== Ответ GitHub ====================
@@ -102,6 +112,10 @@ def _release(tag, asset_name="ScottAI-9.9.9-setup.exe"):
 
 def test_new_version_offered(upd, no_cache, monkeypatch):
     """Вышедшая версия предлагается — со ссылкой на установщик и заметками."""
+    # Вложение в выпуске — установщик Windows, поэтому и система здесь
+    # windows: иначе подходящего файла не найдётся, и проверка расскажет про
+    # машину, на которой её запустили, а не про обновления.
+    monkeypatch.setattr(upd.sys, "platform", "win32")
     monkeypatch.setattr(upd, "current_version", lambda: "1.0.0")
     monkeypatch.setattr(upd, "fetch_latest_release", lambda repo=None: (_release("v9.9.9"), ""))
 
@@ -240,3 +254,47 @@ def test_windows_still_gets_exe(upd, monkeypatch):
         {"name": "ScottAI-1.0.7-setup.exe"},
     ]
     assert upd._pick_installer(assets)["name"].endswith(".exe")
+
+
+def test_macos_gets_disk_image(upd, monkeypatch):
+    """На Mac предлагается образ диска, а не установщик Windows и не архив."""
+    monkeypatch.setattr(upd.sys, "platform", "darwin")
+    monkeypatch.setattr(upd.platform, "machine", lambda: "arm64")
+
+    assets = [
+        {"name": "ScottAI-1.0.7-setup.exe"},
+        {"name": "ScottAI-1.0.7-linux-x64.tar.gz"},
+        {"name": "ScottAI-1.0.7-macos-arm64.dmg"},
+    ]
+    assert upd._pick_installer(assets)["name"].endswith(".dmg")
+
+
+def test_apple_silicon_gets_its_own_build(upd, monkeypatch):
+    """
+    На процессорах Apple нужна сборка arm64 — та самая, которую на Windows и
+    Linux мы намеренно отсеиваем.
+
+    Обратное правило стоило бы дорого: машине с процессором Apple предложили бы
+    сборку для старых Intel. Она запустится через Rosetta, но медленнее, а
+    главное — это молчаливая подмена, о которой человек не узнает.
+    """
+    monkeypatch.setattr(upd.sys, "platform", "darwin")
+    monkeypatch.setattr(upd.platform, "machine", lambda: "arm64")
+
+    assets = [
+        {"name": "ScottAI-1.0.7-macos-x86_64.dmg"},
+        {"name": "ScottAI-1.0.7-macos-arm64.dmg"},
+    ]
+    assert "arm64" in upd._pick_installer(assets)["name"]
+
+
+def test_intel_mac_gets_intel_build(upd, monkeypatch):
+    """Пара к предыдущему: на прежних Mac — сборка x86_64."""
+    monkeypatch.setattr(upd.sys, "platform", "darwin")
+    monkeypatch.setattr(upd.platform, "machine", lambda: "x86_64")
+
+    assets = [
+        {"name": "ScottAI-1.0.7-macos-arm64.dmg"},
+        {"name": "ScottAI-1.0.7-macos-x86_64.dmg"},
+    ]
+    assert "x86_64" in upd._pick_installer(assets)["name"]

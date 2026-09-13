@@ -51,6 +51,17 @@ public partial class ChatViewModel : ViewModelBase
     [ObservableProperty]
     private string? _attachedFileName;
 
+    /// <summary>
+    /// Путь к прикреплённому файлу.
+    ///
+    /// Раньше запоминалось одно имя, и файл никуда не уходил: вопрос
+    /// отправлялся обычным запросом, где вложения нет вовсе. Отсюда и брался
+    /// ответ «Scott не умеет анализировать файлы» — проверить это было
+    /// невозможно, файл до него не доходил.
+    /// </summary>
+    [ObservableProperty]
+    private string? _attachedPath;
+
     public bool HasAttachment => AttachedImageName is not null || AttachedFileName is not null;
 
     public ChatViewModel(BackendClient client)
@@ -61,16 +72,18 @@ public partial class ChatViewModel : ViewModelBase
     partial void OnAttachedImageNameChanged(string? value) => OnPropertyChanged(nameof(HasAttachment));
     partial void OnAttachedFileNameChanged(string? value) => OnPropertyChanged(nameof(HasAttachment));
 
-    public void SetAttachedImage(string name)
+    public void SetAttachedImage(string name, string path)
     {
         AttachedImageName = name;
         AttachedFileName = null;
+        AttachedPath = path;
     }
 
-    public void SetAttachedFile(string name)
+    public void SetAttachedFile(string name, string path)
     {
         AttachedFileName = name;
         AttachedImageName = null;
+        AttachedPath = path;
     }
 
     [RelayCommand]
@@ -78,6 +91,7 @@ public partial class ChatViewModel : ViewModelBase
     {
         AttachedImageName = null;
         AttachedFileName = null;
+        AttachedPath = null;
     }
 
     [RelayCommand]
@@ -133,11 +147,49 @@ public partial class ChatViewModel : ViewModelBase
             : "Окно очищено, но память Scott стереть не вышло: backend не ответил");
     }
 
+    /// <summary>
+    /// Отправить вопрос вместе с файлом.
+    ///
+    /// Ответ может прийти с примечанием — например, что снимок уменьшен или
+    /// что из длинного документа взята только часть. Молчать об этом нельзя:
+    /// человек решит, что ответ обо всём документе.
+    /// </summary>
+    private async Task SendWithAttachment(string path, string question)
+    {
+        Sending = true;
+        try
+        {
+            var (success, answer, note) = await _client.AskAboutFileAsync(path, question);
+
+            if (!string.IsNullOrEmpty(note))
+            {
+                answer = $"{answer}\n\n({note})";
+            }
+
+            Messages.Add(new ChatMessage
+            {
+                Text = string.IsNullOrEmpty(answer) ? "Scott не дал ответа." : answer,
+                FromUser = false,
+            });
+
+            if (success && !QuietMode)
+            {
+                await _client.SpeakAsync(answer);
+            }
+        }
+        finally
+        {
+            Sending = false;
+        }
+    }
+
     [RelayCommand]
     private async Task Send()
     {
         var text = Draft.Trim();
         var attachment = AttachedImageName ?? AttachedFileName;
+        var path = AttachedPath;
+
         if (string.IsNullOrEmpty(text) && attachment is null) return;
         if (Sending) return;
 
@@ -151,16 +203,12 @@ public partial class ChatViewModel : ViewModelBase
             PromptHistory.Insert(0, text);
         }
 
-        // Backend пока не умеет анализировать вложения (см. аналогичное честное
-        // ограничение в Tauri-версии) — если прикреплён файл/картинка без текста,
-        // просто сообщаем об этом и не дёргаем /ask.
-        if (string.IsNullOrEmpty(text) && attachment is not null)
+        // Файл идёт своей дорогой: он уходит на backend целиком, а вопрос —
+        // вместе с ним. Без вопроса тоже можно: перетаскивая снимок молча,
+        // человек обычно хочет услышать, что там вообще.
+        if (path is not null)
         {
-            Messages.Add(new ChatMessage
-            {
-                Text = "Вложение получено — Scott пока не умеет анализировать файлы и изображения (появится, когда backend получит поддержку зрения/файлового анализа).",
-                FromUser = false,
-            });
+            await SendWithAttachment(path, text);
             return;
         }
 

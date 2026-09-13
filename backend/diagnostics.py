@@ -158,11 +158,23 @@ def collect_gpu_info() -> Dict:
             result["устройство"] = torch.cuda.get_device_name(0)
             props = torch.cuda.get_device_properties(0)
             result["память_гб"] = round(props.total_memory / 1024 ** 3, 1)
-        elif not result["сборка_с_cuda"]:
-            result["подсказка"] = (
-                "Установлена сборка torch для процессора. Видеокарта задействована не будет: "
-                "pip install --index-url https://download.pytorch.org/whl/cu126 torch"
-            )
+        else:
+            # На Mac видеокарты NVIDIA не бывает вовсе, а совет поставить сборку
+            # с CUDA только собьёт с толку: там считает графика Apple через
+            # Metal, и синтез речи ею пользуется.
+            mps = bool(getattr(torch.backends, "mps", None) and torch.backends.mps.is_available())
+            result["графика_apple"] = mps
+
+            if mps:
+                result["подсказка"] = (
+                    "Считает графика Apple (Metal). Синтез речи ею пользуется, "
+                    "распознавание — нет: его библиотека поддерживает только процессор."
+                )
+            elif not result["сборка_с_cuda"]:
+                result["подсказка"] = (
+                    "Установлена сборка torch для процессора. Видеокарта задействована не будет: "
+                    "pip install --index-url https://download.pytorch.org/whl/cu126 torch"
+                )
     except ImportError:
         result["torch"] = "не установлен"
     except Exception as e:
