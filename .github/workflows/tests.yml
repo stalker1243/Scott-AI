@@ -77,3 +77,103 @@ jobs:
         # Кросс-компиляция проверяется отдельно: Linux-выпуск собирается
         # отсюда же, и ломается она незаметно — на Windows ничего не меняется.
         run: dotnet publish -c Release -r linux-x64 --self-contained true -o ../artifacts-linux --nologo
+
+  macos:
+    name: Проверки на macOS
+    runs-on: macos-latest
+
+    # Единственное место, где macOS-ветки видит настоящая macOS. У нас её нет,
+    # и всё написанное для неё — от поиска приложений до устройства бандла —
+    # проверено подменой платформы. Подмена ловит логику, но не то, существует
+    # ли в системе osascript, собирается ли Mach-O нужной архитектуры и
+    # запускается ли лаунчер вообще.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Зависимости
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          # torch для процессора: видеокарты NVIDIA на Mac не бывает, а Metal
+          # приходит в обычной сборке с PyPI.
+          pip install torch
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+
+      - name: Тесты backend
+        working-directory: backend
+        env:
+          PYTHONIOENCODING: utf-8
+          WARMUP_MODELS: "0"
+        run: python -m pytest -m "not integration" -q
+
+      - name: Проверка веток macOS на живой системе
+        working-directory: backend
+        env:
+          PYTHONIOENCODING: utf-8
+        # Здесь важен не результат, а то, что ветки вообще исполняются на
+        # macOS: команды существуют, каталог приложений читается, Spotlight
+        # отвечает. Перечисленные Scott умения печатаются в лог — по ним видно,
+        # что именно система дала, а что нет.
+        run: |
+          python -c "
+          import json, os_actions, app_resolver
+          print('умения:', json.dumps(os_actions.describe_capabilities(), ensure_ascii=False))
+          print('каталог приложений:', app_resolver.refresh_index())
+          найдено = app_resolver.resolve_app('safari')
+          print('safari:', найдено.target if найдено else 'НЕ НАЙДЕНА')
+          assert найдено, 'Safari не нашлась — на Mac она есть всегда'
+          "
+
+      - name: .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Тесты лаунчера
+        working-directory: ScottAI_avalonia.Tests
+        run: dotnet test --nologo -v q
+
+      - name: Сборка бандла
+        # Собирается настоящий ScottAI.app вместе с образом диска: hdiutil есть
+        # только здесь, и на Windows эта часть сборщика не выполняется никогда.
+        run: python installer/build_macos.py --arch arm64
+
+      - name: Бандл принимается системой
+        # Запустить программу по-настоящему здесь нельзя: у сервера нет экрана,
+        # и окно открывать негде. Но проверить можно главное — что собралось
+        # именно то: исполняемый файл нужной архитектуры, описание бандла
+        # читается системным разбором, а не только нашим, и значок на месте.
+        #
+        # Проверка не праздная: выпуск 1.0.5 не запускался вовсе и падал молча,
+        # до появления окна.
+        run: |
+          bundle=installer/dist-macos/arm64/ScottAI.app
+
+          test -x "$bundle/Contents/MacOS/ScottAI"
+          file "$bundle/Contents/MacOS/ScottAI" | grep -q "arm64"
+
+          # plutil — системный разборщик plist. Если он файл не понимает, не
+          # поймёт и macOS при запуске.
+          plutil -lint "$bundle/Contents/Info.plist"
+
+          # Строка про микрофон: без неё система не покажет запрос, а просто
+          # убьёт процесс при первом обращении к нему.
+          plutil -extract NSMicrophoneUsageDescription raw "$bundle/Contents/Info.plist"
+
+          test -s "$bundle/Contents/Resources/scott.icns"
+          test -f "$bundle/Contents/Resources/backend/main.py"
+
+      - name: Сохранить бандл
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScottAI-macos-arm64
+          path: installer/release/*.dmg
+          if-no-files-found: warn
