@@ -1,7 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ScottAI.Avalonia.Models;
@@ -12,25 +11,14 @@ namespace ScottAI.Avalonia.ViewModels;
 public partial class HomeViewModel : ViewModelBase
 {
     private readonly BackendClient _client;
-    private readonly Action _onLaunchChat;
-    private readonly DispatcherTimer _animTimer;
-
-    private double _cpuTarget;
-    private double _ramTarget;
-    private double _gpuTarget;
-    private double _diskTarget;
-    private double _processTarget;
-    private double _processDisplay;
-
-    [ObservableProperty]
-    private double _cpuPercent;
-
-    [ObservableProperty]
-    private double _ramPercent;
-
-    [ObservableProperty]
-    private int _processCount;
-
+    /// <summary>
+    /// Перейти в чат — и, если текст задан, сразу его отправить.
+    ///
+    /// Пустая строка означает «просто открой чат». Так с главной страницы
+    /// можно и заговорить со Scott, и просто перейти к разговору, не заводя
+    /// для этого двух разных путей.
+    /// </summary>
+    private readonly Action<string> _onLaunchChat;
     /// <summary>
     /// Примеры того, что Scott умеет.
     ///
@@ -48,22 +36,6 @@ public partial class HomeViewModel : ViewModelBase
     /// </summary>
     public ObservableCollection<HomeExample> Examples { get; } = new(HomeExamples.PickFour());
 
-    /// <summary>Загрузка видеокарты. Ноль означает и «свободна», и «её нет».</summary>
-    [ObservableProperty]
-    private double _gpuPercent;
-
-    /// <summary>Заполненность системного диска.</summary>
-    [ObservableProperty]
-    private double _diskPercent;
-
-    /// <summary>
-    /// Сколько места на диске занято.
-    ///
-    /// Величина медленная: она меняется не в такт остальным и плавного
-    /// подъезда к новому значению не требует, поэтому берётся как есть.
-    /// </summary>
-    [ObservableProperty] private double _diskUsagePercent;
-
     // ---- Прослушивание микрофона ----
     // Scott слушает непрерывно, но выполняет только то, что сказано после его
     // имени. Поэтому счётчиков два: сколько фраз он услышал вообще и сколько
@@ -75,23 +47,18 @@ public partial class HomeViewModel : ViewModelBase
     [ObservableProperty] private string _listenHint = "Scott не слушает";
     [ObservableProperty] private string _lastHeard = "";
 
+    /// <summary>Что человек печатает на главной странице.</summary>
+    [ObservableProperty] private string _draft = "";
+
     public string ListenButtonText => IsListening ? "Не слушать" : "Слушать";
 
     partial void OnIsListeningChanged(bool value) => OnPropertyChanged(nameof(ListenButtonText));
 
-    public HomeViewModel(BackendClient client, Action onLaunchChat)
+    public HomeViewModel(BackendClient client, Action<string> onLaunchChat)
     {
         _client = client;
         _onLaunchChat = onLaunchChat;
 
-        // Плавный "подъезд" чисел к новому значению вместо резкой смены на каждый
-        // опрос метрик — 20 кадров/сек достаточно для лёгкого ease-towards-target
-        // без заметной нагрузки на UI-поток.
-        _animTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
-        _animTimer.Tick += (_, _) => TickAnimation();
-        _animTimer.Start();
-
-        _ = PollMetricsAsync();
         _ = PollListeningAsync();
     }
 
@@ -181,44 +148,45 @@ public partial class HomeViewModel : ViewModelBase
         }
     }
 
-    private void TickAnimation()
-    {
-        const double ease = 0.22;
-        CpuPercent = Ease(CpuPercent, _cpuTarget, ease);
-        RamPercent = Ease(RamPercent, _ramTarget, ease);
-        GpuPercent = Ease(GpuPercent, _gpuTarget, ease);
-        DiskPercent = Ease(DiskPercent, _diskTarget, ease);
-        _processDisplay = Ease(_processDisplay, _processTarget, ease);
-        ProcessCount = (int)Math.Round(_processDisplay);
-    }
+    [RelayCommand]
+    private void LaunchChat() => _onLaunchChat("");
 
-    private static double Ease(double current, double target, double factor)
+    /// <summary>
+    /// Спросить прямо с главной страницы.
+    ///
+    /// Поле ввода стоит здесь не для удобства печати, а чтобы первый экран
+    /// отвечал на вопрос «что дальше». Раньше на нём были кнопка и подсказки,
+    /// а места, куда можно написать, не было вовсе — приходилось сперва
+    /// догадаться зайти в чат.
+    /// </summary>
+    [RelayCommand]
+    private void Ask()
     {
-        var diff = target - current;
-        if (Math.Abs(diff) < 0.05) return target;
-        return current + diff * factor;
-    }
-
-    private async System.Threading.Tasks.Task PollMetricsAsync()
-    {
-        while (true)
+        var вопрос = (Draft ?? "").Trim();
+        if (вопрос.Length == 0)
         {
-            var metrics = await _client.MetricsAsync();
-            if (metrics?.Metrics is not null)
-            {
-                _cpuTarget = metrics.Metrics.Cpu;
-                _ramTarget = metrics.Metrics.Ram;
-                _gpuTarget = metrics.Metrics.Gpu;
-                _diskTarget = metrics.Metrics.Disk;
-                DiskUsagePercent = metrics.Metrics.DiskUsage;
-                _processTarget = metrics.Metrics.Processes;
-            }
-            await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(3));
+            return;
+        }
+
+        Draft = "";
+        _onLaunchChat(вопрос);
+    }
+
+    /// <summary>
+    /// Отправить пример, на который нажали.
+    ///
+    /// Примеры показывались как список того, что Scott умеет, но нажать на них
+    /// было нельзя — человек читал «Закрой дискорд» и шёл печатать то же самое
+    /// руками.
+    /// </summary>
+    [RelayCommand]
+    private void RunExample(HomeExample? пример)
+    {
+        if (пример is not null)
+        {
+            _onLaunchChat(пример.Text);
         }
     }
-
-    [RelayCommand]
-    private void LaunchChat() => _onLaunchChat();
 }
 
 

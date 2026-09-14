@@ -3,7 +3,7 @@
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:conv="using:ScottAI.Avalonia.Converters"
              xmlns:holo="using:ScottAI.Avalonia.Hologram"
-             x:DataType="vm:HomeViewModel"
+             x:DataType="vm:SystemViewModel"
              x:Class="ScottAI.Avalonia.Views.HologramView">
 
     <!-- Голограмма состояния машины.

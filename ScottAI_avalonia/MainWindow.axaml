@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:ScottAI.Avalonia.ViewModels"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -17,7 +17,7 @@
         Icon="/Assets/scott.ico">
 
     <Panel>
-    <Grid ColumnDefinitions="96,*">
+    <Grid ColumnDefinitions="208,*">
 
         <!-- Sidebar -->
         <Border Grid.Column="0" Background="{DynamicResource BgSidebar}"
@@ -26,66 +26,70 @@
                 <!-- Логотип. Подложки под ним нет намеренно: у самой иконки тёмный
                      фон со свечением по краю, и акцентный квадрат за прозрачными
                      углами выглядел бы рамкой. -->
-                <Border Classes="logo" Width="52" Height="52" CornerRadius="14" Margin="0,22,0,24"
-                        HorizontalAlignment="Center" DockPanel.Dock="Top" ClipToBounds="True">
-                    <Image Source="{Binding Logo}" Width="52" Height="52" Stretch="UniformToFill" />
-                </Border>
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12"
+                            Margin="18,20,0,22" VerticalAlignment="Center">
+                    <Border Classes="logo" Width="34" Height="34" CornerRadius="10" ClipToBounds="True">
+                        <Image Source="{Binding Logo}" Width="34" Height="34" Stretch="UniformToFill" />
+                    </Border>
+                    <TextBlock Text="ScottAI" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextPrimary}" />
+                </StackPanel>
 
                 <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="8,0">
                     <Button Command="{Binding NavigateHomeCommand}" Classes="nav" AutomationProperties.Name="Главная"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=home}">
-                        <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="Home" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Главная" HorizontalAlignment="Center" Classes="navlabel" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="Home" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Главная" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateChatCommand}" Classes="nav" AutomationProperties.Name="Чат"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=chat}">
-                        <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="ChatOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Чат" HorizontalAlignment="Center" Classes="navlabel" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="ChatOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Чат" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateSystemCommand}" Classes="nav" AutomationProperties.Name="Система"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=system}">
-                        <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="Cpu64Bit" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Система" HorizontalAlignment="Center" Classes="navlabel" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="Cpu64Bit" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Система" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateProtocolsCommand}" Classes="nav" AutomationProperties.Name="Протоколы"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=protocols}">
-                        <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="FormatListNumbered" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Протоколы" HorizontalAlignment="Center" Classes="navlabel" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="FormatListNumbered" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Протоколы" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateAnalyticsCommand}" Classes="nav" AutomationProperties.Name="Аналит."
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=analytics}">
-                        <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="ChartBar" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Аналит." HorizontalAlignment="Center" Classes="navlabel" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="ChartBar" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Аналит." VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateSettingsCommand}" Classes="nav" AutomationProperties.Name="Настр."
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=settings}">
-                        <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="CogOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Настр." HorizontalAlignment="Center" Classes="navlabel" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="CogOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Настр." VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateProfileCommand}" Classes="nav" AutomationProperties.Name="Профиль"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=profile}">
-                        <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="AccountCircleOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Профиль" HorizontalAlignment="Center" Classes="navlabel" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="AccountCircleOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Профиль" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateLogsCommand}" Classes="nav" AutomationProperties.Name="Логи"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=logs}">
-                        <StackPanel Spacing="3">
-                            <mi:MaterialIcon Kind="TextBoxSearchOutline" Width="21" Height="21" HorizontalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Логи" HorizontalAlignment="Center" Classes="navlabel" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="TextBoxSearchOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Логи" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
@@ -196,9 +200,16 @@
             <Border Grid.Row="1" Background="{DynamicResource BgTopbar}"
                     BorderBrush="{DynamicResource BorderColor}" BorderThickness="0,0,0,1">
                 <Grid ColumnDefinitions="*,Auto" Margin="28,0">
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                        <TextBlock Text="ScottAI" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
-                        <TextBlock Text="{Binding PageTitle}" FontSize="12" Foreground="{DynamicResource TextSecondary}" />
+                    <!-- Название открытого раздела, а не имя программы. Имя
+                         человек и так знает — он её запустил; а вот что перед
+                         ним за страница и зачем она, взгляду сказать некому.
+                         Строка пояснения снимает этот вопрос до того, как он
+                         возникнет. -->
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="{Binding PageTitle}" FontSize="21" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextPrimary}" />
+                        <TextBlock Text="{Binding PageSubtitle}" FontSize="12"
+                                   Foreground="{DynamicResource TextSecondary}" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
                         <!-- «Помолчи» одним нажатием. В настройках это тоже есть,
@@ -341,16 +352,21 @@
     </Panel>
 
     <Window.Styles>
+        <!-- Пункты бокового меню: иконка и подпись в строку, как в списке, а не
+             плитками. Плитки с подписью под значком читаются по одной, а меню
+             читают целиком, сверху вниз — и в строку оно просматривается
+             взглядом за раз. -->
         <Style Selector="Button.nav">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
-            <Setter Property="HorizontalContentAlignment" Value="Center" />
-            <Setter Property="Padding" Value="4,10" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="FontSize" Value="11" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Padding" Value="12,9" />
+            <Setter Property="CornerRadius" Value="9" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="Medium" />
             <Setter Property="RenderTransform" Value="scale(1.0)" />
             <Setter Property="Transitions">
                 <Transitions>
@@ -362,21 +378,23 @@
         </Style>
         <Style Selector="Button.nav:pointerover">
             <Setter Property="Background" Value="{DynamicResource BgElevated}" />
-            <Setter Property="RenderTransform" Value="scale(1.05)" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
         <Style Selector="Button.nav:pressed">
             <Setter Property="RenderTransform" Value="scale(0.95)" />
         </Style>
+        <!-- Открытый раздел залит акцентом целиком. Прежде он отмечался рамкой
+             и цветом подписи — этого мало: взгляд, скользящий по списку из
+             восьми строк, находит заливку сразу, а рамку приходится искать. -->
         <Style Selector="Button.nav.active">
-            <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
-            <Setter Property="BorderThickness" Value="2" />
-            <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+            <Setter Property="Background" Value="{DynamicResource Accent}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="White" />
         </Style>
 
         <Style Selector="TextBlock.navlabel">
-            <Setter Property="FontSize" Value="10" />
-            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="Medium" />
         </Style>
         <Style Selector="mi|MaterialIcon.navicon">
             <Setter Property="Transitions">
@@ -444,6 +462,58 @@
              выше, молча пропадали: кнопки сайдбара перещёлкивались рывком,
              хотя код на них был написан. Теперь всё, что относится к одному
              селектору, стоит в одном месте. -->
+
+        <!-- Плитка: кнопка, которая выглядит карточкой.
+             Нужна там, где нажимаемое перечислено списком — примеры команд на
+             главной, разделы настроек. Обычная кнопка в таком ряду читается как
+             призыв к действию, а нужен спокойный выбор из нескольких равных. -->
+        <!-- Карточка с числом: подпись, крупное значение, полоска. Одинаковые
+             по устройству, они читаются как один ряд, а не как три разные
+             штуки, — и сравнивать их между собой можно взглядом. -->
+        <Style Selector="Border.metric">
+            <Setter Property="Background" Value="{DynamicResource BgSurface}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="18,16" />
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <!-- По содержимому, а не во всю высоту строки: рядом стоит
+                 голограмма в полтора раза выше, и без этого карточки
+                 растягивались под неё, оставляя внутри пустоту. -->
+            <Setter Property="VerticalAlignment" Value="Top" />
+        </Style>
+        <Style Selector="TextBlock.metriclabel">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="LetterSpacing" Value="1.1" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+        <Style Selector="TextBlock.metricvalue">
+            <Setter Property="FontSize" Value="26" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+        <Style Selector="TextBlock.metrichint">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+
+        <Style Selector="Button.tile">
+            <Setter Property="Background" Value="{DynamicResource BgSurface}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="11" />
+            <Setter Property="Transitions">
+                <Transitions>
+                    <BrushTransition Property="Background" Duration="0:0:0.15" />
+                    <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="Button.tile:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BgElevated}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+        </Style>
 
         <Style Selector="Button.accent">
             <Setter Property="Background" Value="{DynamicResource Accent}" />

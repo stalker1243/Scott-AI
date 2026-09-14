@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -30,6 +30,17 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _pageTitle = "Главная";
+
+    /// <summary>
+    /// Пояснение под названием раздела.
+    ///
+    /// Не украшение: по названиям «Память», «Действия», «Диагностика» не
+    /// угадать, что внутри, а заходить в каждый раздел, чтобы выяснить, —
+    /// плохой способ знакомиться с программой. Одна строка снимает вопрос
+    /// раньше, чем он возникнет.
+    /// </summary>
+    [ObservableProperty]
+    private string _pageSubtitle = "Scott готов к работе";
 
     [ObservableProperty]
     private string _activePage = "home";
@@ -86,7 +97,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public MainWindowViewModel()
     {
-        Home = new HomeViewModel(_client, NavigateChat);
+        Home = new HomeViewModel(_client, OpenChatWith);
         Chat = new ChatViewModel(_client);
         SystemPage = new SystemViewModel(_client);
         LogsPage = new LogsViewModel(_client);
@@ -264,7 +275,29 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CurrentPage = Home;
         PageTitle = "Главная";
+        PageSubtitle = "Scott готов к работе";
         ActivePage = "home";
+    }
+
+    /// <summary>
+    /// Открыть чат, а если задан вопрос — сразу его и задать.
+    ///
+    /// Нужно главной странице: там есть поле ввода и примеры команд, по
+    /// которым можно нажать. Без этого вопрос пришлось бы набирать заново уже
+    /// в чате — то есть первый экран показывал бы, что Scott умеет, но сделать
+    /// с этим ничего не давал.
+    /// </summary>
+    private void OpenChatWith(string вопрос)
+    {
+        NavigateChat();
+
+        if (string.IsNullOrWhiteSpace(вопрос))
+        {
+            return;
+        }
+
+        Chat.Draft = вопрос;
+        Chat.SendCommand.Execute(null);
     }
 
     [RelayCommand]
@@ -272,6 +305,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CurrentPage = Chat;
         PageTitle = "Чат";
+        PageSubtitle = "Разговор со Scott";
         ActivePage = "chat";
     }
 
@@ -280,6 +314,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CurrentPage = SystemPage;
         PageTitle = "Система";
+        PageSubtitle = "Мониторинг и управление";
         ActivePage = "system";
     }
 
@@ -288,6 +323,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CurrentPage = ProtocolsPage;
         PageTitle = "Протоколы";
+        PageSubtitle = "Последовательности команд по одному слову";
         ActivePage = "protocols";
 
         // Список перечитывается при каждом заходе: протокол можно завести и
@@ -301,6 +337,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CurrentPage = AnalyticsPage;
         PageTitle = "Аналитика";
+        PageSubtitle = "Чем Scott занимался";
         ActivePage = "analytics";
     }
 
@@ -309,6 +346,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CurrentPage = SettingsPage;
         PageTitle = "Настройки";
+        PageSubtitle = "Основные параметры приложения";
         ActivePage = "settings";
     }
 
@@ -317,6 +355,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CurrentPage = ProfilePage;
         PageTitle = "Профиль";
+        PageSubtitle = "Как Scott к вам обращается";
         ActivePage = "profile";
     }
 
@@ -325,6 +364,7 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         CurrentPage = LogsPage;
         PageTitle = "Логи";
+        PageSubtitle = "Что происходило под капотом";
         ActivePage = "logs";
     }
 
