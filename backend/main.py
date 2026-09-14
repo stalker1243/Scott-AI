@@ -87,6 +87,8 @@ import personality as personality_module
 import memories as memories_module
 import projects as projects_module
 import abilities as abilities_module
+import remote_access
+import telegram_bridge
 import os_actions
 # Под своим именем: обработчик эндпоинта /speech_to_text называется так же
 # и затирает модуль при определении. Распознавание из-за этого молча уходило
@@ -1490,6 +1492,49 @@ def _listener_handle(text: str) -> None:
 # закрытие окна, и перезапуск — служба хранит дела в файле и сама следит за
 # временем.
 
+def _handle_remote(text: str, device: Dict) -> str:
+    """
+    Команда, пришедшая издалека — из Telegram или из мобильного приложения.
+
+    Отличие от голоса одно, но принципиальное: человека рядом нет. Он не видит,
+    что происходит, и не может остановить. Поэтому команда сперва разбирается —
+    и только потом решается, позволено ли такое делать издалека.
+
+    Разбор до проверки не случаен: запретить нужно ДЕЙСТВИЕ, а не слово. Иначе
+    «закрой дискорд» прошло бы как безобидный текст, а отказ достался бы
+    вопросу «как закрыть дискорд».
+    """
+    решение = understanding.understand(
+        text,
+        intent_engine=fast_intent_engine,
+        parser=command_parser,
+        answerer=question_answerer,
+        find_protocol=(scott_runtime.protocols.match
+                       if scott_runtime.protocols else None),
+    )
+
+    вид = решение.kind if решение.kind != 'action' else (решение.action or 'action')
+
+    if not remote_access.is_allowed(вид):
+        отказ = remote_access.refusal(вид)
+        remote_access.log(device["id"], device.get("name", ""), text, f"отказано: {вид}")
+        return отказ
+
+    try:
+        # Тот же путь, что и у голоса: разбирать команду дважды по-разному —
+        # верный способ получить две расходящиеся правды о том, что она значит.
+        итог = asyncio.run_coroutine_threadsafe(
+            scott_ai.process_command(text, quiet_mode=True), _main_loop
+        ).result(timeout=60) if _main_loop else None
+
+        ответ = итог.get("response", "") if isinstance(итог, dict) else "Сделано"
+    except Exception as e:
+        ответ = f"Не получилось: {e}"
+
+    remote_access.log(device["id"], device.get("name", ""), text, ответ)
+    return ответ or "Сделано"
+
+
 def _run_scheduled_command(item) -> None:
     """
     Выполнить то, что человек отложил на этот час.
@@ -1630,6 +1675,84 @@ async def health():
         "version": scott_profile.get('version'),
         "ai_name": scott_profile.get_name()
     }
+
+
+@app.get("/remote/status")
+async def remote_status():
+    """
+    Состояние удалённого доступа: работает ли мост, кто привязан.
+
+    Показывается в лаунчере — там же, где привязывают устройства. Человек
+    должен видеть, кто может командовать его компьютером, не заглядывая в файлы.
+    """
+    мост = telegram_bridge.get_bridge()
+
+    return {
+        "success": True,
+        "bridge": {
+            "configured": bool(мост and мост.configured),
+            "running": bool(мост and мост.running),
+            "username": мост.username if мост else "",
+            "error": мост.last_error if мост else "",
+        },
+        "devices": remote_access.devices(),
+        "pairing": remote_access.pairing_active(),
+        "allowed": remote_access.ALLOWED,
+    }
+
+
+@app.post("/remote/pairing")
+async def start_pairing():
+    """
+    Завести код привязки — шесть цифр, живущих минуту.
+
+    Столько, сколько нужно, чтобы прочитать с экрана и набрать на телефоне.
+    Код, живущий час, успевает попасть на фотографию экрана и в чужие глаза.
+    """
+    return {"success": True, **remote_access.start_pairing()}
+
+
+@app.delete("/remote/devices/{device_id}")
+async def forget_device(device_id: str):
+    """
+    Отвязать устройство — единственная защита при потерянном телефоне, поэтому
+    действует немедленно.
+    """
+    return remote_access.forget(device_id)
+
+
+@app.get("/remote/log")
+async def remote_log(limit: int = 100):
+    """
+    Что выполнялось издалека.
+
+    Без журнала о чужой команде не узнать никогда: она выполнится в пустой
+    комнате и не оставит следа.
+    """
+    return {"success": True, "entries": remote_access.read_log(limit)}
+
+
+@app.post("/remote/telegram")
+async def setup_telegram(request: Dict):
+    """
+    Включить мост в Telegram.
+
+    Токен бота человек получает у BotFather и вставляет сюда. Проверяем сразу:
+    вставивший токен должен увидеть, принят он или нет, а не гадать, почему
+    ничего не приходит.
+    """
+    токен = (request or {}).get("token", "")
+
+    мост = telegram_bridge.setup(_handle_remote, токен)
+    if мост is None:
+        return {"success": False, "error": "Не указан токен бота"}
+
+    итог = мост.start()
+
+    if итог.get("success") and токен:
+        remote_access.save_token(токен)
+
+    return итог
 
 
 @app.get("/abilities")
