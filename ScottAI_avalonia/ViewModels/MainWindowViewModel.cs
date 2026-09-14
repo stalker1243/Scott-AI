@@ -123,6 +123,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public ProjectsViewModel ProjectsPage { get; }
 
     public ActionsViewModel Actions { get; }
+
+    public RemoteViewModel Remote { get; }
     public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
@@ -135,6 +137,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // Примеры из «Действий» уходят в чат: человек должен увидеть, что
         // Scott ответил, а не гадать, сработало ли.
         Actions = new ActionsViewModel(_client, OpenChatWith);
+        Remote = new RemoteViewModel(_client);
         ProfilePage = new ProfileViewModel(_client);
         Home = new HomeViewModel(_client, OpenChatWith);
         Chat = new ChatViewModel(_client);
@@ -421,6 +424,19 @@ public partial class MainWindowViewModel : ViewModelBase
         // Цвет мог смениться из панели в углу окна, пока раздел был закрыт:
         // отметка на странице врала бы о том, какой из них сейчас в деле.
         Appearance.SyncAccentSelection();
+    }
+
+    [RelayCommand]
+    private void NavigateRemote()
+    {
+        CurrentPage = Remote;
+        PageTitle = "Удалённо";
+        PageSubtitle = "Кто может командовать Scott издалека";
+        ActivePage = "remote";
+
+        // Перечитываем при заходе: привязка происходит на телефоне, и список
+        // устройств меняется без участия этого окна.
+        _ = Remote.Refresh();
     }
 
     [RelayCommand]

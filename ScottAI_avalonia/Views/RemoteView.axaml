@@ -1,0 +1,210 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             x:DataType="vm:RemoteViewModel"
+             x:Class="ScottAI.Avalonia.Views.RemoteView">
+
+    <!-- Удалённый доступ.
+
+         Раздел про доверие, а не про удобство. Человек должен видеть, какие
+         устройства имеют доступ к его компьютеру, что они делали, и уметь
+         отвязать любое одним нажатием.
+
+         Привязка идёт отсюда: код показывается на экране компьютера, и это
+         единственное доказательство, что привязывающий сидит за ним. -->
+
+    <ScrollViewer>
+        <StackPanel Margin="32,28" Spacing="20" MaxWidth="740" HorizontalAlignment="Left">
+
+            <!-- ==================== Мост ==================== -->
+
+            <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="1" CornerRadius="12" Padding="18,16" MinWidth="660">
+                <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="12"
+                                Background="{DynamicResource AccentSoft}" VerticalAlignment="Center">
+                            <mi:MaterialIcon Kind="SendOutline" Width="20" Height="20"
+                                             Foreground="{DynamicResource Accent}"
+                                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                            <TextBlock Text="Telegram" FontSize="15" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimary}" />
+                            <TextBlock FontSize="12" Foreground="{DynamicResource TextMuted}"
+                                       IsVisible="{Binding BridgeWorks}">
+                                <Run Text="Бот" /><Run Text=" @" /><Run Text="{Binding Bridge.Username}" />
+                            </TextBlock>
+                            <TextBlock Text="Не подключён — вставьте токен бота ниже" FontSize="12"
+                                       Foreground="{DynamicResource TextMuted}"
+                                       IsVisible="{Binding !BridgeWorks}" />
+                        </StackPanel>
+
+                        <Border Grid.Column="2" Background="{DynamicResource BgElevated}" CornerRadius="8"
+                                Padding="10,5" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="7">
+                                <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                         Fill="{DynamicResource Success}" IsVisible="{Binding BridgeWorks}" />
+                                <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                         Fill="{DynamicResource TextMuted}" IsVisible="{Binding !BridgeWorks}" />
+                                <TextBlock Text="работает" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource Success}" IsVisible="{Binding BridgeWorks}" />
+                                <TextBlock Text="выключен" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextMuted}" IsVisible="{Binding !BridgeWorks}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- Токен спрашиваем только когда моста нет: у подключённого
+                         он уже сохранён, и второй раз вводить его незачем. -->
+                    <StackPanel Spacing="8" IsVisible="{Binding !BridgeWorks}">
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                                   Text="Создайте бота в Telegram у @BotFather (команда /newbot) и вставьте сюда выданный токен. Он хранится только на этом компьютере." />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBox Grid.Column="0" Text="{Binding TokenInput}" PasswordChar="•"
+                                     PlaceholderText="Токен бота" />
+                            <Button Grid.Column="1" Content="Подключить" Classes="accent"
+                                    Command="{Binding ConnectTelegramCommand}" IsEnabled="{Binding !Busy}" />
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ==================== Привязка ==================== -->
+
+            <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="1" CornerRadius="12" Padding="18,16" MinWidth="660"
+                    IsVisible="{Binding BridgeWorks}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Привязать устройство" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondary}" />
+
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                               IsVisible="{Binding !HasCode}">
+                        <Run Text="Нажмите кнопку, найдите в Telegram бота @" /><Run Text="{Binding Bridge.Username}" /><Run Text=" и пришлите ему показанный код." />
+                    </TextBlock>
+
+                    <Button Content="Показать код" Classes="accent" HorizontalAlignment="Left"
+                            Command="{Binding StartPairingCommand}" IsVisible="{Binding !HasCode}" />
+
+                    <!-- Код и обратный отсчёт. Человек должен видеть, сколько у
+                         него осталось, а не обнаружить истёкший код по отказу на
+                         телефоне. -->
+                    <StackPanel Spacing="8" IsVisible="{Binding HasCode}">
+                        <Border Background="{DynamicResource BgElevated}" CornerRadius="12"
+                                Padding="24,18" HorizontalAlignment="Left">
+                            <TextBlock Text="{Binding PairingCode}" FontSize="34" FontWeight="Bold"
+                                       LetterSpacing="8" Foreground="{DynamicResource Accent}" />
+                        </Border>
+                        <TextBlock FontSize="12" Foreground="{DynamicResource TextMuted}">
+                            <Run Text="Пришлите этот код боту. Код действует ещё" />
+                            <Run Text="{Binding PairingSeconds}" FontWeight="SemiBold" />
+                            <Run Text="секунд." />
+                        </TextBlock>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ==================== Устройства ==================== -->
+
+            <StackPanel Spacing="10">
+                <TextBlock Text="Устройства с доступом" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextSecondary}" />
+
+                <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1" CornerRadius="12" Padding="24" MinWidth="660"
+                        IsVisible="{Binding NoDevices}">
+                    <TextBlock Text="Пока никто не привязан — командовать Scott издалека некому."
+                               HorizontalAlignment="Center" FontSize="12"
+                               Foreground="{DynamicResource TextMuted}" />
+                </Border>
+
+                <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1" CornerRadius="12" Padding="4" MinWidth="660"
+                        IsVisible="{Binding !NoDevices}">
+                    <ItemsControl ItemsSource="{Binding Devices}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:RemoteDevice">
+                                <Grid ColumnDefinitions="*,Auto,Auto" Margin="14,11" ColumnSpacing="12">
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13"
+                                                   Foreground="{DynamicResource TextPrimary}" />
+                                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}">
+                                            <Run Text="{Binding ChannelText}" /><Run Text=" · последняя команда: " /><Run Text="{Binding LastSeenText}" />
+                                        </TextBlock>
+                                    </StackPanel>
+
+                                    <TextBlock Grid.Column="1" Text="{Binding PairedText}" FontSize="11"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextMuted}" />
+
+                                    <Button Grid.Column="2" Content="Отвязать" Classes="danger-text"
+                                            VerticalAlignment="Center"
+                                            Command="{Binding $parent[ItemsControl].((vm:RemoteViewModel)DataContext).ForgetCommand}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Border>
+            </StackPanel>
+
+            <!-- ==================== Журнал ====================
+                 Без него о чужой команде не узнать никогда: она выполнится в
+                 пустой комнате и не оставит следа. -->
+
+            <StackPanel Spacing="10" IsVisible="{Binding Log.Count}">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="Что выполнялось издалека" FontWeight="SemiBold"
+                               VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" />
+                    <Button Grid.Column="1" Command="{Binding RefreshCommand}" Classes="soft" Padding="12,7">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <mi:MaterialIcon Kind="Refresh" Width="14" Height="14" VerticalAlignment="Center" />
+                            <TextBlock Text="Обновить" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                        BorderThickness="1" CornerRadius="12" Padding="4" MinWidth="660">
+                    <ScrollViewer MaxHeight="300" Padding="0,0,12,0">
+                        <ItemsControl ItemsSource="{Binding Log}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:RemoteLogEntry">
+                                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="14,9" ColumnSpacing="12">
+                                        <TextBlock Grid.Column="0" Text="{Binding AtText}" FontSize="11"
+                                                   VerticalAlignment="Top" Width="82"
+                                                   Foreground="{DynamicResource TextMuted}" />
+
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock Text="{Binding Text}" FontSize="12" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource TextPrimary}" />
+                                            <TextBlock Text="{Binding Outcome}" FontSize="11" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource TextMuted}"
+                                                       IsVisible="{Binding !Refused}" />
+                                            <!-- Отказ выделен: именно о нём стоит узнать. -->
+                                            <TextBlock Text="{Binding Outcome}" FontSize="11" TextWrapping="Wrap"
+                                                       Foreground="#F59E0B"
+                                                       IsVisible="{Binding Refused}" />
+                                        </StackPanel>
+
+                                        <TextBlock Grid.Column="2" Text="{Binding Device}" FontSize="11"
+                                                   VerticalAlignment="Top"
+                                                   Foreground="{DynamicResource TextMuted}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+            </StackPanel>
+
+            <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
+                       Text="Издалека разрешено не всё: запустить программу, открыть сайт, поставить напоминание, ответить на вопрос. Выключение компьютера, закрытие программ и удаление файлов Scott делает только с самого компьютера." />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -1644,6 +1644,24 @@ except Exception as e:
     print(f"⚠️ Служба напоминаний недоступна: {e}")
 
 
+# ============= УДАЛЁННЫЙ ДОСТУП =============
+# Мост поднимается сам, если токен уже сохранён: человек, настроивший его
+# однажды, не должен включать его заново при каждом запуске.
+#
+# Без токена молчит и ничего не ломает — это обычное состояние для того, кто
+# удалённым доступом не пользуется.
+try:
+    _telegram = telegram_bridge.setup(_handle_remote)
+    if _telegram is not None:
+        _итог = _telegram.start()
+        if _итог.get("success"):
+            print(f"📨 Мост в Telegram работает: @{_итог.get('username', '')}")
+        else:
+            print(f"⚠️ Мост в Telegram не поднялся: {_итог.get('error')}")
+except Exception as e:
+    print(f"⚠️ Мост в Telegram недоступен: {e}")
+
+
 try:
     try:
         from .listener import VoiceListener

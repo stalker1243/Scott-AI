@@ -526,6 +526,88 @@ public class BackendClient
         }
     }
 
+    // ---------- Удалённый доступ ----------
+
+    public async Task<RemoteStatus?> RemoteStatusAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<RemoteStatus>("/remote/status");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Завести код привязки — шесть цифр, живущих минуту.</summary>
+    public async Task<(string Code, int Seconds)> StartPairingAsync()
+    {
+        try
+        {
+            var res = await _http.PostAsync("/remote/pairing", null);
+            var body = await res.Content.ReadFromJsonAsync<System.Text.Json.Nodes.JsonObject>();
+
+            return (body?["code"]?.GetValue<string>() ?? "",
+                    body?["expires_in"]?.GetValue<int>() ?? 0);
+        }
+        catch
+        {
+            return ("", 0);
+        }
+    }
+
+    public async Task<bool> ForgetDeviceAsync(string id)
+    {
+        try
+        {
+            var res = await _http.DeleteAsync($"/remote/devices/{id}");
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<List<RemoteLogEntry>> RemoteLogAsync()
+    {
+        try
+        {
+            var ответ = await _http.GetFromJsonAsync<System.Text.Json.Nodes.JsonObject>("/remote/log");
+            var записи = ответ?["entries"];
+
+            return записи is null
+                ? new List<RemoteLogEntry>()
+                : System.Text.Json.JsonSerializer.Deserialize<List<RemoteLogEntry>>(записи.ToJsonString())
+                  ?? new List<RemoteLogEntry>();
+        }
+        catch
+        {
+            return new List<RemoteLogEntry>();
+        }
+    }
+
+    /// <summary>Включить мост, вставив токен бота.</summary>
+    public async Task<(bool Success, string Message)> SetupTelegramAsync(string token)
+    {
+        try
+        {
+            var res = await _http.PostAsJsonAsync("/remote/telegram", new { token });
+            var body = await res.Content.ReadFromJsonAsync<System.Text.Json.Nodes.JsonObject>();
+
+            var успех = body?["success"]?.GetValue<bool>() ?? false;
+            var имя = body?["username"]?.GetValue<string>() ?? "";
+            var ошибка = body?["error"]?.GetValue<string>() ?? "";
+
+            return (успех, успех ? имя : ошибка);
+        }
+        catch (System.Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     // ---------- Проекты ----------
 
     public async Task<List<Project>> ProjectsAsync()
