@@ -86,6 +86,7 @@ import protocols as protocols_module
 import personality as personality_module
 import memories as memories_module
 import projects as projects_module
+import abilities as abilities_module
 import os_actions
 # Под своим именем: обработчик эндпоинта /speech_to_text называется так же
 # и затирает модуль при определении. Распознавание из-за этого молча уходило
@@ -1533,6 +1534,17 @@ async def health():
         "version": scott_profile.get('version'),
         "ai_name": scott_profile.get_name()
     }
+
+
+@app.get("/abilities")
+async def list_abilities():
+    """
+    Что Scott умеет — с примерами фраз и пометкой, доступно ли это здесь.
+
+    Список, обещающий то, чего на этой машине нет, хуже отсутствия списка:
+    человек решит, что у него сломалось.
+    """
+    return {"success": True, **abilities_module.describe()}
 
 
 @app.get("/projects")

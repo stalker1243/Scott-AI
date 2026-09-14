@@ -513,6 +513,19 @@ public class BackendClient
         }
     }
 
+    /// <summary>Что Scott умеет — с примерами фраз и пометкой о доступности.</summary>
+    public async Task<AbilitiesResponse?> AbilitiesAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<AbilitiesResponse>("/abilities");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     // ---------- Проекты ----------
 
     public async Task<List<Project>> ProjectsAsync()

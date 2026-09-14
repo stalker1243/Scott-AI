@@ -121,6 +121,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public MemoryViewModel Memory { get; }
 
     public ProjectsViewModel ProjectsPage { get; }
+
+    public ActionsViewModel Actions { get; }
     public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
@@ -129,6 +131,10 @@ public partial class MainWindowViewModel : ViewModelBase
         Diagnostics = new DiagnosticsViewModel(_client);
         Memory = new MemoryViewModel(_client);
         ProjectsPage = new ProjectsViewModel(_client);
+
+        // Примеры из «Действий» уходят в чат: человек должен увидеть, что
+        // Scott ответил, а не гадать, сработало ли.
+        Actions = new ActionsViewModel(_client, OpenChatWith);
         ProfilePage = new ProfileViewModel(_client);
         Home = new HomeViewModel(_client, OpenChatWith);
         Chat = new ChatViewModel(_client);
@@ -415,6 +421,19 @@ public partial class MainWindowViewModel : ViewModelBase
         // Цвет мог смениться из панели в углу окна, пока раздел был закрыт:
         // отметка на странице врала бы о том, какой из них сейчас в деле.
         Appearance.SyncAccentSelection();
+    }
+
+    [RelayCommand]
+    private void NavigateActions()
+    {
+        CurrentPage = Actions;
+        PageTitle = "Действия";
+        PageSubtitle = "Что Scott умеет и как его об этом просить";
+        ActivePage = "actions";
+
+        // Перечитываем при заходе: доступность умений меняется — микрофон
+        // отключают, ключ вводят, — и список, собранный при запуске, соврал бы.
+        _ = Actions.Refresh();
     }
 
     [RelayCommand]

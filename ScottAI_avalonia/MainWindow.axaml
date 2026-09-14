@@ -57,6 +57,13 @@
                             <TextBlock Text="Система" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
+                    <Button Command="{Binding NavigateActionsCommand}" Classes="nav" AutomationProperties.Name="Действия"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=actions}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="LightningBoltOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Действия" VerticalAlignment="Center" Classes="navlabel" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding NavigateProtocolsCommand}" Classes="nav" AutomationProperties.Name="Протоколы"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=protocols}">
                         <StackPanel Orientation="Horizontal" Spacing="12">

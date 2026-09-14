@@ -1,6 +1,7 @@
 DELETE /memories/{memory_id}
 DELETE /projects/{project_id}
 DELETE /protocols/{name}
+GET /abilities
 GET /ai/memory-stats
 GET /ai/providers
 GET /ai/status
