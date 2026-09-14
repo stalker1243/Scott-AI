@@ -85,8 +85,47 @@
 
                     <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
                                IsVisible="{Binding !HasCode}">
-                        <Run Text="Нажмите кнопку, найдите в Telegram бота @" /><Run Text="{Binding Bridge.Username}" /><Run Text=" и пришлите ему показанный код." />
+                        <Run Text="Нажмите кнопку, найдите в Telegram бота @" /><Run Text="{Binding Bridge.Username}" /><Run Text=" и пришлите ему показанный код. Для мобильного приложения впишите в него адрес этого компьютера и тот же код." />
                     </TextBlock>
+
+                    <!-- ==================== Адрес компьютера ====================
+
+                         Приложению нужен адрес, и взять его человеку больше
+                         неоткуда: «запустите ipconfig» — не ответ на вопрос
+                         «куда подключаться».
+
+                         Адресов показано несколько, и это не перестраховка. На
+                         машине с VPN исходящий пакет уходит с адреса
+                         переходника, и именно он выглядит главным — а телефон
+                         по нему не достучится никогда. Какой из трёх-четырёх
+                         настоящий, надёжно не знает никто; первый в списке —
+                         самый вероятный. -->
+                    <StackPanel Spacing="7" IsVisible="{Binding HasAddresses}">
+                        <TextBlock Text="Адрес этого компьютера" FontSize="12"
+                                   Foreground="{DynamicResource TextSecondary}" />
+
+                        <ItemsControl ItemsSource="{Binding Addresses}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                    <Border Background="{DynamicResource BgElevated}" CornerRadius="8"
+                                            Padding="11,6" Margin="0,0,8,8">
+                                        <SelectableTextBlock Text="{Binding}" FontSize="13"
+                                                             FontFamily="Consolas,Menlo,monospace"
+                                                             Foreground="{DynamicResource TextPrimary}" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <TextBlock Classes="hint" TextWrapping="Wrap" FontSize="11"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   Text="Первый — самый вероятный. Если приложение по нему не достучится, попробуйте следующий: остальные обычно принадлежат VPN и виртуальным машинам." />
+                    </StackPanel>
 
                     <Button Content="Показать код" Classes="accent" HorizontalAlignment="Left"
                             Command="{Binding StartPairingCommand}" IsVisible="{Binding !HasCode}" />

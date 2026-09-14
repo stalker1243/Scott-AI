@@ -1859,6 +1859,11 @@ async def remote_status():
         "devices": remote_access.devices(),
         "pairing": remote_access.pairing_active(),
         "lan": remote_access.allow_lan(),
+        # Адреса для телефона: их переписывают с экрана компьютера руками.
+        # Список, а не один: на машине с VPN «главным» оказывается адрес
+        # переходника, по которому телефон не достучится.
+        "address": remote_access.lan_address(),
+        "addresses": remote_access.lan_addresses(),
         "allowed": remote_access.ALLOWED,
     }
 

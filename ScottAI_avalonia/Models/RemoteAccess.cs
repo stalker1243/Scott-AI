@@ -98,4 +98,15 @@ public class RemoteStatus
     /// <summary>Что вообще позволено издалека — показывается человеку списком.</summary>
     [JsonPropertyName("allowed")]
     public Dictionary<string, string> Allowed { get; set; } = new();
+
+    /// <summary>
+    /// Адреса этого компьютера — их переписывают в телефон при привязке.
+    ///
+    /// Список, а не один адрес: на машине с VPN «главным» оказывается адрес
+    /// переходника, по которому телефон не достучится никогда. Какой из
+    /// трёх-четырёх настоящий, надёжно не знает никто, поэтому показываем все,
+    /// начиная с самого вероятного.
+    /// </summary>
+    [JsonPropertyName("addresses")]
+    public List<string> Addresses { get; set; } = new();
 }

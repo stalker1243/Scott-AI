@@ -26,6 +26,14 @@ public partial class RemoteViewModel : ViewModelBase
     public ObservableCollection<RemoteDevice> Devices { get; } = new();
     public ObservableCollection<RemoteLogEntry> Log { get; } = new();
 
+    /// <summary>
+    /// Адреса этого компьютера — их переписывают в телефон.
+    ///
+    /// Без них «впишите адрес компьютера» в приложении — тупик: где его взять,
+    /// человек не знает, а «запустите ipconfig» на такой вопрос не ответ.
+    /// </summary>
+    public ObservableCollection<string> Addresses { get; } = new();
+
     [ObservableProperty] private RemoteBridge _bridge = new();
     [ObservableProperty] private string _tokenInput = "";
     [ObservableProperty] private bool _busy;
@@ -38,6 +46,7 @@ public partial class RemoteViewModel : ViewModelBase
     public bool HasCode => PairingCode.Length > 0;
     public bool NoDevices => Devices.Count == 0;
     public bool BridgeWorks => Bridge.Running;
+    public bool HasAddresses => Addresses.Count > 0;
 
     partial void OnPairingCodeChanged(string value) => OnPropertyChanged(nameof(HasCode));
     partial void OnBridgeChanged(RemoteBridge value) => OnPropertyChanged(nameof(BridgeWorks));
@@ -66,6 +75,14 @@ public partial class RemoteViewModel : ViewModelBase
         {
             Devices.Add(устройство);
         }
+
+        Addresses.Clear();
+        foreach (var адрес in состояние.Addresses)
+        {
+            Addresses.Add(адрес);
+        }
+
+        OnPropertyChanged(nameof(HasAddresses));
 
         Log.Clear();
         var записи = await _client.RemoteLogAsync();
