@@ -113,10 +113,13 @@ public partial class MainWindowViewModel : ViewModelBase
     public AccentPickerViewModel Accent { get; } = new();
 
     public AppearanceViewModel Appearance { get; } = new();
+
+    public AiModelViewModel AiModel { get; }
     public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
     {
+        AiModel = new AiModelViewModel(_client);
         ProfilePage = new ProfileViewModel(_client);
         Home = new HomeViewModel(_client, OpenChatWith);
         Chat = new ChatViewModel(_client);
@@ -381,6 +384,15 @@ public partial class MainWindowViewModel : ViewModelBase
         PageTitle = "Персонализация";
         PageSubtitle = "Как Scott будет с вами говорить";
         ActivePage = "profile";
+    }
+
+    [RelayCommand]
+    private void NavigateAiModel()
+    {
+        CurrentPage = AiModel;
+        PageTitle = "Модель";
+        PageSubtitle = "Кто отвечает на вопросы и каким ключом";
+        ActivePage = "aimodel";
     }
 
     [RelayCommand]

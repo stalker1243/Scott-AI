@@ -1,0 +1,143 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             x:DataType="vm:AiModelViewModel"
+             x:Class="ScottAI.Avalonia.Views.AiModelView">
+
+    <!-- Какая модель отвечает на вопросы.
+
+         Первое, куда человек идёт на новой машине: без ключа Scott выполняет
+         команды, но на вопросы не отвечает вовсе. Поэтому сверху стоит ответ на
+         вопрос «работает ли сейчас», а уже под ним — выбор. -->
+
+    <ScrollViewer>
+        <StackPanel Margin="32,28" Spacing="22" MaxWidth="640" HorizontalAlignment="Left">
+
+            <!-- ==================== Кто отвечает сейчас ==================== -->
+
+            <Border Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                    BorderThickness="1" CornerRadius="12" Padding="18,16">
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+                    <Border Grid.Column="0" Width="40" Height="40" CornerRadius="12"
+                            Background="{DynamicResource AccentSoft}" VerticalAlignment="Center">
+                        <mi:MaterialIcon Kind="RobotOutline" Width="21" Height="21"
+                                         Foreground="{DynamicResource Accent}"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ActiveProvider, FallbackValue='Никто не подключён'}"
+                                   FontSize="15" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimary}" />
+                        <TextBlock Text="{Binding ActiveModel}" FontSize="12"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   IsVisible="{Binding ActiveModel, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                        <!-- Без ключа Scott не молчит совсем: команды он
+                             выполняет и без модели. Сказать об этом важнее, чем
+                             показать слово «ошибка». -->
+                        <TextBlock Text="Команды Scott выполняет и так, но на вопросы отвечать некому"
+                                   FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   IsVisible="{Binding !Connected}" />
+                    </StackPanel>
+
+                    <Border Grid.Column="2" CornerRadius="8" Padding="10,5" VerticalAlignment="Center"
+                            Background="{DynamicResource BgElevated}">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                     Fill="{DynamicResource Success}" IsVisible="{Binding Connected}" />
+                            <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                     Fill="{DynamicResource TextMuted}" IsVisible="{Binding !Connected}" />
+                            <TextBlock FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                                       Text="Подключено" Foreground="{DynamicResource Success}"
+                                       IsVisible="{Binding Connected}" />
+                            <TextBlock FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                                       Text="Не настроено" Foreground="{DynamicResource TextMuted}"
+                                       IsVisible="{Binding !Connected}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- ==================== Сообщения ==================== -->
+
+            <Border Background="{DynamicResource Danger}" Opacity="0.15" CornerRadius="8" Padding="12,8"
+                    IsVisible="{Binding Error, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                <TextBlock Text="{Binding Error}" Foreground="{DynamicResource Danger}" TextWrapping="Wrap" />
+            </Border>
+
+            <Border Background="{DynamicResource Success}" Opacity="0.15" CornerRadius="8" Padding="12,8"
+                    IsVisible="{Binding Status, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                <TextBlock Text="{Binding Status}" Foreground="{DynamicResource Success}" TextWrapping="Wrap" />
+            </Border>
+
+            <!-- ==================== Выбор ==================== -->
+
+            <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="Провайдер" FontWeight="SemiBold"
+                               VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" />
+                    <Button Grid.Column="1" Command="{Binding LoadCommand}" Classes="soft" Padding="12,7">
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <mi:MaterialIcon Kind="Refresh" Width="14" Height="14" VerticalAlignment="Center" />
+                            <TextBlock Text="Обновить" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <ItemsControl ItemsSource="{Binding Providers}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:AiProvider">
+                            <Button Content="{Binding Id}" Classes="tab" Margin="0,0,8,8"
+                                    Command="{Binding $parent[ItemsControl].((vm:AiModelViewModel)DataContext).SetSelectedProviderCommand}"
+                                    CommandParameter="{Binding}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="{Binding SelectedProvider.Note}" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TextMuted}" />
+            </StackPanel>
+
+            <StackPanel Spacing="10">
+                <TextBlock Text="Модель" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+
+                <ComboBox ItemsSource="{Binding SelectedProvider.Models}" SelectedValue="{Binding SelectedModel}"
+                          SelectedValueBinding="{Binding Id}" HorizontalAlignment="Stretch"
+                          IsEnabled="{Binding !UseCustomModel}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:AiModelOption">
+                            <TextBlock Text="{Binding Id}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <!-- Своя модель. Список подсказывает известные, но новые выходят
+                     чаще, чем обновляется Scott, — и человек не должен ждать
+                     выпуска, чтобы попробовать свежую. -->
+                <CheckBox IsChecked="{Binding UseCustomModel}" Content="Указать модель вручную" />
+                <TextBox Text="{Binding CustomModel}" IsVisible="{Binding UseCustomModel}"
+                         PlaceholderText="Например: llama-3.3-70b-versatile" />
+            </StackPanel>
+
+            <StackPanel Spacing="10">
+                <TextBlock Text="Ключ доступа" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+                <TextBlock Text="Нужен только при первой настройке провайдера или при смене ключа. Хранится на вашем компьютере."
+                           FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" />
+                <TextBox Text="{Binding ApiKeyInput}" PasswordChar="•"
+                         PlaceholderText="Оставьте пустым, если ключ уже настроен" />
+            </StackPanel>
+
+            <Button Content="Применить" Command="{Binding ApplyCommand}" IsEnabled="{Binding !Applying}"
+                    Classes="accent" HorizontalAlignment="Left" Padding="20,11" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -71,6 +71,13 @@
                             <TextBlock Text="Аналитика" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
+                    <Button Command="{Binding NavigateAiModelCommand}" Classes="nav" AutomationProperties.Name="Модель"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=aimodel}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="RobotOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Модель" VerticalAlignment="Center" Classes="navlabel" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding NavigateAppearanceCommand}" Classes="nav" AutomationProperties.Name="Внешний вид"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=appearance}">
                         <StackPanel Orientation="Horizontal" Spacing="12">

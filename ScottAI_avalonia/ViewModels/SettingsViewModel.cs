@@ -28,24 +28,6 @@ public partial class SettingsViewModel : ViewModelBase
     [RelayCommand]
     private void SetSettingsTab(string tab) => SettingsTab = tab;
 
-    // ---- Модель ИИ ----
-    public ObservableCollection<AiProvider> Providers { get; } = new();
-
-    [ObservableProperty] private AiProvider? _selectedProvider;
-    [ObservableProperty] private string? _selectedModel;
-    [ObservableProperty] private string _apiKeyInput = "";
-
-    /// <summary>Вводить название модели руками вместо выбора из списка.</summary>
-    [ObservableProperty] private bool _useCustomModel;
-
-    /// <summary>Название модели, введённое вручную. Новые модели выходят чаще,
-    /// чем обновляется Scott, и ждать выпуска ради свежей — глупо.</summary>
-    [ObservableProperty] private string _customModel = "";
-    [ObservableProperty] private string? _activeProvider;
-    [ObservableProperty] private string _activeModel = "";
-    [ObservableProperty] private bool _aiApplying;
-    [ObservableProperty] private string? _aiError;
-    [ObservableProperty] private string? _aiStatus;
     [ObservableProperty] private bool _aiLoading;
 
     // ---- Голос Scott ----
@@ -102,7 +84,6 @@ public partial class SettingsViewModel : ViewModelBase
     {
         _onAppearanceReset = onAppearanceReset;
         _client = client;
-        _ = LoadAiProviders();
         _ = LoadVersions();
         _ = LoadVoices();
         _ = LoadDeviceSettings();
@@ -112,7 +93,6 @@ public partial class SettingsViewModel : ViewModelBase
         // и списки провайдеров, голосов и устройств приходили пустыми.
         BackendReady.WhenReady(() =>
         {
-            _ = LoadAiProviders();
             _ = LoadVersions();
             _ = LoadVoices();
             _ = LoadDeviceSettings();
@@ -192,48 +172,6 @@ public partial class SettingsViewModel : ViewModelBase
     [RelayCommand]
     private Task SetDeviceCpu() => SetDevice("cpu");
 
-    [RelayCommand]
-    private async Task LoadAiProviders()
-    {
-        AiLoading = true;
-        AiError = null;
-        try
-        {
-            var (providers, activeProvider, activeModel) = await _client.ListAiProvidersAsync();
-            Providers.Clear();
-            foreach (var p in providers) Providers.Add(p);
-            ActiveProvider = activeProvider;
-            ActiveModel = activeModel;
-            SelectedProvider = Providers.Count > 0
-                ? (Providers.FirstOrDefault(p => p.Id == activeProvider) ?? Providers[0])
-                : null;
-
-            // На свежей установке активной модели ещё нет, и эта строка затирала
-            // ту, что подставилась вместе с провайдером. Человек вводил ключ,
-            // жал «Применить» — и не происходило ничего: модель пустая.
-            SelectedModel = !string.IsNullOrWhiteSpace(activeModel)
-                ? activeModel
-                : SelectedProvider?.Models.FirstOrDefault()?.Id;
-        }
-        catch (System.Exception ex)
-        {
-            AiError = ex.Message;
-        }
-        finally
-        {
-            AiLoading = false;
-        }
-    }
-
-    [RelayCommand]
-    private void SetSelectedProvider(AiProvider provider) => SelectedProvider = provider;
-
-    partial void OnSelectedProviderChanged(AiProvider? value)
-    {
-        ApiKeyInput = "";
-        SelectedModel = value?.Id == ActiveProvider ? ActiveModel : value?.Models.Count > 0 ? value.Models[0].Id : null;
-    }
-
     /// <summary>Сбросить профиль и оформление к первоначальному виду.</summary>
     [RelayCommand]
     private void ResetSettings()
@@ -249,62 +187,6 @@ public partial class SettingsViewModel : ViewModelBase
         _onAppearanceReset?.Invoke();
 
         ToastService.Success("Настройки сброшены — имя, «о себе», аватар и оформление очищены");
-    }
-
-    [RelayCommand]
-    private async Task ApplyAi()
-    {
-        // Молчаливый выход отсюда — худшее, что можно сделать с человеком,
-        // который только что ввёл ключ: кнопка нажата, и ничего не произошло.
-        if (SelectedProvider is null)
-        {
-            AiError = "Выберите провайдера ИИ — например, Groq";
-            ToastService.Error(AiError);
-            return;
-        }
-
-        // Введённая руками модель важнее выбранной в списке: человек указал её
-        // намеренно.
-        var model = UseCustomModel && !string.IsNullOrWhiteSpace(CustomModel)
-            ? CustomModel.Trim()
-            : SelectedModel;
-
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            // Модель почти всегда можно взять сама собой: у провайдера есть
-            // список, и первая в нём — разумный выбор по умолчанию.
-            model = SelectedProvider.Models.FirstOrDefault()?.Id;
-        }
-
-        SelectedModel = model;
-
-        if (string.IsNullOrWhiteSpace(SelectedModel))
-        {
-            AiError = "У этого провайдера не нашлось моделей — выберите другого";
-            ToastService.Error(AiError);
-            return;
-        }
-        AiApplying = true;
-        AiError = null;
-        AiStatus = null;
-        try
-        {
-            var (success, message) = await _client.ConfigureAiAsync(SelectedProvider.Id, SelectedModel, string.IsNullOrWhiteSpace(ApiKeyInput) ? null : ApiKeyInput.Trim());
-            if (!success)
-            {
-                AiError = message;
-                ToastService.Error(message);
-                return;
-            }
-            ApiKeyInput = "";
-            AiStatus = message;
-            ToastService.Success($"Модель ИИ переключена на {SelectedProvider.Id}");
-            await LoadAiProviders();
-        }
-        finally
-        {
-            AiApplying = false;
-        }
     }
 
     [RelayCommand]

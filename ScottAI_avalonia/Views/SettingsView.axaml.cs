@@ -28,12 +28,12 @@ public partial class SettingsView : UserControl
         {
             if (e.PropertyName != nameof(ViewModels.SettingsViewModel.SettingsTab)) return;
 
+            // Оформление и модель ИИ уехали в свои разделы: оформление
+            // перебирают, глядя на программу, а модель ищут первым делом на
+            // новой машине — обоим не место во вкладках раздела с громкостью.
             var section = vm.SettingsTab switch
             {
-                // Оформление уехало в свой раздел: перебирают его, глядя на
-                // программу, а не заходя в настройки с вопросом.
                 "voice" => (Control)VoiceSection,
-                "ai" => AiSection,
                 _ => OtherSection,
             };
 
