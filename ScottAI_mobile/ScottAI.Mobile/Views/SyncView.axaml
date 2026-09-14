@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Mobile.ViewModels"
+             xmlns:mi="using:Material.Icons.Avalonia"
              x:DataType="vm:SyncViewModel"
              x:Class="ScottAI.Mobile.Views.SyncView">
 
@@ -8,72 +9,117 @@
 
          Раздел про доверие, а не про удобство, поэтому здесь сказано прямо и
          то, чего связь НЕ делает: вне дома этот путь не работает, а отвязка с
-         телефона не убирает его из списка на компьютере. -->
+         телефона не убирает устройство из списка на компьютере. -->
 
-    <ScrollViewer Padding="16,14">
+    <ScrollViewer Padding="16,16,10,20">
         <StackPanel Spacing="16">
-
-            <TextBlock Text="Связь" Classes="h1" />
 
             <!-- ==================== Пока не привязан ==================== -->
 
-            <StackPanel Spacing="14" IsVisible="{Binding NotPaired}">
-                <TextBlock Classes="hint"
-                           Text="Откройте Scott на компьютере, раздел «Удалённо», нажмите «Показать код» — и впишите сюда адрес компьютера и этот код. Код живёт минуту." />
+            <StackPanel Spacing="16" IsVisible="{Binding NotPaired}">
 
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Адрес компьютера" FontSize="12"
-                               Foreground="{DynamicResource TextSecondary}" />
-                    <TextBox Text="{Binding Host}" PlaceholderText="192.168.1.5" />
+                <Border Classes="card">
+                    <StackPanel Spacing="14">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="13">
+                            <Border Grid.Column="0" Width="42" Height="42" CornerRadius="14"
+                                    Background="{DynamicResource AccentSoft}"
+                                    VerticalAlignment="Top">
+                                <mi:MaterialIcon Kind="CellphoneLink" Width="21" Height="21"
+                                                 Foreground="{DynamicResource Accent}"
+                                                 HorizontalAlignment="Center"
+                                                 VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock Text="Связать с компьютером" Classes="h2" />
+                                <TextBlock Classes="hint"
+                                           Text="Откройте Scott на компьютере, раздел «Удалённо», и нажмите «Показать код». Код живёт минуту." />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="АДРЕС КОМПЬЮТЕРА" Classes="label" />
+                    <TextBox Text="{Binding Host}" PlaceholderText="192.168.0.104" />
                     <TextBlock Classes="hint"
-                               Text="Это адрес в домашней сети. В Scott он показан там же, в разделе «Удалённо»." />
+                               Text="Он показан там же, в разделе «Удалённо». Если адресов несколько — начните с первого." />
                 </StackPanel>
 
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Код с экрана" FontSize="12"
-                               Foreground="{DynamicResource TextSecondary}" />
-                    <TextBox Text="{Binding Code}" PlaceholderText="6 цифр" MaxLength="6"
-                             FontSize="20" LetterSpacing="4" />
+                <StackPanel Spacing="8">
+                    <TextBlock Text="КОД С ЭКРАНА" Classes="label" />
+                    <TextBox Text="{Binding Code}" PlaceholderText="000000" MaxLength="6"
+                             FontSize="26" FontWeight="Bold" LetterSpacing="10"
+                             HorizontalContentAlignment="Center" Padding="16,14" />
                 </StackPanel>
 
-                <Button Content="Привязать" Classes="accent" HorizontalAlignment="Stretch"
+                <Button Classes="accent" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
-                        Command="{Binding PairCommand}" IsEnabled="{Binding !Busy}" />
+                        Command="{Binding PairCommand}" IsEnabled="{Binding !Busy}">
+                    <StackPanel Orientation="Horizontal" Spacing="9">
+                        <mi:MaterialIcon Kind="LinkVariant" Width="17" Height="17"
+                                         VerticalAlignment="Center" />
+                        <TextBlock Text="Привязать" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
             </StackPanel>
 
             <!-- ==================== Уже привязан ==================== -->
 
-            <StackPanel Spacing="14" IsVisible="{Binding Paired}">
-                <Border Background="{DynamicResource BgSurface}" CornerRadius="14" Padding="16"
-                        BorderThickness="1" BorderBrush="{DynamicResource BorderColor}">
-                    <StackPanel Spacing="8">
-                        <StackPanel Orientation="Horizontal" Spacing="9">
-                            <Ellipse Width="8" Height="8" VerticalAlignment="Center"
-                                     Fill="{DynamicResource Success}" />
-                            <TextBlock Text="Связан с компьютером" FontWeight="SemiBold"
-                                       Foreground="{DynamicResource TextPrimary}" />
+            <StackPanel Spacing="12" IsVisible="{Binding Paired}">
+                <Border Classes="card">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="13">
+                        <Border Grid.Column="0" Width="42" Height="42" CornerRadius="14"
+                                Background="#1A10B981" VerticalAlignment="Center">
+                            <mi:MaterialIcon Kind="CheckCircleOutline" Width="21" Height="21"
+                                             Foreground="{DynamicResource Success}"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                            <TextBlock Text="Связан с компьютером" Classes="h2" />
+                            <TextBlock Text="{Binding PairedHost}" FontSize="12"
+                                       FontFamily="Consolas,Menlo,monospace"
+                                       Foreground="{DynamicResource TextMuted}" />
                         </StackPanel>
-                        <TextBlock Text="{Binding PairedHost}" FontSize="13"
-                                   Foreground="{DynamicResource TextMuted}" />
-                    </StackPanel>
+                    </Grid>
                 </Border>
 
-                <Button Content="Проверить связь" HorizontalAlignment="Stretch"
+                <Button Classes="soft" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
-                        Command="{Binding CheckCommand}" IsEnabled="{Binding !Busy}" />
+                        Command="{Binding CheckCommand}" IsEnabled="{Binding !Busy}">
+                    <StackPanel Orientation="Horizontal" Spacing="9">
+                        <mi:MaterialIcon Kind="WifiArrowUpDown" Width="17" Height="17"
+                                         VerticalAlignment="Center" />
+                        <TextBlock Text="Проверить связь" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
 
-                <Button Content="Забыть привязку" Classes="quiet" HorizontalAlignment="Stretch"
+                <Button Classes="quiet" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Center"
-                        Command="{Binding ForgetCommand}" />
+                        Command="{Binding ForgetCommand}">
+                    <TextBlock Text="Забыть привязку" FontSize="13" />
+                </Button>
             </StackPanel>
 
             <!-- ==================== Что вышло ==================== -->
 
-            <Border CornerRadius="12" Padding="14,11"
-                    Background="{DynamicResource BgSurface}"
+            <Border CornerRadius="14" Padding="15,13"
+                    Background="{DynamicResource BgElevated}"
                     IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                <TextBlock Text="{Binding Status}" TextWrapping="Wrap" FontSize="13"
-                           Foreground="{DynamicResource TextSecondary}" />
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="11">
+                    <mi:MaterialIcon Grid.Column="0" Kind="AlertCircleOutline"
+                                     Width="17" Height="17" VerticalAlignment="Top"
+                                     Margin="0,1,0,0"
+                                     Foreground="{DynamicResource Danger}"
+                                     IsVisible="{Binding StatusIsError}" />
+                    <mi:MaterialIcon Grid.Column="0" Kind="InformationOutline"
+                                     Width="17" Height="17" VerticalAlignment="Top"
+                                     Margin="0,1,0,0"
+                                     Foreground="{DynamicResource Success}"
+                                     IsVisible="{Binding !StatusIsError}" />
+                    <TextBlock Grid.Column="1" Text="{Binding Status}" Classes="body"
+                               FontSize="13" />
+                </Grid>
             </Border>
 
             <!-- ==================== Вне дома ====================
@@ -81,27 +127,49 @@
                  который рассчитывал на команду из города и не получил её,
                  решит, что приложение сломано. -->
 
-            <Border Background="{DynamicResource BgSurface}" CornerRadius="14" Padding="16"
-                    BorderThickness="1" BorderBrush="{DynamicResource BorderColor}">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="А если вас нет дома" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimary}" />
+            <Border Classes="card">
+                <StackPanel Spacing="11">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="11">
+                        <mi:MaterialIcon Grid.Column="0" Kind="HomeMapMarker" Width="18" Height="18"
+                                         VerticalAlignment="Center"
+                                         Foreground="{DynamicResource TextSecondary}" />
+                        <TextBlock Grid.Column="1" Text="А если вас нет дома" Classes="h2"
+                                   VerticalAlignment="Center" />
+                    </Grid>
                     <TextBlock Classes="hint"
-                               Text="Отсюда команды идут напрямую по домашней сети — это быстро и ни через кого не проходит, но работает только дома. Из города Scott слушается через Telegram: напишите его боту, и он выполнит то же самое, по тем же правилам." />
+                               Text="Отсюда команды идут напрямую по домашней сети — быстро и ни через кого не проходя, но работает это только дома. Из города Scott слушается через Telegram: напишите его боту, и он выполнит то же самое, по тем же правилам." />
                 </StackPanel>
             </Border>
 
             <!-- ==================== Что можно издалека ==================== -->
 
-            <Border Background="{DynamicResource BgSurface}" CornerRadius="14" Padding="16"
-                    BorderThickness="1" BorderBrush="{DynamicResource BorderColor}">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Что Scott сделает издалека" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextPrimary}" />
-                    <TextBlock Classes="hint"
-                               Text="Запустит программу, откроет сайт или папку, найдёт в интернете, поставит напоминание, ответит на вопрос, откроет проект, отложит команду до вашего прихода." />
-                    <TextBlock Classes="hint"
-                               Text="Не станет: выключать и перезагружать компьютер, закрывать программы, удалять файлы, выполнять команды оболочки. Всё это требует, чтобы вы видели экран и могли остановить." />
+            <Border Classes="card">
+                <StackPanel Spacing="13">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="11">
+                        <mi:MaterialIcon Grid.Column="0" Kind="ShieldCheckOutline"
+                                         Width="18" Height="18" VerticalAlignment="Center"
+                                         Foreground="{DynamicResource TextSecondary}" />
+                        <TextBlock Grid.Column="1" Text="Что Scott сделает издалека"
+                                   Classes="h2" VerticalAlignment="Center" />
+                    </Grid>
+
+                    <StackPanel Spacing="7">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="9">
+                            <mi:MaterialIcon Grid.Column="0" Kind="Check" Width="15" Height="15"
+                                             VerticalAlignment="Top" Margin="0,2,0,0"
+                                             Foreground="{DynamicResource Success}" />
+                            <TextBlock Grid.Column="1" Classes="hint"
+                                       Text="Запустит программу, откроет сайт или папку, найдёт в интернете, поставит напоминание, ответит на вопрос, откроет проект, отложит команду до вашего прихода." />
+                        </Grid>
+
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="9">
+                            <mi:MaterialIcon Grid.Column="0" Kind="Close" Width="15" Height="15"
+                                             VerticalAlignment="Top" Margin="0,2,0,0"
+                                             Foreground="{DynamicResource Warning}" />
+                            <TextBlock Grid.Column="1" Classes="hint"
+                                       Text="Не станет: выключать и перезагружать компьютер, закрывать программы, удалять файлы, выполнять команды оболочки. Всё это требует, чтобы вы видели экран и могли остановить." />
+                        </Grid>
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </StackPanel>

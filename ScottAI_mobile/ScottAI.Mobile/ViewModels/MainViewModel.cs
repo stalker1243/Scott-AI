@@ -24,6 +24,18 @@ public partial class MainViewModel : ViewModelBase
     /// <summary>Открытый экран: chat | look | sync.</summary>
     [ObservableProperty] private string _tab = "chat";
 
+    /// <summary>
+    /// Связан ли телефон с компьютером — видно в шапке на каждом экране.
+    ///
+    /// Иначе о непривязанности узнаёшь только по ответу на первую команду, а к
+    /// тому времени человек уже успел на неё рассчитывать.
+    /// </summary>
+    public bool Linked => SettingsStore.Current.Paired;
+
+    public string StateText => Linked
+        ? SettingsStore.Current.Host
+        : "телефон не привязан";
+
     public bool OnChat => Tab == "chat";
     public bool OnLook => Tab == "look";
     public bool OnSync => Tab == "sync";
@@ -38,7 +50,15 @@ public partial class MainViewModel : ViewModelBase
 
         // Чат должен узнать о привязке сразу: пока её нет, он показывает не
         // подсказки, а объяснение, куда идти.
-        Sync.PairingChanged = Chat.NotifyPairingChanged;
+        Sync.PairingChanged = () =>
+        {
+            Chat.NotifyPairingChanged();
+
+            // Шапка показывает состояние связи на каждом экране, и обновиться
+            // она должна в тот же миг, а не при следующем переключении вкладки.
+            OnPropertyChanged(nameof(Linked));
+            OnPropertyChanged(nameof(StateText));
+        };
 
         // Непривязанный телефон открывается на «Связи»: чат ему всё равно
         // ответит только «сначала привяжитесь».

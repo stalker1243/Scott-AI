@@ -64,12 +64,31 @@ public partial class AppearanceViewModel : ViewModelBase
         Apply();
     }
 
+    /// <summary>Название выбранного цвета — кружок сам по себе безымянный.</summary>
+    public string AccentName
+    {
+        get
+        {
+            foreach (var цвет in Accents)
+            {
+                if (цвет.Hex == Accent)
+                {
+                    return цвет.Name;
+                }
+            }
+
+            return "Свой";
+        }
+    }
+
     private void Отметить()
     {
         foreach (var цвет in Accents)
         {
             цвет.Selected = цвет.Hex == Accent;
         }
+
+        OnPropertyChanged(nameof(AccentName));
     }
 
     partial void OnDarkChanged(bool value)

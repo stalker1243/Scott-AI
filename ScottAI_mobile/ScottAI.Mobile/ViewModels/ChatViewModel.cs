@@ -1,3 +1,4 @@
+using System;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -31,6 +32,32 @@ public partial class ChatViewModel : ViewModelBase
     public ChatViewModel(ScottClient client)
     {
         _client = client;
+
+        // Показать пример переписки — для проверки внешнего вида в окне на
+        // компьютере. Без этого вид реплик не проверить вовсе: чтобы они
+        // появились, нужен привязанный телефон и живой компьютер, а нажать
+        // кнопку в окне со стороны нельзя. На телефоне переменной нет.
+        if (Environment.GetEnvironmentVariable("SCOTT_DEMO") == "1")
+        {
+            Messages.Add(new ChatMessage { Text = "открой браузер", Mine = true });
+            Messages.Add(new ChatMessage { Text = "Открыл Chrome." });
+            Messages.Add(new ChatMessage { Text = "выключи компьютер", Mine = true });
+            Messages.Add(new ChatMessage
+            {
+                Text = "Выключение компьютера издалека я не делаю — вдруг на нём идёт работа.",
+                Refused = true,
+            });
+            Messages.Add(new ChatMessage
+            {
+                Text = "напомни через час про созвон",
+                Mine = true,
+            });
+            Messages.Add(new ChatMessage
+            {
+                Text = "Связи с компьютером нет: он мог уснуть или выйти из сети.",
+                Failed = true,
+            });
+        }
     }
 
     [RelayCommand]

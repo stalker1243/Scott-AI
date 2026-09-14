@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ScottAI.Mobile.ViewModels"
              xmlns:views="using:ScottAI.Mobile.Views"
+             xmlns:mi="using:Material.Icons.Avalonia"
              x:DataType="vm:MainViewModel"
              x:Class="ScottAI.Mobile.Views.MainView">
 
@@ -10,45 +11,125 @@
     </Design.DataContext>
 
     <UserControl.Styles>
-        <!-- Вкладка внизу: значок и подпись. Выбранная — акцентным цветом,
-             остальные приглушены. Подпись обязательна: значок без слова
-             угадывают неверно, а места внизу хватает. -->
+        <!-- Вкладка внизу: значок и подпись. Подпись обязательна — значок без
+             слова угадывают неверно, а места внизу хватает. -->
         <Style Selector="Button.tab /template/ ContentPresenter">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="CornerRadius" Value="0" />
         </Style>
 
         <Style Selector="Button.tab">
-            <Setter Property="Padding" Value="0,6" />
-            <Setter Property="MinHeight" Value="56" />
+            <Setter Property="CornerRadius" Value="0" />
+            <Setter Property="Padding" Value="0,8" />
+            <Setter Property="MinHeight" Value="60" />
             <Setter Property="HorizontalAlignment" Value="Stretch" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
         </Style>
     </UserControl.Styles>
 
-    <Grid RowDefinitions="*,Auto" Background="{DynamicResource BgWindow}">
+    <Grid RowDefinitions="Auto,*,Auto" Background="{DynamicResource BgWindow}">
+
+        <!-- Отсвет акцента сверху. Едва заметный: ровная тёмная плоскость во
+             весь экран читается как пустота, а не как фон, и любой предмет на
+             ней выглядит наклейкой. Лежит под всем содержимым и не ловит
+             нажатия. -->
+        <Border Grid.Row="0" Grid.RowSpan="2" Height="340" VerticalAlignment="Top"
+                IsHitTestVisible="False">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                    <GradientStop Color="{DynamicResource AccentColor}" Offset="0" />
+                    <GradientStop Color="Transparent" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+            <Border.Opacity>0.13</Border.Opacity>
+        </Border>
+
+        <!-- ==================== Шапка ====================
+
+             Держит две вещи, которые нужны на каждом экране: чьё это
+             приложение и есть ли связь с домом. Второе важнее: команда,
+             отправленная в никуда, выглядит так же, как отправленная
+             удачно, — и узнать об этом лучше до того, как её напишешь. -->
+
+        <Border Grid.Row="0" Background="{DynamicResource BgBar}"
+                BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BorderSoft}"
+                Padding="18,14">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+
+                <!-- Знак Scott: своя форма, не заимствованная ни у кого. -->
+                <Border Grid.Column="0" Width="38" Height="38" CornerRadius="13"
+                        VerticalAlignment="Center">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                            <GradientStop Color="{DynamicResource AccentColor}" Offset="0" />
+                            <GradientStop Color="#0B2C6B" Offset="1" />
+                        </LinearGradientBrush>
+                    </Border.Background>
+                    <TextBlock Text="S" FontSize="19" FontWeight="Bold" Foreground="White"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+
+                <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                    <TextBlock Text="Scott" FontSize="17" FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimary}" />
+                    <TextBlock Text="{Binding StateText}" FontSize="11"
+                               Foreground="{DynamicResource TextMuted}" />
+                </StackPanel>
+
+                <Border Grid.Column="2" CornerRadius="20" Padding="11,6"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource BgElevated}">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                 Fill="{DynamicResource Success}"
+                                 IsVisible="{Binding Linked}" />
+                        <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                 Fill="{DynamicResource TextMuted}"
+                                 IsVisible="{Binding !Linked}" />
+                        <TextBlock Text="связан" FontSize="11" FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource Success}"
+                                   IsVisible="{Binding Linked}" />
+                        <TextBlock Text="не связан" FontSize="11" FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   IsVisible="{Binding !Linked}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
 
         <!-- Экраны живут все сразу и лишь показываются по очереди: иначе
              переключение вкладок стирало бы набранный, но не отправленный
              текст и половину заполненной привязки. -->
-        <Panel Grid.Row="0">
-            <views:ChatView DataContext="{Binding Chat}" IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnChat}" />
-            <views:AppearanceView DataContext="{Binding Appearance}" IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnLook}" />
-            <views:SyncView DataContext="{Binding Sync}" IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnSync}" />
+        <Panel Grid.Row="1">
+            <views:ChatView DataContext="{Binding Chat}"
+                            IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnChat}" />
+            <views:AppearanceView DataContext="{Binding Appearance}"
+                                  IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnLook}" />
+            <views:SyncView DataContext="{Binding Sync}"
+                            IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnSync}" />
         </Panel>
 
         <!-- ==================== Вкладки ====================
              Внизу, а не сверху: телефон держат одной рукой, и до верха экрана
              большой палец не достаёт. -->
 
-        <Border Grid.Row="1" Background="{DynamicResource BgBar}"
-                BorderThickness="0,1,0,0" BorderBrush="{DynamicResource BorderColor}">
+        <Border Grid.Row="2" Background="{DynamicResource BgBar}"
+                BorderThickness="0,1,0,0" BorderBrush="{DynamicResource BorderSoft}">
             <Grid ColumnDefinitions="*,*,*">
 
                 <Button Grid.Column="0" Classes="tab" Command="{Binding OpenCommand}"
                         CommandParameter="chat">
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="💬" FontSize="19" HorizontalAlignment="Center" />
+                    <StackPanel Spacing="4">
+                        <mi:MaterialIcon Kind="ChatOutline" Width="22" Height="22"
+                                         HorizontalAlignment="Center"
+                                         Foreground="{DynamicResource TextMuted}"
+                                         IsVisible="{Binding !OnChat}" />
+                        <mi:MaterialIcon Kind="Chat" Width="22" Height="22"
+                                         HorizontalAlignment="Center"
+                                         Foreground="{DynamicResource Accent}"
+                                         IsVisible="{Binding OnChat}" />
                         <TextBlock Text="Чат" FontSize="11" HorizontalAlignment="Center"
                                    Foreground="{DynamicResource TextMuted}"
                                    IsVisible="{Binding !OnChat}" />
@@ -61,8 +142,15 @@
 
                 <Button Grid.Column="1" Classes="tab" Command="{Binding OpenCommand}"
                         CommandParameter="look">
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="🎨" FontSize="19" HorizontalAlignment="Center" />
+                    <StackPanel Spacing="4">
+                        <mi:MaterialIcon Kind="PaletteOutline" Width="22" Height="22"
+                                         HorizontalAlignment="Center"
+                                         Foreground="{DynamicResource TextMuted}"
+                                         IsVisible="{Binding !OnLook}" />
+                        <mi:MaterialIcon Kind="Palette" Width="22" Height="22"
+                                         HorizontalAlignment="Center"
+                                         Foreground="{DynamicResource Accent}"
+                                         IsVisible="{Binding OnLook}" />
                         <TextBlock Text="Вид" FontSize="11" HorizontalAlignment="Center"
                                    Foreground="{DynamicResource TextMuted}"
                                    IsVisible="{Binding !OnLook}" />
@@ -75,8 +163,15 @@
 
                 <Button Grid.Column="2" Classes="tab" Command="{Binding OpenCommand}"
                         CommandParameter="sync">
-                    <StackPanel Spacing="3">
-                        <TextBlock Text="🔗" FontSize="19" HorizontalAlignment="Center" />
+                    <StackPanel Spacing="4">
+                        <mi:MaterialIcon Kind="LinkVariant" Width="22" Height="22"
+                                         HorizontalAlignment="Center"
+                                         Foreground="{DynamicResource TextMuted}"
+                                         IsVisible="{Binding !OnSync}" />
+                        <mi:MaterialIcon Kind="LinkVariant" Width="22" Height="22"
+                                         HorizontalAlignment="Center"
+                                         Foreground="{DynamicResource Accent}"
+                                         IsVisible="{Binding OnSync}" />
                         <TextBlock Text="Связь" FontSize="11" HorizontalAlignment="Center"
                                    Foreground="{DynamicResource TextMuted}"
                                    IsVisible="{Binding !OnSync}" />
