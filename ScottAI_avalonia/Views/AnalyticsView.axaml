@@ -8,7 +8,6 @@
     <ScrollViewer>
         <StackPanel Margin="32" Spacing="20">
             <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Grid.Column="0" Text="Аналитика" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
                 <Button Grid.Column="1" Content="Обновить" Command="{Binding RefreshCommand}" Classes="soft" />
             </Grid>
 

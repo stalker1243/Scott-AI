@@ -9,101 +9,18 @@
              x:Class="ScottAI.Avalonia.Views.SettingsView">
     <ScrollViewer>
         <StackPanel Margin="32" Spacing="24" MaxWidth="640">
-            <TextBlock Text="Настройки" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
 
 
             <!-- Разделы вместо простыни. Раньше до модели ИИ приходилось
                  прокручивать мимо стилей, тем и голосов, читая по дороге всё
                  подряд. -->
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button Content="Оформление" Classes="tab" Command="{Binding SetSettingsTabCommand}" CommandParameter="look"
-                        Classes.tabactive="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=look}" />
                 <Button Content="Голос" Classes="tab" Command="{Binding SetSettingsTabCommand}" CommandParameter="voice"
                         Classes.tabactive="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=voice}" />
                 <Button Content="Модель ИИ" Classes="tab" Command="{Binding SetSettingsTabCommand}" CommandParameter="ai"
                         Classes.tabactive="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=ai}" />
                 <Button Content="Прочее" Classes="tab" Command="{Binding SetSettingsTabCommand}" CommandParameter="other"
                         Classes.tabactive="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=other}" />
-            </StackPanel>
-
-            <!-- Оформление -->
-            <StackPanel Spacing="24" IsVisible="{Binding SettingsTab, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=look}" Name="LookSection">
-                <StackPanel Spacing="10">
-                    <TextBlock Text="Стиль" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Button Content="Classic" Command="{Binding SetStyleClassicCommand}" Classes="tab"
-                                Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=classic}" />
-                        <Button Content="Glass" Command="{Binding SetStyleGlassCommand}" Classes="tab"
-                                Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=glass}" />
-                        <Button Content="Terminal Pro" Command="{Binding SetStyleTerminalCommand}" Classes="tab"
-                                Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=terminal}" />
-                    </StackPanel>
-                </StackPanel>
-
-                <StackPanel Spacing="10" IsVisible="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=classic}">
-                    <TextBlock Text="Тема" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                        <Button Content="Тёмная" Command="{Binding SetDarkCommand}" Classes="soft"
-                                Classes.tabactive="{Binding IsDark}" />
-                        <Button Content="Светлая" Command="{Binding SetLightCommand}" Classes="soft"
-                                Classes.tabactive="{Binding !IsDark}" />
-                    </StackPanel>
-                </StackPanel>
-
-                <StackPanel Spacing="10" IsVisible="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=glass}">
-                    <TextBlock Text="Прозрачность окна" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                    <TextBlock Text="Настоящий блюр рабочего стола под окном — двигайте, чтобы подобрать баланс между читаемостью и прозрачностью."
-                               FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
-                    <Grid ColumnDefinitions="*,Auto">
-                        <Slider Grid.Column="0" Minimum="15" Maximum="100" Value="{Binding GlassOpacity}" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Text="{Binding GlassOpacity, StringFormat={}{0:0}%}" Width="48"
-                                   HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimary}" />
-                    </Grid>
-                </StackPanel>
-
-                <StackPanel Spacing="10">
-                    <TextBlock Text="Акцентный цвет" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                    <ItemsControl ItemsSource="{Binding AccentSwatches}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal" Spacing="10" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:AccentSwatch">
-                                <Button Width="36" Height="36" CornerRadius="18" Padding="0" Classes="swatch"
-                                        Classes.selected="{Binding IsSelected}"
-                                        Background="{Binding Hex, Converter={x:Static myconv:HexToBrushConverter.Instance}}"
-                                        Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).SetAccentCommand}"
-                                        CommandParameter="{Binding}">
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-
-                <StackPanel Spacing="10">
-                    <TextBlock Text="Иконка приложения" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
-                               Text="Меняется значок в трее, заголовке окна и логотип слева. Тёмная лучше видна на тёмной панели задач, светлая — на светлой. Значок самого файла программы остаётся прежним: он вшит при сборке." />
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <Button Classes="iconpick" AutomationProperties.Name="Тёмная иконка" Command="{Binding SetIconCommand}" CommandParameter="dark"
-                                Classes.tabactive="{Binding IconVariant, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=dark}">
-                            <StackPanel Spacing="6">
-                                <Image Source="/Assets/scott-logo.png" Width="56" Height="56" />
-                                <TextBlock Text="Тёмная" FontSize="12" HorizontalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
-                        <Button Classes="iconpick" AutomationProperties.Name="Светлая иконка" Command="{Binding SetIconCommand}" CommandParameter="light"
-                                Classes.tabactive="{Binding IconVariant, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=light}">
-                            <StackPanel Spacing="6">
-                                <Image Source="/Assets/scott-logo-light.png" Width="56" Height="56" />
-                                <TextBlock Text="Светлая" FontSize="12" HorizontalAlignment="Center" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
-                </StackPanel>
-
             </StackPanel>
 
             <!-- Голос -->

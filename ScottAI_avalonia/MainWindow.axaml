@@ -68,14 +68,21 @@
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=analytics}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <mi:MaterialIcon Kind="ChartBar" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Аналит." VerticalAlignment="Center" Classes="navlabel" />
+                            <TextBlock Text="Аналитика" VerticalAlignment="Center" Classes="navlabel" />
+                        </StackPanel>
+                    </Button>
+                    <Button Command="{Binding NavigateAppearanceCommand}" Classes="nav" AutomationProperties.Name="Внешний вид"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=appearance}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="PaletteOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Внешний вид" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateSettingsCommand}" Classes="nav" AutomationProperties.Name="Настр."
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=settings}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <mi:MaterialIcon Kind="CogOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Настр." VerticalAlignment="Center" Classes="navlabel" />
+                            <TextBlock Text="Настройки" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding NavigateProfileCommand}" Classes="nav" AutomationProperties.Name="Персонализация"

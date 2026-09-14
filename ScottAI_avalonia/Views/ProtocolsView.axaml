@@ -8,9 +8,6 @@
              x:DataType="vm:ProtocolsViewModel"
              x:Class="ScottAI.Avalonia.Views.ProtocolsView">
     <Grid Margin="32" RowDefinitions="Auto,Auto,Auto,Auto,*">
-        <TextBlock Grid.Row="0" Text="Протоколы" FontSize="24" FontWeight="Bold"
-                   Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,6" />
-
         <Grid Grid.Row="1" ColumnDefinitions="*,Auto" Margin="0,0,0,4">
             <TextBlock Grid.Column="0" Text="Несколько шагов одной фразой: «протокол рабочий день» — и Scott выполнит их по порядку."
                        Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" TextWrapping="Wrap" />

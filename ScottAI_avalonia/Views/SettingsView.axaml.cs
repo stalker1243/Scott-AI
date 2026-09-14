@@ -1,4 +1,4 @@
-﻿using Avalonia.Controls;
+using Avalonia.Controls;
 using ScottAI.Avalonia.Services;
 
 namespace ScottAI.Avalonia.Views;
@@ -30,8 +30,9 @@ public partial class SettingsView : UserControl
 
             var section = vm.SettingsTab switch
             {
-                "look" => (Control)LookSection,
-                "voice" => VoiceSection,
+                // Оформление уехало в свой раздел: перебирают его, глядя на
+                // программу, а не заходя в настройки с вопросом.
+                "voice" => (Control)VoiceSection,
                 "ai" => AiSection,
                 _ => OtherSection,
             };

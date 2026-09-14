@@ -111,6 +111,8 @@ public partial class MainWindowViewModel : ViewModelBase
     /// не должна пропадать при переходе между разделами.
     /// </summary>
     public AccentPickerViewModel Accent { get; } = new();
+
+    public AppearanceViewModel Appearance { get; } = new();
     public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
@@ -122,7 +124,10 @@ public partial class MainWindowViewModel : ViewModelBase
         LogsPage = new LogsViewModel(_client);
         ProtocolsPage = new ProtocolsViewModel(_client);
         AnalyticsPage = new AnalyticsViewModel(_client);
-        SettingsPage = new SettingsViewModel(_client);
+        // Сброс настроек делается в Настройках, а оформление живёт в своём
+        // разделе: без этой связи его переключатели после сброса показывали бы
+        // прежнее до перезапуска лаунчера.
+        SettingsPage = new SettingsViewModel(_client, Appearance.ReloadFromSettings);
 
         // Тихий режим переключается из двух мест — кнопкой в шапке и на
         // странице настроек. Связь нужна в обе стороны, иначе переключатель и
@@ -376,6 +381,19 @@ public partial class MainWindowViewModel : ViewModelBase
         PageTitle = "Персонализация";
         PageSubtitle = "Как Scott будет с вами говорить";
         ActivePage = "profile";
+    }
+
+    [RelayCommand]
+    private void NavigateAppearance()
+    {
+        CurrentPage = Appearance;
+        PageTitle = "Внешний вид";
+        PageSubtitle = "Стиль окна, тема, цвет и значок";
+        ActivePage = "appearance";
+
+        // Цвет мог смениться из панели в углу окна, пока раздел был закрыт:
+        // отметка на странице врала бы о том, какой из них сейчас в деле.
+        Appearance.SyncAccentSelection();
     }
 
     [RelayCommand]

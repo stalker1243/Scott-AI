@@ -13,51 +13,20 @@ public partial class SettingsViewModel : ViewModelBase
 {
     private readonly BackendClient _client;
 
-    // Стартовые значения — те, что остались с прошлого запуска. Само оформление
-    // к этому моменту уже применено в App (до создания окна), здесь лишь
-    // приводится в соответствие состояние переключателей на странице.
-    [ObservableProperty]
-    private bool _isDark = SettingsStore.Current.IsDark;
+    /// <summary>
+    /// Кого предупредить, что оформление сброшено.
+    ///
+    /// Сама страница оформления — отдельный раздел, и её переключатели после
+    /// сброса показывали бы прежнее, пока человек не перезапустит лаунчер.
+    /// </summary>
+    private readonly System.Action? _onAppearanceReset;
 
+    /// <summary>Открытый раздел настроек: "voice" | "ai" | "other".</summary>
     [ObservableProperty]
-    private string _currentStyle = SettingsStore.Current.Style; // "classic" | "glass" | "terminal"
-
-    /// <summary>Открытый раздел настроек: "look" | "voice" | "ai" | "other".</summary>
-    [ObservableProperty]
-    private string _settingsTab = "look";
+    private string _settingsTab = "voice";
 
     [RelayCommand]
     private void SetSettingsTab(string tab) => SettingsTab = tab;
-
-    public ObservableCollection<AccentSwatch> AccentSwatches { get; } = new(
-        ThemeService.AccentPalette.Select(h => new AccentSwatch(h)));
-
-    [ObservableProperty]
-    private string _currentAccentHex = "#3B82F6";
-
-    [ObservableProperty]
-    private double _glassOpacity = ThemeService.GlassOpacityPercent;
-
-    partial void OnGlassOpacityChanged(double value)
-    {
-        ThemeService.SetGlassOpacity(value);
-        PersistTheme();
-    }
-
-    /// <summary>
-    /// Запомнить оформление на следующий запуск. Снимок берётся с ThemeService,
-    /// а не с полей страницы: акцент он сбрасывает сам при смене стиля, и только
-    /// он знает, какой цвет в итоге применён.
-    /// </summary>
-    private void PersistTheme()
-    {
-        var settings = SettingsStore.Current;
-        settings.Style = CurrentStyle;
-        settings.IsDark = ThemeService.IsDark;
-        settings.AccentHex = ThemeService.CurrentAccentHex;
-        settings.GlassOpacity = ThemeService.GlassOpacityPercent;
-        SettingsStore.SaveCurrent();
-    }
 
     // ---- Модель ИИ ----
     public ObservableCollection<AiProvider> Providers { get; } = new();
@@ -100,24 +69,6 @@ public partial class SettingsViewModel : ViewModelBase
         SettingsStore.SaveCurrent();
     }
 
-    // ---- Иконка приложения ----
-    // Два варианта различаются фоном самой иконки: тёмная со свечением хороша
-    // на тёмной панели задач, светлая — на светлой. Привязывать её к теме
-    // лаунчера нельзя: тема окна и тема панели задач у человека независимы.
-    [ObservableProperty] private string _iconVariant = SettingsStore.Current.IconVariant;
-
-    [RelayCommand]
-    private void SetIcon(string variant)
-    {
-        if (variant != AppIconService.Dark && variant != AppIconService.Light)
-            return;
-
-        IconVariant = variant;
-        AppIconService.Apply(variant);
-        SettingsStore.Current.IconVariant = variant;
-        SettingsStore.SaveCurrent();
-    }
-
     // ---- Устройство для речи ----
     // Автовыбор берёт видеокарту, когда она есть: разница принципиальная —
     // распознавание фразы занимает около секунды против четырёх с половиной на
@@ -147,10 +98,10 @@ public partial class SettingsViewModel : ViewModelBase
     [ObservableProperty] private bool _versionsLoading;
     [ObservableProperty] private string? _versionsError;
 
-    public SettingsViewModel(BackendClient client)
+    public SettingsViewModel(BackendClient client, System.Action? onAppearanceReset = null)
     {
+        _onAppearanceReset = onAppearanceReset;
         _client = client;
-        SyncAccentSelection();
         _ = LoadAiProviders();
         _ = LoadVersions();
         _ = LoadVoices();
@@ -167,66 +118,6 @@ public partial class SettingsViewModel : ViewModelBase
             _ = LoadDeviceSettings();
             _ = LoadAudioSettings();
         });
-    }
-
-    [RelayCommand]
-    private void SetStyleClassic()
-    {
-        CurrentStyle = "classic";
-        ThemeService.ApplyStyle(AppStyle.Classic, IsDark);
-        SyncAccentSelection();
-        PersistTheme();
-    }
-
-    [RelayCommand]
-    private void SetStyleGlass()
-    {
-        CurrentStyle = "glass";
-        ThemeService.ApplyStyle(AppStyle.Glass);
-        SyncAccentSelection();
-        PersistTheme();
-    }
-
-    [RelayCommand]
-    private void SetStyleTerminal()
-    {
-        CurrentStyle = "terminal";
-        ThemeService.ApplyStyle(AppStyle.Terminal);
-        SyncAccentSelection();
-        PersistTheme();
-    }
-
-    [RelayCommand]
-    private void SetDark()
-    {
-        IsDark = true;
-        if (CurrentStyle == "classic")
-        {
-            ThemeService.ApplyStyle(AppStyle.Classic, true);
-            SyncAccentSelection();
-        }
-        PersistTheme();
-    }
-
-    [RelayCommand]
-    private void SetLight()
-    {
-        IsDark = false;
-        if (CurrentStyle == "classic")
-        {
-            ThemeService.ApplyStyle(AppStyle.Classic, false);
-            SyncAccentSelection();
-        }
-        PersistTheme();
-    }
-
-    [RelayCommand]
-    private void SetAccent(AccentSwatch swatch)
-    {
-        ThemeService.SetAccent(Color.Parse(swatch.Hex));
-        CurrentAccentHex = swatch.Hex;
-        SyncAccentSelection();
-        PersistTheme();
     }
 
     [RelayCommand]
@@ -301,13 +192,6 @@ public partial class SettingsViewModel : ViewModelBase
     [RelayCommand]
     private Task SetDeviceCpu() => SetDevice("cpu");
 
-    private void SyncAccentSelection()
-    {
-        CurrentAccentHex = ThemeService.CurrentAccentHex;
-        foreach (var swatch in AccentSwatches)
-            swatch.IsSelected = string.Equals(swatch.Hex, CurrentAccentHex, System.StringComparison.OrdinalIgnoreCase);
-    }
-
     [RelayCommand]
     private async Task LoadAiProviders()
     {
@@ -359,10 +243,10 @@ public partial class SettingsViewModel : ViewModelBase
         // Оформление применяем сразу: иначе окно осталось бы в прежнем виде до
         // перезапуска, и человек решил бы, что сброс не сработал.
         ThemeService.ApplySaved(SettingsStore.Current);
-        IsDark = SettingsStore.Current.IsDark;
-        CurrentStyle = SettingsStore.Current.Style;
-        GlassOpacity = SettingsStore.Current.GlassOpacity;
-        SyncAccentSelection();
+
+        // И сообщаем разделу «Внешний вид», что его переключатели устарели:
+        // оформление живёт теперь там, а сброс делается отсюда.
+        _onAppearanceReset?.Invoke();
 
         ToastService.Success("Настройки сброшены — имя, «о себе», аватар и оформление очищены");
     }
