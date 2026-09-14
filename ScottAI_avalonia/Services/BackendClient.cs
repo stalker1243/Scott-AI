@@ -513,6 +513,81 @@ public class BackendClient
         }
     }
 
+    // ---------- Проекты ----------
+
+    public async Task<List<Project>> ProjectsAsync()
+    {
+        try
+        {
+            var ответ = await _http.GetFromJsonAsync<ProjectsResponse>("/projects");
+            return ответ?.Projects ?? new List<Project>();
+        }
+        catch
+        {
+            return new List<Project>();
+        }
+    }
+
+    public async Task<(bool Success, string Message)> AddProjectAsync(
+        string name, string path, string stack, string note)
+    {
+        try
+        {
+            var res = await _http.PostAsJsonAsync("/projects", new { name, path, stack, note });
+            var body = await res.Content.ReadFromJsonAsync<System.Text.Json.Nodes.JsonObject>();
+
+            return (body?["success"]?.GetValue<bool>() ?? false,
+                    body?["note"]?.GetValue<string>() ?? body?["error"]?.GetValue<string>() ?? "");
+        }
+        catch (System.Exception ex)
+        {
+            return (false, $"Не удалось завести проект: {ex.Message}");
+        }
+    }
+
+    /// <summary>Открыть папку проекта. Он же становится текущим.</summary>
+    public async Task<(bool Success, string Message)> OpenProjectAsync(string id)
+    {
+        try
+        {
+            var res = await _http.PostAsync($"/projects/{id}/open", null);
+            var body = await res.Content.ReadFromJsonAsync<System.Text.Json.Nodes.JsonObject>();
+
+            return (body?["success"]?.GetValue<bool>() ?? false,
+                    body?["error"]?.GetValue<string>() ?? "");
+        }
+        catch (System.Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    public async Task<bool> SetCurrentProjectAsync(string id)
+    {
+        try
+        {
+            var res = await _http.PostAsync($"/projects/{id}/current", null);
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> ForgetProjectAsync(string id)
+    {
+        try
+        {
+            var res = await _http.DeleteAsync($"/projects/{id}");
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     // ---------- Память ----------
 
     /// <summary>Что Scott помнит о своём человеке.</summary>

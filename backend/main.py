@@ -85,6 +85,8 @@ import understanding
 import protocols as protocols_module
 import personality as personality_module
 import memories as memories_module
+import projects as projects_module
+import os_actions
 # Под своим именем: обработчик эндпоинта /speech_to_text называется так же
 # и затирает модуль при определении. Распознавание из-за этого молча уходило
 # на запасной путь через сеть, а в логе стояло «'function' object has no
@@ -822,6 +824,32 @@ class ScottAI:
                 )
             print(f"🔎 Решение: {decision.kind} — {decision.reason}")
 
+            # ---------------------------------------------------- проект
+            if decision.kind == 'project':
+                проект = projects_module.find(decision.project)
+
+                if проект is None:
+                    response = f"Не знаю проекта «{decision.project}». Заведите его в разделе «Проекты»"
+                elif not проект.get("path"):
+                    response = f"У проекта «{проект['name']}» не указана папка"
+                else:
+                    итог = os_actions.open_path(проект["path"])
+                    if итог.get("success"):
+                        # Раз человек открыл проект, он над ним и работает:
+                        # дальше Scott будет держать в уме именно его.
+                        projects_module.set_current(проект["id"])
+                        response = f"Открыл проект «{проект['name']}»"
+                    else:
+                        response = f"Не удалось открыть: {итог.get('error', 'папка недоступна')}"
+
+                knowledge_base.add_conversation(text, response)
+                print(f"🤖 Scott: {response}")
+                return {
+                    "type": "project",
+                    "response": response,
+                    "quiet_mode": quiet_mode,
+                }
+
             # ---------------------------------------------------- запомнить
             #
             # Просьбу запомнить выполняем сами, не спрашивая модель. Отданная
@@ -1505,6 +1533,67 @@ async def health():
         "version": scott_profile.get('version'),
         "ai_name": scott_profile.get_name()
     }
+
+
+@app.get("/projects")
+async def list_projects():
+    """Проекты, над которыми человек работает. Текущий — первым."""
+    return {"success": True, "projects": projects_module.all_projects()}
+
+
+@app.post("/projects")
+async def add_project(request: Dict):
+    """Завести проект."""
+    данные = request or {}
+    return projects_module.add(
+        данные.get("name", ""),
+        данные.get("path", ""),
+        данные.get("stack", ""),
+        данные.get("note", ""),
+    )
+
+
+@app.post("/projects/{project_id}/current")
+async def make_current(project_id: str):
+    """
+    Переключиться на проект.
+
+    Scott держит в уме текущий: вопрос «как здесь сделать асинхронно» от
+    человека, пишущего на C#, заслуживает ответа про C#.
+    """
+    return projects_module.set_current(project_id)
+
+
+@app.post("/projects/{project_id}/open")
+async def open_project(project_id: str):
+    """
+    Открыть папку проекта.
+
+    То же делает фраза «открой проект такой-то» в разговоре.
+    """
+    проект = next((п for п in projects_module.all_projects() if п["id"] == project_id), None)
+    if проект is None:
+        return {"success": False, "error": "Такого проекта нет"}
+
+    if not проект.get("path"):
+        return {"success": False, "error": "У проекта не указана папка"}
+
+    итог = os_actions.open_path(проект["path"])
+    if итог.get("success"):
+        projects_module.set_current(project_id)
+
+    return итог
+
+
+@app.delete("/projects/{project_id}")
+async def forget_project(project_id: str):
+    """
+    Забыть проект.
+
+    Папка на диске не трогается: Scott перестаёт о нём знать, работа остаётся
+    на месте.
+    """
+    return projects_module.remove(project_id)
 
 
 @app.get("/memories")

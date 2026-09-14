@@ -570,6 +570,20 @@ class IntelligentAnswerer:
         except Exception:
             pass
 
+        # Над чем человек работает сейчас. Только текущий проект: перечислять
+        # все — значит платить за это в каждом вопросе.
+        try:
+            try:
+                from . import projects
+            except ImportError:
+                import projects
+
+            работа = projects.prompt_addition()
+            if работа:
+                добавка = (добавка + "\n\n" + работа) if добавка else работа
+        except Exception:
+            pass
+
         if not добавка:
             return основа
 

@@ -119,6 +119,8 @@ public partial class MainWindowViewModel : ViewModelBase
     public DiagnosticsViewModel Diagnostics { get; }
 
     public MemoryViewModel Memory { get; }
+
+    public ProjectsViewModel ProjectsPage { get; }
     public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
@@ -126,6 +128,7 @@ public partial class MainWindowViewModel : ViewModelBase
         AiModel = new AiModelViewModel(_client);
         Diagnostics = new DiagnosticsViewModel(_client);
         Memory = new MemoryViewModel(_client);
+        ProjectsPage = new ProjectsViewModel(_client);
         ProfilePage = new ProfileViewModel(_client);
         Home = new HomeViewModel(_client, OpenChatWith);
         Chat = new ChatViewModel(_client);
@@ -412,6 +415,19 @@ public partial class MainWindowViewModel : ViewModelBase
         // Цвет мог смениться из панели в углу окна, пока раздел был закрыт:
         // отметка на странице врала бы о том, какой из них сейчас в деле.
         Appearance.SyncAccentSelection();
+    }
+
+    [RelayCommand]
+    private void NavigateProjects()
+    {
+        CurrentPage = ProjectsPage;
+        PageTitle = "Проекты";
+        PageSubtitle = "Над чем вы работаете";
+        ActivePage = "projects";
+
+        // Перечитываем при заходе: текущий проект мог смениться от фразы
+        // «открой проект такой-то», сказанной в разговоре.
+        _ = ProjectsPage.Refresh();
     }
 
     [RelayCommand]

@@ -92,6 +92,13 @@
                             <TextBlock Text="Настройки" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
+                    <Button Command="{Binding NavigateProjectsCommand}" Classes="nav" AutomationProperties.Name="Проекты"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=projects}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="FolderMultipleOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Проекты" VerticalAlignment="Center" Classes="navlabel" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding NavigateMemoryCommand}" Classes="nav" AutomationProperties.Name="Память"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=memory}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
@@ -574,6 +581,12 @@
         <!-- Карточка с числом: подпись, крупное значение, полоска. Одинаковые
              по устройству, они читаются как один ряд, а не как три разные
              штуки, — и сравнивать их между собой можно взглядом. -->
+        <!-- Карточка проекта, над которым работают сейчас: рамка акцентом.
+             В списке из десятка одинаковых карточек текущий иначе не найти. -->
+        <Style Selector="Border.current">
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+        </Style>
+
         <Style Selector="Border.metric">
             <Setter Property="Background" Value="{DynamicResource BgSurface}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderColor}" />

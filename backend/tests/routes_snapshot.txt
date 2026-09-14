@@ -1,4 +1,5 @@
 DELETE /memories/{memory_id}
+DELETE /projects/{project_id}
 DELETE /protocols/{name}
 GET /ai/memory-stats
 GET /ai/providers
@@ -54,6 +55,7 @@ GET /profile
 GET /profiles/current
 GET /profiles/list
 GET /profiles/stats
+GET /projects
 GET /protocols
 GET /protocols/{name}
 GET /reminders
@@ -133,6 +135,9 @@ POST /profiles/create
 POST /profiles/delete
 POST /profiles/switch
 POST /profiles/update
+POST /projects
+POST /projects/{project_id}/current
+POST /projects/{project_id}/open
 POST /protocols
 POST /protocols/{name}/run
 POST /reminders/add

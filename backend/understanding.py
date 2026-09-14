@@ -44,7 +44,7 @@ class Decision:
     писал код.
     """
 
-    kind: str                       # 'protocol' | 'web' | 'question' | 'action' | 'remember' | 'refused'
+    kind: str                       # 'protocol' | 'web' | 'question' | 'action' | 'remember' | 'project' | 'refused'
     reason: str = ""
 
     # kind='protocol'
@@ -60,6 +60,9 @@ class Decision:
 
     # kind='remember'
     memory: str = ""            # что именно запомнить
+
+    # kind='project'
+    project: str = ""           # название проекта, который просят открыть
 
     # kind='refused'
     message: str = ""
@@ -204,6 +207,20 @@ def understand(text: str, *, intent_engine, parser, answerer,
             kind='remember',
             memory=запомнить,
             reason=f"просьба запомнить: «{запомнить}»",
+            intent=intent,
+        )
+
+    # 0.7 «Открой проект такой-то».
+    #
+    #     Стоит до разбора команд, потому что общий разборщик видит «открой» и
+    #     принимается искать программу с названием «проект скотт» — которой,
+    #     разумеется, нет. Проект же — это папка, которую Scott знает по имени.
+    проект = extract_project(text)
+    if проект is not None:
+        return Decision(
+            kind='project',
+            project=проект,
+            reason=f"просьба открыть проект «{проект}»",
             intent=intent,
         )
 
@@ -424,6 +441,31 @@ def extract_memory(text: str):
     for начало in ЗАПОМНИТЬ:
         if низ.startswith(начало):
             остаток = строка[len(начало):].strip(" ,:—-")
+            return остаток if остаток else None
+
+    return None
+
+
+# Как просят открыть проект.
+#
+# Слово «проект» обязательно: без него «открой скотт» — это просьба запустить
+# программу, и отбирать её у обычного разбора нельзя.
+ОТКРЫТЬ_ПРОЕКТ = (
+    "открой проект",
+    "открыть проект",
+    "покажи проект",
+    "перейди к проекту",
+)
+
+
+def extract_project(text: str):
+    """Название проекта, который просят открыть, или None."""
+    строка = (text or "").strip()
+    низ = строка.lower()
+
+    for начало in ОТКРЫТЬ_ПРОЕКТ:
+        if низ.startswith(начало):
+            остаток = строка[len(начало):].strip(" ,:—-«»\"")
             return остаток if остаток else None
 
     return None
