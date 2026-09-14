@@ -18,7 +18,17 @@ public partial class MainWindowViewModel : ViewModelBase
     public FirstRunViewModel FirstRun { get; } = new();
 
     /// <summary>Полоска «вышла новая версия» — показывается один раз при запуске.</summary>
-    public UpdateViewModel Update { get; } = new("http://127.0.0.1:8000");
+    /// <summary>
+    /// Адрес backend — один на всех, кто к нему обращается.
+    ///
+    /// Записанный в двух местах, он однажды разойдётся, и тогда одна половина
+    /// программы будет разговаривать с backend, а другая молча нет.
+    /// </summary>
+    public const string BackendBase = "http://127.0.0.1:8000";
+
+    public UpdateViewModel Update { get; } = new(BackendBase);
+
+    public AboutViewModel About { get; } = new(BackendBase);
     private readonly DispatcherTimer _healthTimer;
     private bool _everOnline;
 
@@ -366,6 +376,15 @@ public partial class MainWindowViewModel : ViewModelBase
         PageTitle = "Персонализация";
         PageSubtitle = "Как Scott будет с вами говорить";
         ActivePage = "profile";
+    }
+
+    [RelayCommand]
+    private void NavigateAbout()
+    {
+        CurrentPage = About;
+        PageTitle = "О ScottAI";
+        PageSubtitle = "Версия, обновления и сведения о программе";
+        ActivePage = "about";
     }
 
     [RelayCommand]

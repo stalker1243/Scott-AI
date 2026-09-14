@@ -85,6 +85,13 @@
                             <TextBlock Text="Персонализация" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
+                    <Button Command="{Binding NavigateAboutCommand}" Classes="nav" AutomationProperties.Name="О ScottAI"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=about}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="InformationOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="О ScottAI" VerticalAlignment="Center" Classes="navlabel" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding NavigateLogsCommand}" Classes="nav" AutomationProperties.Name="Логи"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=logs}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
@@ -604,6 +611,21 @@
         </Style>
         <Style Selector="Button.swatchdot:pointerover">
             <Setter Property="RenderTransform" Value="scale(1.14)" />
+        </Style>
+
+        <!-- Строка сведений: подпись слева, значение справа. Ровный ряд
+             одинаковых строк читается как таблица, не будучи ею. -->
+        <Style Selector="Grid.aboutrow">
+            <Setter Property="Margin" Value="14,11" />
+        </Style>
+        <Style Selector="TextBlock.aboutlabel">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}" />
+        </Style>
+        <Style Selector="TextBlock.aboutvalue">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
         </Style>
 
         <Style Selector="Button.tile">
