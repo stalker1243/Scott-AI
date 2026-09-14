@@ -30,7 +30,14 @@ public class ScottClient
 {
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(70) };
 
-    private static string База(string host)
+    /// <summary>
+    /// Привести введённый адрес к тому, по которому можно постучаться.
+    ///
+    /// Человек вводит «192.168.1.5» — без схемы и обычно без порта. Дописать
+    /// их за него надёжнее, чем объяснять, почему «не подключается»: адрес он
+    /// переписывает с чужого экрана и лишнего туда не добавит.
+    /// </summary>
+    public static string Normalize(string host)
     {
         var адрес = (host ?? "").Trim();
 
@@ -39,8 +46,6 @@ public class ScottClient
             return "";
         }
 
-        // Человек вводит «192.168.1.5» — без схемы и часто без порта. Дописать
-        // их за него надёжнее, чем объяснять, почему «не подключается».
         if (!адрес.StartsWith("http://") && !адрес.StartsWith("https://"))
         {
             адрес = "http://" + адрес;
@@ -62,7 +67,7 @@ public class ScottClient
     /// </summary>
     public async Task<bool> ReachableAsync(string host)
     {
-        var адрес = База(host);
+        var адрес = Normalize(host);
         if (адрес.Length == 0)
         {
             return false;
@@ -89,7 +94,7 @@ public class ScottClient
     public async Task<(bool Успех, string Ключ, string Ошибка)> PairAsync(
         string host, string code, string name)
     {
-        var адрес = База(host);
+        var адрес = Normalize(host);
         if (адрес.Length == 0)
         {
             return (false, "", "Не указан адрес компьютера");
@@ -126,10 +131,10 @@ public class ScottClient
     /// «не буду выключать компьютер издалека» — тоже ответ Scott, и человек
     /// должен его прочитать, а не увидеть «сбой связи».
     /// </summary>
-    public async Task<CommandResult> SendAsync(string text)
+    public virtual async Task<CommandResult> SendAsync(string text)
     {
         var настройки = SettingsStore.Current;
-        var адрес = База(настройки.Host);
+        var адрес = Normalize(настройки.Host);
 
         if (адрес.Length == 0 || настройки.Token.Length == 0)
         {

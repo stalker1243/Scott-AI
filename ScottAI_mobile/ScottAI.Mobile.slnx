@@ -9,4 +9,5 @@
        и возврат строки с ScottAI.Mobile.Android сюда. -->
   <Project Path="ScottAI.Mobile/ScottAI.Mobile.csproj" />
   <Project Path="ScottAI.Mobile.Desktop/ScottAI.Mobile.Desktop.csproj" />
+  <Project Path="ScottAI.Mobile.Tests/ScottAI.Mobile.Tests.csproj" />
 </Solution>
