@@ -513,6 +513,70 @@ public class BackendClient
         }
     }
 
+    // ---------- Память ----------
+
+    /// <summary>Что Scott помнит о своём человеке.</summary>
+    public async Task<MemoryList?> MemoriesAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<MemoryList>("/memories");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Запомнить. То же делает фраза «запомни, что …» в разговоре.</summary>
+    public async Task<(bool Success, string Message)> AddMemoryAsync(string text, string kind)
+    {
+        try
+        {
+            var res = await _http.PostAsJsonAsync("/memories", new { text, kind });
+            var body = await res.Content.ReadFromJsonAsync<System.Text.Json.Nodes.JsonObject>();
+
+            var успех = body?["success"]?.GetValue<bool>() ?? false;
+            var сообщение = body?["note"]?.GetValue<string>()
+                            ?? body?["error"]?.GetValue<string>()
+                            ?? "";
+
+            return (успех, сообщение);
+        }
+        catch (System.Exception ex)
+        {
+            return (false, $"Не удалось запомнить: {ex.Message}");
+        }
+    }
+
+    /// <summary>Забыть одну запись.</summary>
+    public async Task<bool> ForgetMemoryAsync(string id)
+    {
+        try
+        {
+            var res = await _http.DeleteAsync($"/memories/{id}");
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Забыть всё.</summary>
+    public async Task<bool> ForgetAllMemoriesAsync()
+    {
+        try
+        {
+            var res = await _http.PostAsJsonAsync("/memories/clear", new { });
+            return res.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>Что работает прямо сейчас: микрофон, динамики, речь, модель, сеть.</summary>
     public async Task<HealthReport?> HealthChecksAsync()
     {

@@ -92,6 +92,13 @@
                             <TextBlock Text="Настройки" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
+                    <Button Command="{Binding NavigateMemoryCommand}" Classes="nav" AutomationProperties.Name="Память"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=memory}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="HeadCogOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Память" VerticalAlignment="Center" Classes="navlabel" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding NavigateProfileCommand}" Classes="nav" AutomationProperties.Name="Персонализация"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=profile}">
                         <StackPanel Orientation="Horizontal" Spacing="12">

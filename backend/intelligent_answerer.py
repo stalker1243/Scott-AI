@@ -556,6 +556,20 @@ class IntelligentAnswerer:
             # отвечаем как раньше.
             добавка = ""
 
+        # То, что человек просил запомнить. Отдельно от персонализации: она о
+        # том, КАК говорить, а это — что Scott знает.
+        try:
+            try:
+                from . import memories
+            except ImportError:
+                import memories
+
+            помнит = memories.prompt_addition()
+            if помнит:
+                добавка = (добавка + "\n\n" + помнит) if добавка else помнит
+        except Exception:
+            pass
+
         if not добавка:
             return основа
 

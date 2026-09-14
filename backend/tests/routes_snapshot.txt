@@ -1,3 +1,4 @@
+DELETE /memories/{memory_id}
 DELETE /protocols/{name}
 GET /ai/memory-stats
 GET /ai/providers
@@ -45,6 +46,7 @@ GET /listen/status
 GET /macros/get
 GET /macros/list
 GET /macros/status
+GET /memories
 GET /metrics
 GET /personality
 GET /processes
@@ -123,6 +125,8 @@ POST /macros/execute
 POST /macros/record-action
 POST /macros/start-recording
 POST /macros/stop-recording
+POST /memories
+POST /memories/clear
 POST /open-program
 POST /personality
 POST /profiles/create

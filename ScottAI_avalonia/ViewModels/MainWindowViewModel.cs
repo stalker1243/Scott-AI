@@ -117,12 +117,15 @@ public partial class MainWindowViewModel : ViewModelBase
     public AiModelViewModel AiModel { get; }
 
     public DiagnosticsViewModel Diagnostics { get; }
+
+    public MemoryViewModel Memory { get; }
     public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
     {
         AiModel = new AiModelViewModel(_client);
         Diagnostics = new DiagnosticsViewModel(_client);
+        Memory = new MemoryViewModel(_client);
         ProfilePage = new ProfileViewModel(_client);
         Home = new HomeViewModel(_client, OpenChatWith);
         Chat = new ChatViewModel(_client);
@@ -409,6 +412,19 @@ public partial class MainWindowViewModel : ViewModelBase
         // Цвет мог смениться из панели в углу окна, пока раздел был закрыт:
         // отметка на странице врала бы о том, какой из них сейчас в деле.
         Appearance.SyncAccentSelection();
+    }
+
+    [RelayCommand]
+    private void NavigateMemory()
+    {
+        CurrentPage = Memory;
+        PageTitle = "Память";
+        PageSubtitle = "Что Scott о вас помнит";
+        ActivePage = "memory";
+
+        // Перечитываем при заходе: запомнить можно и голосом, посреди
+        // разговора, — и список, собранный при запуске, этого не покажет.
+        _ = Memory.Refresh();
     }
 
     [RelayCommand]

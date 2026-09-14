@@ -84,6 +84,7 @@ import understanding
 
 import protocols as protocols_module
 import personality as personality_module
+import memories as memories_module
 # Под своим именем: обработчик эндпоинта /speech_to_text называется так же
 # и затирает модуль при определении. Распознавание из-за этого молча уходило
 # на запасной путь через сеть, а в логе стояло «'function' object has no
@@ -821,6 +822,28 @@ class ScottAI:
                 )
             print(f"🔎 Решение: {decision.kind} — {decision.reason}")
 
+            # ---------------------------------------------------- запомнить
+            #
+            # Просьбу запомнить выполняем сами, не спрашивая модель. Отданная
+            # ей, она кончилась бы вежливым «хорошо, запомнил» — и ничем
+            # больше: у модели нет доступа к памяти Scott, а у человека
+            # осталось бы впечатление, что запомнили.
+            if decision.kind == 'remember':
+                итог = memories_module.add(decision.memory)
+
+                if not итог.get("success"):
+                    response = итог.get("error", "Не понял, что запомнить")
+                else:
+                    response = итог.get("note") or f"Запомнил: {decision.memory}"
+
+                knowledge_base.add_conversation(text, response)
+                print(f"🤖 Scott: {response}")
+                return {
+                    "type": "memory_added",
+                    "response": response,
+                    "quiet_mode": quiet_mode,
+                }
+
             # ---------------------------------------------------- протокол
             if decision.kind == 'protocol':
                 result = await self.run_protocol(
@@ -1482,6 +1505,40 @@ async def health():
         "version": scott_profile.get('version'),
         "ai_name": scott_profile.get_name()
     }
+
+
+@app.get("/memories")
+async def list_memories():
+    """Что Scott помнит о своём человеке."""
+    return {"success": True, **memories_module.describe()}
+
+
+@app.post("/memories")
+async def add_memory(request: Dict):
+    """
+    Запомнить что-то новое.
+
+    То же самое делает фраза «запомни, что …» в разговоре: раздел в лаунчере и
+    голос ведут в одно место, иначе человек видел бы в списке не всё, что
+    Scott помнит.
+    """
+    return memories_module.add(
+        (request or {}).get("text", ""),
+        (request or {}).get("kind", memories_module.DEFAULT_KIND),
+    )
+
+
+@app.delete("/memories/{memory_id}")
+async def forget_memory(memory_id: str):
+    """Забыть одну запись. Окончательно, без корзины."""
+    return memories_module.remove(memory_id)
+
+
+@app.post("/memories/clear")
+async def forget_all(request: Dict = None):
+    """Забыть всё или всё в одной категории."""
+    вид = (request or {}).get("kind")
+    return memories_module.clear(вид)
 
 
 @app.get("/personality")

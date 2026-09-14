@@ -1,0 +1,136 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Avalonia.ViewModels"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:myconv="using:ScottAI.Avalonia.Converters"
+             xmlns:mi="using:Material.Icons.Avalonia"
+             x:DataType="vm:MemoryViewModel"
+             x:Class="ScottAI.Avalonia.Views.MemoryView">
+
+    <!-- Память.
+
+         Раздел существует ради одного: память, которую нельзя увидеть и
+         поправить, — это не память, а слух. Человек сказал «запомни, что я
+         работаю в вечернюю смену», Scott ответил «запомнил» — и до сих пор
+         проверить это было негде, а забыть неверно понятое тем более. -->
+
+    <Grid Margin="32,28" RowDefinitions="Auto,Auto,*,Auto" MaxWidth="720" HorizontalAlignment="Left">
+
+        <!-- ==================== Категории ==================== -->
+
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+            <ItemsControl Grid.Column="0" ItemsSource="{Binding Kinds}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:MemoryKind">
+                        <Button Content="{Binding Title}" Classes="tab" Margin="0,0,8,8"
+                                Command="{Binding $parent[ItemsControl].((vm:MemoryViewModel)DataContext).ShowKindCommand}"
+                                CommandParameter="{Binding Id}"
+                                Classes.tabactive="{Binding IsActive}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Button Grid.Column="1" Command="{Binding ShowKindCommand}" CommandParameter=""
+                    Classes="tab" Margin="8,0,0,8" Content="Все"
+                    Classes.tabactive="{Binding ActiveKind, Converter={x:Static conv:StringConverters.IsNullOrEmpty}}" />
+        </Grid>
+
+        <!-- ==================== Что помнит ==================== -->
+
+        <Border Grid.Row="1" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                BorderThickness="1" CornerRadius="12" Padding="4" Margin="0,6,0,0"
+                IsVisible="{Binding !IsEmpty}">
+            <ScrollViewer MaxHeight="420" Padding="0,0,12,0">
+                <ItemsControl ItemsSource="{Binding Visible}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:MemoryItem">
+                            <Grid ColumnDefinitions="*,Auto,Auto" Margin="14,11" ColumnSpacing="12">
+                                <TextBlock Grid.Column="0" Text="{Binding Text}" TextWrapping="Wrap"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextPrimary}" />
+
+                                <!-- Дата: память накапливается, и через полгода
+                                     «мой проект на C#» может относиться уже к
+                                     другому проекту. -->
+                                <TextBlock Grid.Column="1" Text="{Binding CreatedText}" FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextMuted}" />
+
+                                <Button Grid.Column="2" Padding="6" Background="Transparent" BorderThickness="0"
+                                        VerticalAlignment="Center"
+                                        Command="{Binding $parent[ItemsControl].((vm:MemoryViewModel)DataContext).ForgetCommand}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip.Tip="Забыть"
+                                        AutomationProperties.Name="Забыть">
+                                    <mi:MaterialIcon Kind="Close" Width="14" Height="14"
+                                                     Foreground="{DynamicResource TextMuted}" />
+                                </Button>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Пусто — не беда, а обычное начало: Scott ещё ничего не просили
+             запомнить. Сказать об этом словами полезнее, чем оставить пустоту. -->
+        <Border Grid.Row="1" Background="{DynamicResource BgSurface}" BorderBrush="{DynamicResource BorderColor}"
+                BorderThickness="1" CornerRadius="12" Padding="28" Margin="0,6,0,0"
+                IsVisible="{Binding IsEmpty}">
+            <StackPanel Spacing="10" HorizontalAlignment="Center">
+                <mi:MaterialIcon Kind="HeadCogOutline" Width="30" Height="30"
+                                 HorizontalAlignment="Center"
+                                 Foreground="{DynamicResource TextMuted}" />
+                <TextBlock Text="Scott пока ничего не помнит" HorizontalAlignment="Center"
+                           Foreground="{DynamicResource TextSecondary}" />
+                <TextBlock Text="Скажите ему «запомни, что я работаю в вечернюю смену» — или впишите ниже."
+                           FontSize="12" TextAlignment="Center" TextWrapping="Wrap" MaxWidth="340"
+                           HorizontalAlignment="Center" Foreground="{DynamicResource TextMuted}" />
+            </StackPanel>
+        </Border>
+
+        <TextBlock Grid.Row="2" Text="{Binding Error}" Margin="0,10,0,0" TextWrapping="Wrap"
+                   Foreground="{DynamicResource Danger}" VerticalAlignment="Top"
+                   IsVisible="{Binding Error, Converter={x:Static conv:ObjectConverters.IsNotNull}}" />
+
+        <!-- ==================== Запомнить ==================== -->
+
+        <StackPanel Grid.Row="3" Spacing="10" Margin="0,16,0,0">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding NewText}"
+                         PlaceholderText="Что Scott должен помнить о вас?">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding AddCommand}" />
+                    </TextBox.KeyBindings>
+                </TextBox>
+
+                <ComboBox Grid.Column="1" ItemsSource="{Binding Kinds}" SelectedValue="{Binding NewKind}"
+                          SelectedValueBinding="{Binding Id}" MinWidth="150">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:MemoryKind">
+                            <TextBlock Text="{Binding Title}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+
+                <Button Grid.Column="2" Content="Запомнить" Command="{Binding AddCommand}" Classes="accent" />
+            </Grid>
+
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                <TextBlock Grid.Column="0" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextMuted}"
+                           Text="Scott учитывает это в каждом ответе. То же самое делает фраза «запомни, что …» в разговоре." />
+
+                <Button Grid.Column="1" Content="Забыть всё" Command="{Binding ForgetAllCommand}"
+                        Classes="danger-text" VerticalAlignment="Center"
+                        IsVisible="{Binding !IsEmpty}" />
+            </Grid>
+        </StackPanel>
+    </Grid>
+</UserControl>
