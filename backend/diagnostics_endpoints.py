@@ -12,10 +12,34 @@ from fastapi.responses import FileResponse, JSONResponse
 
 try:
     from . import diagnostics
+    from . import health_checks
 except ImportError:
     import diagnostics
+    import health_checks
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
+
+
+@router.get("/checks")
+async def checks() -> Dict:
+    """
+    Что работает прямо сейчас: микрофон, динамики, речь, модель, сеть.
+
+    Отвечает на вопрос «что сломано», тогда как /system — на вопрос «как всё
+    устроено». Второй спрашивают редко, первый — почти всегда.
+    """
+    return health_checks.run_all()
+
+
+@router.get("/checks/text")
+async def checks_text() -> Dict:
+    """
+    То же списком словами — чтобы человек скопировал и переслал.
+
+    Главный способ рассказать о поломке: вместо «у меня не работает» — восемь
+    строк, по которым видно, что именно.
+    """
+    return {"success": True, "text": health_checks.as_text()}
 
 
 @router.get("/system")

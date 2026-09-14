@@ -115,11 +115,14 @@ public partial class MainWindowViewModel : ViewModelBase
     public AppearanceViewModel Appearance { get; } = new();
 
     public AiModelViewModel AiModel { get; }
+
+    public DiagnosticsViewModel Diagnostics { get; }
     public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
     {
         AiModel = new AiModelViewModel(_client);
+        Diagnostics = new DiagnosticsViewModel(_client);
         ProfilePage = new ProfileViewModel(_client);
         Home = new HomeViewModel(_client, OpenChatWith);
         Chat = new ChatViewModel(_client);
@@ -406,6 +409,19 @@ public partial class MainWindowViewModel : ViewModelBase
         // Цвет мог смениться из панели в углу окна, пока раздел был закрыт:
         // отметка на странице врала бы о том, какой из них сейчас в деле.
         Appearance.SyncAccentSelection();
+    }
+
+    [RelayCommand]
+    private void NavigateDiagnostics()
+    {
+        CurrentPage = Diagnostics;
+        PageTitle = "Диагностика";
+        PageSubtitle = "Что работает, а что нет";
+        ActivePage = "diagnostics";
+
+        // Перепроверяем при каждом заходе: микрофон отключают, ключ вводят,
+        // интернет пропадает — снимок получасовой давности здесь бесполезен.
+        _ = Diagnostics.Refresh();
     }
 
     [RelayCommand]

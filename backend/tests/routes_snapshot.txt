@@ -26,6 +26,8 @@ GET /context/history
 GET /custom-commands/list
 GET /custom-commands/stats
 GET /desktop-files
+GET /diagnostics/checks
+GET /diagnostics/checks/text
 GET /diagnostics/errors
 GET /diagnostics/gpu
 GET /diagnostics/logs

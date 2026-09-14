@@ -106,6 +106,13 @@
                             <TextBlock Text="О ScottAI" VerticalAlignment="Center" Classes="navlabel" />
                         </StackPanel>
                     </Button>
+                    <Button Command="{Binding NavigateDiagnosticsCommand}" Classes="nav" AutomationProperties.Name="Диагностика"
+                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=diagnostics}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <mi:MaterialIcon Kind="Stethoscope" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
+                            <TextBlock Text="Диагностика" VerticalAlignment="Center" Classes="navlabel" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding NavigateLogsCommand}" Classes="nav" AutomationProperties.Name="Логи"
                             Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=logs}">
                         <StackPanel Orientation="Horizontal" Spacing="12">

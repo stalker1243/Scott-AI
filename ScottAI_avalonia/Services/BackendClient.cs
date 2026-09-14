@@ -513,6 +513,34 @@ public class BackendClient
         }
     }
 
+    /// <summary>Что работает прямо сейчас: микрофон, динамики, речь, модель, сеть.</summary>
+    public async Task<HealthReport?> HealthChecksAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<HealthReport>("/diagnostics/checks");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>То же списком словами — для пересылки.</summary>
+    public async Task<string?> HealthChecksTextAsync()
+    {
+        try
+        {
+            var ответ = await _http.GetFromJsonAsync<System.Text.Json.Nodes.JsonObject>(
+                "/diagnostics/checks/text");
+            return ответ?["text"]?.GetValue<string>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async Task<ListenStatus?> ListenStatusAsync()
     {
         try
