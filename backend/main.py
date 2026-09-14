@@ -502,6 +502,53 @@ _LOCAL_ORIGINS = [
     for port in ("1420", "5173", "8000", "8001", "3000")
 ]
 
+# Что видно снаружи. Список нарочно короткий: всё, чего в нём нет, для
+# постороннего адреса просто не существует.
+REMOTE_PATHS = {
+    "/health",
+    "/remote/pair",
+    "/remote/command",
+}
+
+
+@app.middleware("http")
+async def _guard_remote(request: Request, call_next):
+    """
+    Снаружи — только с ключом устройства и только по разрешённым путям.
+
+    Backend слушает всю сеть, когда человек это разрешил: иначе мобильное
+    приложение до него не достучится. Но открытый порт без охраны — та самая
+    беда, из-за которой доступ по сети когда-то и закрыли: сосед по Wi-Fi мог
+    открывать программы и смотреть рабочий стол.
+
+    Поэтому запросы с чужого адреса проходят только два условия сразу: путь из
+    короткого списка и ключ привязанного устройства. Всё остальное API снаружи
+    не существует вовсе.
+
+    Свои запросы — с этого же компьютера — проходят как раньше: лаунчер ничего
+    не знает ни о каких ключах, и знать не должен.
+    """
+    откуда = request.client.host if request.client else ""
+
+    if откуда in ("127.0.0.1", "::1", "localhost", ""):
+        return await call_next(request)
+
+    if request.url.path not in REMOTE_PATHS:
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+    ключ = request.headers.get("X-Scott-Device", "")
+    устройство = remote_access.find_by_token(ключ)
+
+    if устройство is None:
+        return JSONResponse(status_code=403,
+                            content={"detail": "Устройство не привязано"})
+
+    # Кладём устройство в запрос: обработчику нужно знать, кто спрашивает, —
+    # для журнала и для ограничения частоты.
+    request.state.device = устройство
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_LOCAL_ORIGINS,
@@ -1515,9 +1562,14 @@ def _handle_remote(text: str, device: Dict) -> str:
 
     вид = решение.kind if решение.kind != 'action' else (решение.action or 'action')
 
-    if not remote_access.is_allowed(вид):
-        отказ = remote_access.refusal(вид)
-        remote_access.log(device["id"], device.get("name", ""), text, f"отказано: {вид}")
+    # Действие нужно отдельно: «системная команда» — это и «сделай громче», и
+    # «выключи компьютер», а издалека позволено только первое.
+    действие = getattr(решение.parsed, "main_param", "") if решение.parsed else ""
+
+    if not remote_access.is_allowed(вид, действие):
+        отказ = remote_access.refusal(вид, действие)
+        что = remote_access.effective(вид, действие)
+        remote_access.log(device["id"], device.get("name", ""), text, f"отказано: {что}")
         return отказ
 
     try:
@@ -1695,6 +1747,84 @@ async def health():
     }
 
 
+@app.post("/remote/pair")
+async def pair_device(request: Dict):
+    """
+    Привязать приложение по коду с экрана компьютера.
+
+    Единственный путь, по которому устройство получает ключ. Ключ показывается
+    один раз — тому, кто привязался; повторно узнать его нельзя, и в списке
+    устройств его нет.
+    """
+    данные = request or {}
+
+    итог = remote_access.pair(
+        данные.get("code", ""),
+        данные.get("name", "Приложение"),
+        channel="app",
+    )
+
+    if not итог.get("success"):
+        return итог
+
+    устройство = итог["device"]
+    return {
+        "success": True,
+        "token": устройство["token"],
+        "device_id": устройство["id"],
+        "name": устройство["name"],
+    }
+
+
+@app.post("/remote/command")
+async def remote_command(request: Dict, req: Request):
+    """
+    Команда от привязанного устройства.
+
+    Проходит те же правила, что и команда из Telegram: разрешено меньше, чем
+    Scott умеет вообще, и всё выполненное попадает в журнал. Охрана доступа
+    сделана раньше, в middleware, — сюда запрос доходит уже с известным
+    устройством.
+    """
+    устройство = getattr(req.state, "device", None)
+
+    # Запрос с самого компьютера устройства не имеет: там ключи не нужны, но и
+    # выдавать себя за телефон незачем.
+    if устройство is None:
+        устройство = {"id": "local", "name": "Этот компьютер"}
+
+    текст = (request or {}).get("text", "").strip()
+    if not текст:
+        return {"success": False, "error": "Пустая команда"}
+
+    if not remote_access.within_rate_limit(устройство["id"]):
+        return {"success": False, "error": "Слишком много команд подряд — подождите минуту"}
+
+    remote_access.touch(устройство["id"])
+
+    ответ = await asyncio.to_thread(_handle_remote, текст, устройство)
+    return {"success": True, "response": ответ}
+
+
+@app.post("/remote/lan")
+async def set_lan_access(request: Dict):
+    """
+    Разрешить или запретить доступ из домашней сети.
+
+    Вступает в силу после перезапуска Scott: адрес, который слушает сервер,
+    задаётся при запуске и на лету не меняется. Человеку об этом сказано прямо
+    — иначе он решит, что переключатель не работает.
+    """
+    включить = bool((request or {}).get("enabled"))
+    remote_access.set_allow_lan(включить)
+
+    return {
+        "success": True,
+        "enabled": включить,
+        "note": "Вступит в силу после перезапуска Scott",
+    }
+
+
 @app.get("/remote/status")
 async def remote_status():
     """
@@ -1715,6 +1845,7 @@ async def remote_status():
         },
         "devices": remote_access.devices(),
         "pairing": remote_access.pairing_active(),
+        "lan": remote_access.allow_lan(),
         "allowed": remote_access.ALLOWED,
     }
 
@@ -2741,7 +2872,11 @@ if __name__ == "__main__":
     # Если доступ по сети всё же нужен (например, лаунчер на другом
     # устройстве), BACKEND_HOST задаётся явно — но тогда ОБЯЗАТЕЛЬНО закройте
     # порт брандмауэром или поставьте перед ним обратный прокси с проверкой.
-    backend_host = os.getenv("BACKEND_HOST", "127.0.0.1")
+    # По умолчанию — только этот компьютер. Доступ из домашней сети включается
+    # человеком осознанно, в разделе «Удалённо», и даже тогда снаружи видны
+    # ровно три пути, каждый из которых требует ключа устройства (см.
+    # _guard_remote).
+    backend_host = remote_access.listen_host(os.getenv("BACKEND_HOST", ""))
     backend_port = int(os.getenv("BACKEND_PORT", "8000"))
     backend_reload = os.getenv("BACKEND_RELOAD", "false").lower() in ("1", "true", "yes")
 

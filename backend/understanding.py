@@ -129,6 +129,9 @@ PROGRAM_ACTION_TYPES = {
     'open_app', 'close_app', 'create_file', 'create_folder',
     'open_folder', 'open_website', 'open_url',
     'manage_window', 'file_operation',
+    # Управление машиной здесь же, и по той же причине: «чем выключить
+    # компьютер по расписанию» — просьба посоветовать, а не выключить.
+    'system_command',
 }
 
 # Типы, которые Scott выполняет сам.
@@ -162,6 +165,16 @@ INTENT_WINS_WHEN_PARSER_LOST = (
 
 # Намерения, которые сильнее разбора всегда, а не только при его провале.
 INTENT_ALWAYS_WINS = ('reminder', 'write_code', 'run_code')
+
+# Что умеет системная команда — ровно то, что различает исполнитель.
+#
+# Список нужен, чтобы понять, разобралось ли намерение до конца. «Убавь
+# яркость» разборщик тоже считает системной командой, но кладёт в параметр
+# слово «убавь» — а исполнитель ждёт brightness_down и не находит его.
+SYSTEM_ACTIONS = {
+    'volume_up', 'volume_down', 'brightness_up', 'brightness_down',
+    'sleep', 'restart', 'shutdown',
+}
 
 QUESTION_KEYWORDS = vocabulary.QUESTION_WORDS
 
@@ -304,6 +317,15 @@ def understand(text: str, *, intent_engine, parser, answerer,
         parsed.command_type = 'open_folder'
         parsed.main_param = intent.main_param
         notes.append("папка, а не программа")
+
+    if intent.intent_type == 'system_command' and intent.main_param in SYSTEM_ACTIONS:
+        # Намерение разобралось до конкретного действия, разбор — нет. Два
+        # случая, и оба чинятся здесь: «выключи компьютер» уезжало в close_app,
+        # где Scott искал программу с таким названием и не находил её, а
+        # «убавь яркость» доходило до исполнителя с параметром «убавь».
+        parsed.command_type = 'system_command'
+        parsed.main_param = intent.main_param
+        notes.append(f"системная команда: {intent.main_param}")
 
     if intent.intent_type in INTENT_ALWAYS_WINS:
         # «Напомни через час открыть почту»: разборщик видит «открыть почту» и

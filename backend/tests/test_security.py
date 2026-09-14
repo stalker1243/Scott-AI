@@ -20,6 +20,18 @@ pytestmark = pytest.mark.unit
 BACKEND = Path(__file__).resolve().parent.parent
 
 
+@pytest.fixture
+def доступ(tmp_path, monkeypatch):
+    """Правила доступа со своим файлом настроек — настоящий не трогаем."""
+    try:
+        import remote_access
+    except ImportError:  # pragma: no cover — запуск из корня репозитория
+        from backend import remote_access
+
+    monkeypatch.setattr(remote_access, "STORE_PATH", tmp_path / "remote.json")
+    return remote_access
+
+
 @pytest.fixture(scope="module")
 def main_source():
     return (BACKEND / "main.py").read_text(encoding="utf-8")
@@ -27,7 +39,7 @@ def main_source():
 
 # ==================== Кто может достучаться ====================
 
-def test_listens_locally_by_default(main_source):
+def test_listens_locally_by_default(доступ):
     """
     По умолчанию backend слушает только этот компьютер.
 
@@ -36,12 +48,25 @@ def test_listens_locally_by_default(main_source):
     рабочем столе. Проверено практикой — запрос с сетевого адреса машины
     возвращал 200.
     """
-    match = re.search(r'os\.getenv\("BACKEND_HOST",\s*"([^"]+)"\)', main_source)
+    assert доступ.listen_host() in ("127.0.0.1", "localhost")
 
-    assert match, "не найдено значение BACKEND_HOST по умолчанию"
-    assert match.group(1) in ("127.0.0.1", "localhost"), (
-        f"backend по умолчанию слушает {match.group(1)} — это открывает его сети"
-    )
+
+def test_домашняя_сеть_открывается_только_осознанно(доступ):
+    """
+    Сеть открывает человек — в разделе «Удалённо», а не значение по умолчанию.
+    """
+    доступ.set_allow_lan(True)
+
+    assert доступ.listen_host() == "0.0.0.0"
+
+
+def test_заданный_руками_адрес_сильнее(доступ):
+    """
+    BACKEND_HOST оставлен для случаев, когда backend нужен на другом
+    устройстве. Тогда порт закрывают брандмауэром — но решение остаётся за
+    человеком, а не за настройкой из интерфейса.
+    """
+    assert доступ.listen_host("192.168.1.10") == "192.168.1.10"
 
 
 def test_cors_is_not_wildcard(main_source):
