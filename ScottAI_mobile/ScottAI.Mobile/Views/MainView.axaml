@@ -1,0 +1,92 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Mobile.ViewModels"
+             xmlns:views="using:ScottAI.Mobile.Views"
+             x:DataType="vm:MainViewModel"
+             x:Class="ScottAI.Mobile.Views.MainView">
+
+    <Design.DataContext>
+        <vm:MainViewModel />
+    </Design.DataContext>
+
+    <UserControl.Styles>
+        <!-- Вкладка внизу: значок и подпись. Выбранная — акцентным цветом,
+             остальные приглушены. Подпись обязательна: значок без слова
+             угадывают неверно, а места внизу хватает. -->
+        <Style Selector="Button.tab /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="CornerRadius" Value="0" />
+        </Style>
+
+        <Style Selector="Button.tab">
+            <Setter Property="Padding" Value="0,6" />
+            <Setter Property="MinHeight" Value="56" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+        </Style>
+    </UserControl.Styles>
+
+    <Grid RowDefinitions="*,Auto" Background="{DynamicResource BgWindow}">
+
+        <!-- Экраны живут все сразу и лишь показываются по очереди: иначе
+             переключение вкладок стирало бы набранный, но не отправленный
+             текст и половину заполненной привязки. -->
+        <Panel Grid.Row="0">
+            <views:ChatView DataContext="{Binding Chat}" IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnChat}" />
+            <views:AppearanceView DataContext="{Binding Appearance}" IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnLook}" />
+            <views:SyncView DataContext="{Binding Sync}" IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).OnSync}" />
+        </Panel>
+
+        <!-- ==================== Вкладки ====================
+             Внизу, а не сверху: телефон держат одной рукой, и до верха экрана
+             большой палец не достаёт. -->
+
+        <Border Grid.Row="1" Background="{DynamicResource BgBar}"
+                BorderThickness="0,1,0,0" BorderBrush="{DynamicResource BorderColor}">
+            <Grid ColumnDefinitions="*,*,*">
+
+                <Button Grid.Column="0" Classes="tab" Command="{Binding OpenCommand}"
+                        CommandParameter="chat">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="💬" FontSize="19" HorizontalAlignment="Center" />
+                        <TextBlock Text="Чат" FontSize="11" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   IsVisible="{Binding !OnChat}" />
+                        <TextBlock Text="Чат" FontSize="11" HorizontalAlignment="Center"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Accent}"
+                                   IsVisible="{Binding OnChat}" />
+                    </StackPanel>
+                </Button>
+
+                <Button Grid.Column="1" Classes="tab" Command="{Binding OpenCommand}"
+                        CommandParameter="look">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="🎨" FontSize="19" HorizontalAlignment="Center" />
+                        <TextBlock Text="Вид" FontSize="11" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   IsVisible="{Binding !OnLook}" />
+                        <TextBlock Text="Вид" FontSize="11" HorizontalAlignment="Center"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Accent}"
+                                   IsVisible="{Binding OnLook}" />
+                    </StackPanel>
+                </Button>
+
+                <Button Grid.Column="2" Classes="tab" Command="{Binding OpenCommand}"
+                        CommandParameter="sync">
+                    <StackPanel Spacing="3">
+                        <TextBlock Text="🔗" FontSize="19" HorizontalAlignment="Center" />
+                        <TextBlock Text="Связь" FontSize="11" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   IsVisible="{Binding !OnSync}" />
+                        <TextBlock Text="Связь" FontSize="11" HorizontalAlignment="Center"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Accent}"
+                                   IsVisible="{Binding OnSync}" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

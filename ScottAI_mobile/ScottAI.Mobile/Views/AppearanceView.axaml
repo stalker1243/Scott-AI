@@ -1,0 +1,106 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Mobile.ViewModels"
+             x:DataType="vm:AppearanceViewModel"
+             x:Class="ScottAI.Mobile.Views.AppearanceView">
+
+    <!-- Внешний вид. Всё применяется сразу: выбор цвета проверяют глазами. -->
+
+    <ScrollViewer Padding="16,14">
+        <StackPanel Spacing="20">
+
+            <TextBlock Text="Внешний вид" Classes="h1" />
+
+            <!-- ==================== Цвет ==================== -->
+
+            <StackPanel Spacing="10">
+                <TextBlock Text="Акцентный цвет" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimary}" />
+                <TextBlock Classes="hint"
+                           Text="Тот же набор, что в Scott на компьютере: это одна вещь на двух экранах." />
+
+                <ItemsControl ItemsSource="{Binding Accents}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:AccentChoice">
+                            <Button Classes="quiet" Margin="0,0,10,10" Padding="10,8"
+                                    Command="{Binding $parent[ItemsControl].((vm:AppearanceViewModel)DataContext).ChooseCommand}"
+                                    CommandParameter="{Binding Hex}">
+                                <StackPanel Orientation="Horizontal" Spacing="9">
+                                    <!-- Выбранный обведён кольцом и помечен галочкой.
+                                         Одного кольца мало: тот, кто не различает
+                                         эти цвета, увидит семь одинаковых кружков. -->
+                                    <Panel>
+                                        <Ellipse Width="30" Height="30"
+                                                 Stroke="{DynamicResource TextPrimary}"
+                                                 StrokeThickness="2"
+                                                 IsVisible="{Binding Selected}" />
+                                        <Border Width="24" Height="24" CornerRadius="12"
+                                                Background="{Binding Brush}" />
+                                        <TextBlock Text="✓" FontSize="13" FontWeight="Bold"
+                                                   Foreground="White"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   IsVisible="{Binding Selected}" />
+                                    </Panel>
+                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                               FontSize="13"
+                                               Foreground="{DynamicResource TextSecondary}" />
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
+            <!-- ==================== Тема ==================== -->
+
+            <StackPanel Spacing="10">
+                <TextBlock Text="Тема" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimary}" />
+                <Border Background="{DynamicResource BgSurface}" CornerRadius="14" Padding="16,12"
+                        BorderThickness="1" BorderBrush="{DynamicResource BorderColor}">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel Grid.Column="0" Spacing="3">
+                            <TextBlock Text="Тёмная" Foreground="{DynamicResource TextPrimary}" />
+                            <TextBlock Classes="hint"
+                                       Text="По умолчанию: телефон чаще берут в руки вечером." />
+                        </StackPanel>
+                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding Dark}"
+                                      OnContent="" OffContent=""
+                                      VerticalAlignment="Center" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <!-- ==================== Размер текста ==================== -->
+
+            <StackPanel Spacing="10">
+                <TextBlock Text="Размер текста" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimary}" />
+                <TextBlock Classes="hint"
+                           Text="Телефон держат дальше от глаз, чем монитор, — и читают на ходу." />
+
+                <Border Background="{DynamicResource BgSurface}" CornerRadius="14" Padding="16,12"
+                        BorderThickness="1" BorderBrush="{DynamicResource BorderColor}">
+                    <StackPanel Spacing="10">
+                        <Slider Minimum="0.85" Maximum="1.45" Value="{Binding FontScale}"
+                                TickFrequency="0.05" IsSnapToTickEnabled="True" />
+                        <!-- Пример тут же: проверять размер на настоящей реплике
+                             честнее, чем на числе процентов. -->
+                        <Border Background="{DynamicResource AccentSoft}" CornerRadius="16,16,4,16"
+                                Padding="14,10" HorizontalAlignment="Right">
+                            <TextBlock Text="открой браузер" TextWrapping="Wrap"
+                                       FontSize="{DynamicResource ChatFontSize}"
+                                       Foreground="{DynamicResource TextPrimary}" />
+                        </Border>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -1,0 +1,12 @@
+<Solution>
+  <!-- Общий проект и окно на компьютере. Android лежит рядом, но в сборку
+       пока не включён: он требует .NET-нагрузки android и Java, а без них
+       сборка решения падала бы целиком — в том числе у того, кто просто
+       хочет посмотреть, как приложение выглядит.
+
+       Включается, когда дойдёт до настоящего телефона:
+           dotnet workload install android
+       и возврат строки с ScottAI.Mobile.Android сюда. -->
+  <Project Path="ScottAI.Mobile/ScottAI.Mobile.csproj" />
+  <Project Path="ScottAI.Mobile.Desktop/ScottAI.Mobile.Desktop.csproj" />
+</Solution>

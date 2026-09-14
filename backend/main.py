@@ -1539,7 +1539,7 @@ def _listener_handle(text: str) -> None:
 # закрытие окна, и перезапуск — служба хранит дела в файле и сама следит за
 # временем.
 
-def _handle_remote(text: str, device: Dict) -> str:
+def _remote_reply(text: str, device: Dict) -> Dict:
     """
     Команда, пришедшая издалека — из Telegram или из мобильного приложения.
 
@@ -1570,7 +1570,7 @@ def _handle_remote(text: str, device: Dict) -> str:
         отказ = remote_access.refusal(вид, действие)
         что = remote_access.effective(вид, действие)
         remote_access.log(device["id"], device.get("name", ""), text, f"отказано: {что}")
-        return отказ
+        return {"text": отказ, "refused": True}
 
     try:
         # Тот же путь, что и у голоса: разбирать команду дважды по-разному —
@@ -1584,7 +1584,15 @@ def _handle_remote(text: str, device: Dict) -> str:
         ответ = f"Не получилось: {e}"
 
     remote_access.log(device["id"], device.get("name", ""), text, ответ)
-    return ответ or "Сделано"
+    return {"text": ответ or "Сделано", "refused": False}
+
+
+def _handle_remote(text: str, device: Dict) -> str:
+    """
+    То же самое для моста в Telegram: там ответ уходит текстом, и различать
+    отказ от удачи некому — человек читает слова.
+    """
+    return _remote_reply(text, device)["text"]
 
 
 def _run_scheduled_command(item) -> None:
@@ -1802,8 +1810,13 @@ async def remote_command(request: Dict, req: Request):
 
     remote_access.touch(устройство["id"])
 
-    ответ = await asyncio.to_thread(_handle_remote, текст, устройство)
-    return {"success": True, "response": ответ}
+    ответ = await asyncio.to_thread(_remote_reply, текст, устройство)
+
+    # Отказ отдаётся отдельным признаком, а не только словами. Для приложения
+    # это разные вещи: «не буду выключать компьютер издалека» — Scott, который
+    # работает как задумано, а «компьютер не отвечает» — сломанная связь.
+    # Показать их одинаково значит отправить человека чинить исправное.
+    return {"success": True, "response": ответ["text"], "refused": ответ["refused"]}
 
 
 @app.post("/remote/lan")

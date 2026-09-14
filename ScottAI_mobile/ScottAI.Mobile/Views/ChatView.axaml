@@ -1,0 +1,119 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ScottAI.Mobile.ViewModels"
+             xmlns:models="using:ScottAI.Mobile.Models"
+             x:DataType="vm:ChatViewModel"
+             x:Class="ScottAI.Mobile.Views.ChatView">
+
+    <!-- Чат со Scott.
+
+         Написанное здесь выполняется на домашнем компьютере, в пустой комнате.
+         Поэтому реплики Scott бывают трёх видов, и различить их нужно с одного
+         взгляда: обычный ответ, отказ (издалека он делает не всё, что умеет) и
+         сбой связи (команда могла не дойти). -->
+
+    <Grid RowDefinitions="*,Auto">
+
+        <!-- ==================== Лента ==================== -->
+
+        <ScrollViewer Grid.Row="0" Padding="16,12,10,12">
+            <StackPanel Spacing="10">
+
+                <!-- Пустой чат объясняет, что тут вообще можно сказать.
+                     Мигающий курсор без единой подсказки — худшее начало: Scott
+                     понимает не всё подряд, и угадывать это человек не обязан. -->
+                <StackPanel Spacing="14" Margin="4,40,4,0" IsVisible="{Binding Empty}">
+                    <TextBlock Text="Scott слушает" Classes="h1" HorizontalAlignment="Center" />
+
+                    <TextBlock Classes="hint" HorizontalAlignment="Center" TextAlignment="Center"
+                               Text="Команды выполняются на домашнем компьютере. Например:"
+                               IsVisible="{Binding Paired}" />
+
+                    <ItemsControl ItemsSource="{Binding Hints}" IsVisible="{Binding Paired}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <Button Classes="quiet" Margin="0,3" HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        Background="{DynamicResource BgSurface}"
+                                        Command="{Binding $parent[ItemsControl].((vm:ChatViewModel)DataContext).UseHintCommand}"
+                                        CommandParameter="{Binding}">
+                                    <TextBlock Text="{Binding}" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextSecondary}" />
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Classes="hint" HorizontalAlignment="Center" TextAlignment="Center"
+                               IsVisible="{Binding !Paired}"
+                               Text="Телефон ещё не связан с компьютером. Откройте «Связь» внизу — привязка занимает минуту." />
+                </StackPanel>
+
+                <ItemsControl ItemsSource="{Binding Messages}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="models:ChatMessage">
+                            <Grid Margin="0,3">
+                                <!-- Своё справа, ответ слева — как в любом мессенджере.
+                                     Здесь это не подражание: так видно, где просьба,
+                                     а где то, что из неё вышло. -->
+                                <Border HorizontalAlignment="Right" MaxWidth="300"
+                                        CornerRadius="16,16,4,16" Padding="14,10"
+                                        Background="{DynamicResource AccentSoft}"
+                                        IsVisible="{Binding Mine}">
+                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                               FontSize="{DynamicResource ChatFontSize}"
+                                               Foreground="{DynamicResource TextPrimary}" />
+                                </Border>
+
+                                <Border HorizontalAlignment="Left" MaxWidth="300"
+                                        CornerRadius="16,16,16,4" Padding="14,10"
+                                        Background="{DynamicResource BgSurface}"
+                                        BorderThickness="1"
+                                        BorderBrush="{DynamicResource BorderColor}"
+                                        IsVisible="{Binding Theirs}">
+                                    <StackPanel Spacing="5">
+                                        <!-- Отказ и сбой подписаны словами, а не только
+                                             цветом: цвет не читается при ярком солнце и
+                                             ничего не говорит тому, кто его не различает. -->
+                                        <TextBlock Text="Scott не стал этого делать"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Warning}"
+                                                   IsVisible="{Binding Refused}" />
+                                        <TextBlock Text="Команда не дошла"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Danger}"
+                                                   IsVisible="{Binding Failed}" />
+                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap"
+                                                   FontSize="{DynamicResource ChatFontSize}"
+                                                   Foreground="{DynamicResource TextPrimary}" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Ожидание показывается прямо в ленте: команда идёт до дома и
+                     обратно, и без этого кажется, что нажатие потерялось. -->
+                <Border HorizontalAlignment="Left" CornerRadius="16,16,16,4" Padding="14,10"
+                        Background="{DynamicResource BgSurface}" IsVisible="{Binding Busy}">
+                    <TextBlock Text="Scott думает…" FontSize="13"
+                               Foreground="{DynamicResource TextMuted}" />
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ==================== Строка ввода ==================== -->
+
+        <Border Grid.Row="1" Background="{DynamicResource BgBar}" Padding="12,10"
+                BorderThickness="0,1,0,0" BorderBrush="{DynamicResource BorderColor}">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding Input}" AcceptsReturn="False"
+                         PlaceholderText="Что сделать дома?"
+                         FontSize="{DynamicResource ChatFontSize}" />
+                <Button Grid.Column="1" Classes="accent" Content="→" FontSize="18"
+                        Command="{Binding SendCommand}" IsEnabled="{Binding !Busy}" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
