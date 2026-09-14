@@ -530,7 +530,38 @@ class IntelligentAnswerer:
 6. Будь дружелюбен и профессионален
 
 Тебя зовут Scott AI, ты персональный ИИ-ассистент."""
-    
+
+    def instructions(self, brief: bool = False) -> str:
+        """
+        Системное указание модели — вместе с тем, что человек о себе рассказал.
+
+        Персонализация добавляется ПОСЛЕ основных правил и не может их
+        отменить: характер меняет тон, а не обязанности. Иначе «отвечай
+        коротко» стало бы способом обойти всё остальное.
+
+        Пока человек ничего не настроил, добавка пуста, и поведение ровно
+        прежнее.
+        """
+        основа = BRIEF_SYSTEM_PROMPT if brief else self.system_prompt
+
+        try:
+            try:
+                from . import personality
+            except ImportError:
+                import personality
+
+            добавка = personality.prompt_addition()
+        except Exception:
+            # Персонализация — улучшение, а не условие работы: не прочиталась —
+            # отвечаем как раньше.
+            добавка = ""
+
+        if not добавка:
+            return основа
+
+        return основа + "\n\n" + добавка
+
+
     def _test_connection_groq(self):
         """
         Проверить, что работает и ключ, и выбранная модель.
@@ -875,7 +906,7 @@ class IntelligentAnswerer:
             self.memory.add_message("user", text)
             
             # Получаем контекст разговора
-            instructions = BRIEF_SYSTEM_PROMPT if brief else self.system_prompt
+            instructions = self.instructions(brief)
             max_tokens = BRIEF_MAX_TOKENS if brief else self.max_tokens
 
             messages = [{"role": "system", "content": instructions}]
@@ -1108,7 +1139,7 @@ class IntelligentAnswerer:
                     },
                     json={
                         "model": self.model,
-                        "system": self.system_prompt,
+                        "system": self.instructions(),
                         "max_tokens": self.max_tokens,
                         "messages": [{
                             "role": "user",
@@ -1146,7 +1177,7 @@ class IntelligentAnswerer:
             ]
 
             messages = [
-                {"role": "system", "content": self.system_prompt},
+                {"role": "system", "content": self.instructions()},
                 {"role": "user", "content": content},
             ]
 

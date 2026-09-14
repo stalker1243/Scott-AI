@@ -275,7 +275,10 @@ def test_claude_gets_system_prompt_separately(отвечающий, monkeypatch)
     assert ответ == "Ответ Claude."
 
     body = отправлено["body"]
-    assert body["system"] == отвечающий.system_prompt
+    # Начинается с основы, а не равно ей: следом может идти персонализация —
+    # характер и рассказ человека о себе. Отменить основные правила она не
+    # может и не должна, а вот дописать к ним своё — её работа.
+    assert body["system"].startswith(отвечающий.system_prompt)
     assert all(m["role"] != "system" for m in body["messages"]), \
         "роль system осталась в списке сообщений — Anthropic такой запрос отвергнет"
 
@@ -354,7 +357,7 @@ def test_brief_request_reaches_claude(отвечающий, monkeypatch):
 
     отвечающий.answer("вопрос", use_memory=False, brief=True)
 
-    assert отправлено["body"]["system"] == ia.BRIEF_SYSTEM_PROMPT
+    assert отправлено["body"]["system"].startswith(ia.BRIEF_SYSTEM_PROMPT)
     assert отправлено["body"]["max_tokens"] == ia.BRIEF_MAX_TOKENS
 
 # ==================== Понятные отказы ====================

@@ -27,6 +27,25 @@ os.chdir(BACKEND_DIR)
 os.environ.setdefault("WARMUP_MODELS", "0")
 
 
+@pytest.fixture(autouse=True)
+def без_чужой_персонализации(tmp_path, monkeypatch):
+    """
+    Персонализация — всегда пустая, какой бы она ни была на этой машине.
+
+    Настройки характера и рассказ о себе подмешиваются к указанию модели в
+    каждом запросе. Значит любая проверка, сравнивающая отправленное указание с
+    ожидаемым, начинает зависеть от того, что разработчик настроил себе в
+    лаунчере. Так и случилось: два теста ИИ-провайдеров позеленели у одного и
+    покраснели у другого, хотя код был один и тот же.
+    """
+    try:
+        import personality
+    except ImportError:  # pragma: no cover — запуск из корня репозитория
+        from backend import personality
+
+    monkeypatch.setattr(personality, "CONFIG_PATH", tmp_path / "personality.json")
+
+
 @pytest.fixture(scope="session")
 def main_module():
     """

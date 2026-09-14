@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Media;
@@ -30,7 +30,7 @@ public partial class SettingsViewModel : ViewModelBase
     private void SetSettingsTab(string tab) => SettingsTab = tab;
 
     public ObservableCollection<AccentSwatch> AccentSwatches { get; } = new(
-        new[] { "#3B82F6", "#22C55E", "#A855F7", "#F59E0B", "#EF4444", "#00FFF2" }.Select(h => new AccentSwatch(h)));
+        ThemeService.AccentPalette.Select(h => new AccentSwatch(h)));
 
     [ObservableProperty]
     private string _currentAccentHex = "#3B82F6";

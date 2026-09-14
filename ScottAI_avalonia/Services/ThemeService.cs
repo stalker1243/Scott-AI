@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Media;
@@ -31,6 +31,18 @@ public static class ThemeService
     public static AppStyle CurrentStyle { get; private set; } = AppStyle.Classic;
     public static bool IsDark { get; private set; } = true;
     public static string CurrentAccentHex { get; private set; } = "#3B82F6";
+
+    /// <summary>
+    /// Цвета, которые предлагаются на выбор.
+    ///
+    /// Один список на все места, откуда цвет можно сменить, — Настройки и
+    /// панель в углу окна. Разойдись они, человек нашёл бы в одном месте цвет,
+    /// которого нет в другом, и не понял бы, какое из двух настоящее.
+    /// </summary>
+    public static readonly string[] AccentPalette =
+    {
+        "#3B82F6", "#22C55E", "#A855F7", "#F59E0B", "#EF4444", "#00FFF2",
+    };
 
     /// <summary>Непрозрачность фона в стиле Glass, 15-100%. Ниже 15 — контент нечитаем.</summary>
     public static double GlassOpacityPercent { get; private set; } = 55;

@@ -92,11 +92,20 @@ public partial class MainWindowViewModel : ViewModelBase
     public ProtocolsViewModel ProtocolsPage { get; }
     public AnalyticsViewModel AnalyticsPage { get; }
     public SettingsViewModel SettingsPage { get; }
-    public ProfileViewModel ProfilePage { get; } = new();
+    public ProfileViewModel ProfilePage { get; }
+
+    /// <summary>
+    /// Выбор акцентного цвета, доступный с любой страницы.
+    ///
+    /// Живёт в модели окна, а не страницы: панель висит поверх содержимого и
+    /// не должна пропадать при переходе между разделами.
+    /// </summary>
+    public AccentPickerViewModel Accent { get; } = new();
     public LogsViewModel LogsPage { get; }
 
     public MainWindowViewModel()
     {
+        ProfilePage = new ProfileViewModel(_client);
         Home = new HomeViewModel(_client, OpenChatWith);
         Chat = new ChatViewModel(_client);
         SystemPage = new SystemViewModel(_client);
@@ -354,8 +363,8 @@ public partial class MainWindowViewModel : ViewModelBase
     private void NavigateProfile()
     {
         CurrentPage = ProfilePage;
-        PageTitle = "Профиль";
-        PageSubtitle = "Как Scott к вам обращается";
+        PageTitle = "Персонализация";
+        PageSubtitle = "Как Scott будет с вами говорить";
         ActivePage = "profile";
     }
 

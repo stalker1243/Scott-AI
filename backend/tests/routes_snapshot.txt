@@ -44,6 +44,7 @@ GET /macros/get
 GET /macros/list
 GET /macros/status
 GET /metrics
+GET /personality
 GET /processes
 GET /profile
 GET /profiles/current
@@ -121,6 +122,7 @@ POST /macros/record-action
 POST /macros/start-recording
 POST /macros/stop-recording
 POST /open-program
+POST /personality
 POST /profiles/create
 POST /profiles/delete
 POST /profiles/switch

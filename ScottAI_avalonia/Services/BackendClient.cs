@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
@@ -477,6 +477,41 @@ public class BackendClient
     }
 
     // ---------- Прослушивание микрофона ----------
+
+    /// <summary>
+    /// Персонализация вместе со списком доступных характеров.
+    /// </summary>
+    public async Task<PersonalitySettings?> PersonalityAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<PersonalitySettings>("/personality");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Сохранить персонализацию.
+    ///
+    /// Возвращается то, что действительно записано: рассказ о себе обрезается,
+    /// неизвестный характер заменяется обычным. Показывать надо именно это —
+    /// иначе человек видел бы на экране одно, а в разговоре получал другое.
+    /// </summary>
+    public async Task<PersonalitySettings?> SavePersonalityAsync(object changes)
+    {
+        try
+        {
+            var res = await _http.PostAsJsonAsync("/personality", changes);
+            return await res.Content.ReadFromJsonAsync<PersonalitySettings>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     public async Task<ListenStatus?> ListenStatusAsync()
     {

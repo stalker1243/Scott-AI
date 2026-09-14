@@ -83,6 +83,7 @@ from speech_text import shorten_for_speech, THINKING_CUES
 import understanding
 
 import protocols as protocols_module
+import personality as personality_module
 # Под своим именем: обработчик эндпоинта /speech_to_text называется так же
 # и затирает модуль при определении. Распознавание из-за этого молча уходило
 # на запасной путь через сеть, а в логе стояло «'function' object has no
@@ -1481,6 +1482,32 @@ async def health():
         "version": scott_profile.get('version'),
         "ai_name": scott_profile.get_name()
     }
+
+
+@app.get("/personality")
+async def get_personality():
+    """
+    Как Scott разговаривает и что он знает о своём человеке.
+
+    Вместе с настройками отдаётся список доступных характеров: лаунчер не
+    должен знать их наизусть, иначе добавленный здесь характер не появится в
+    интерфейсе до пересборки программы.
+    """
+    return {"success": True, **personality_module.describe()}
+
+
+@app.post("/personality")
+async def set_personality(request: Dict):
+    """
+    Сохранить персонализацию.
+
+    Возвращается то, что действительно записано, а не то, что прислали: текст
+    о себе обрезается, неизвестный характер заменяется на обычный. Лаунчер
+    показывает именно сохранённое — иначе человек видел бы на экране одно, а в
+    разговоре получал другое.
+    """
+    сохранено = personality_module.save(request or {})
+    return {"success": True, **сохранено}
 
 
 @app.get("/profile")

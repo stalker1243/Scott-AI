@@ -3,6 +3,8 @@
              xmlns:vm="using:ScottAI.Avalonia.ViewModels"
              xmlns:conv="using:Avalonia.Data.Converters"
              xmlns:myconv="using:ScottAI.Avalonia.Converters"
+             xmlns:models="using:ScottAI.Avalonia.Models"
+             xmlns:mi="using:Material.Icons.Avalonia"
              x:DataType="vm:ProfileViewModel"
              x:Class="ScottAI.Avalonia.Views.ProfileView">
     <!-- Прокрутка обязательна: на невысоком окне нижняя часть страницы —
@@ -10,8 +12,6 @@
          недоступна вовсе. -->
     <ScrollViewer>
     <StackPanel Margin="40" Spacing="24" MaxWidth="560">
-        <TextBlock Text="Профиль" FontSize="24" FontWeight="Bold" Foreground="{DynamicResource TextPrimary}" />
-
         <StackPanel Orientation="Horizontal" Spacing="20" VerticalAlignment="Center">
             <!-- Итоговый вид: ровно так аватар выглядит в интерфейсе -->
             <Border Width="88" Height="88" CornerRadius="44" ClipToBounds="True" Background="{DynamicResource Accent}">
@@ -46,7 +46,7 @@
         <!-- Подбор кадра. Виден только когда есть что кадрировать. -->
         <StackPanel Spacing="10" IsVisible="{Binding HasAvatar}">
             <TextBlock Text="Положение фото" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-            <TextBlock Text="Перетащите снимок мышью, чтобы выбрать видимую часть. Колесо мыши или ползунок — приближение."
+            <TextBlock Text="Перетащите снимок мышью, чтобы выбрать видимую часть. Приближение — ползунком или колесом с зажатым Ctrl."
                        FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" />
 
             <Border Width="220" Height="220" CornerRadius="110" ClipToBounds="True"
@@ -83,8 +83,86 @@
         </StackPanel>
 
         <StackPanel Spacing="6">
-            <TextBlock Text="О себе" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-            <TextBox Text="{Binding Bio}" AcceptsReturn="True" Height="90" PlaceholderText="Расскажите немного о себе..." />
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="О себе" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextSecondary}" />
+                <!-- Счётчик стоит здесь не для порядка: рассказ уходит в каждый
+                     запрос к модели и там обрезается. Лучше увидеть предел
+                     заранее, чем недосчитаться половины уже после сохранения. -->
+                <TextBlock Grid.Column="1" Text="{Binding AboutCounter}" FontSize="11"
+                           VerticalAlignment="Center" Foreground="{DynamicResource TextMuted}" />
+            </Grid>
+            <TextBox Text="{Binding Bio}" AcceptsReturn="True" Height="90"
+                     PlaceholderText="Чем занимаетесь, что вам важно — Scott учтёт это в ответах" />
+        </StackPanel>
+
+        <!-- ==================== Характер ====================
+             Раньше в профиле Scott лежал ключ personality, и не читал его
+             никто: как бы он ни назывался, Scott отвечал одинаково. Теперь
+             выбранное отсюда уходит в указание модели при каждом ответе. -->
+        <StackPanel Spacing="8">
+            <TextBlock Text="Характер" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+            <TextBlock Text="Каким тоном Scott будет отвечать. На то, что он умеет, это не влияет."
+                       FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" />
+
+            <ComboBox ItemsSource="{Binding Styles}" SelectedItem="{Binding SelectedStyle}"
+                      HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="models:PersonalityStyle">
+                        <StackPanel Spacing="2" Margin="0,4">
+                            <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimary}" />
+                            <TextBlock Text="{Binding Hint}" FontSize="11"
+                                       Foreground="{DynamicResource TextMuted}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+        </StackPanel>
+
+        <!-- ==================== Интересы ====================
+             Уходят в разговор вместе с рассказом о себе: Scott подбирает по ним
+             примеры и объяснения. -->
+        <StackPanel Spacing="8">
+            <TextBlock Text="Интересы" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
+            <TextBlock Text="Scott будет опираться на них в примерах и объяснениях."
+                       FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" />
+
+            <ItemsControl ItemsSource="{Binding Interests}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <Border Background="{DynamicResource BgElevated}" CornerRadius="14"
+                                Padding="12,6" Margin="0,0,8,8">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding}" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextPrimary}" FontSize="12" />
+                                <Button Padding="2" Background="Transparent" BorderThickness="0"
+                                        Command="{Binding $parent[ItemsControl].((vm:ProfileViewModel)DataContext).RemoveInterestCommand}"
+                                        CommandParameter="{Binding}"
+                                        AutomationProperties.Name="Убрать интерес">
+                                    <mi:MaterialIcon Kind="Close" Width="12" Height="12"
+                                                     Foreground="{DynamicResource TextMuted}" />
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0" Text="{Binding NewInterest}"
+                         PlaceholderText="Например: музыка, астрономия, C#">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding AddInterestCommand}" />
+                    </TextBox.KeyBindings>
+                </TextBox>
+                <Button Grid.Column="1" Content="Добавить" Command="{Binding AddInterestCommand}"
+                        Classes="soft" Margin="8,0,0,0" />
+            </Grid>
         </StackPanel>
 
         <StackPanel Orientation="Horizontal" Spacing="10">
