@@ -44,7 +44,7 @@ class Decision:
     писал код.
     """
 
-    kind: str                       # 'protocol' | 'web' | 'question' | 'action' | 'remember' | 'project' | 'refused'
+    kind: str                       # 'protocol' | 'web' | 'question' | 'action' | 'remember' | 'project' | 'schedule' | 'refused'
     reason: str = ""
 
     # kind='protocol'
@@ -63,6 +63,10 @@ class Decision:
 
     # kind='project'
     project: str = ""           # название проекта, который просят открыть
+
+    # kind='schedule'
+    when: Any = None            # когда выполнить
+    order: str = ""             # что именно выполнить
 
     # kind='refused'
     message: str = ""
@@ -207,6 +211,26 @@ def understand(text: str, *, intent_engine, parser, answerer,
             kind='remember',
             memory=запомнить,
             reason=f"просьба запомнить: «{запомнить}»",
+            intent=intent,
+        )
+
+    # 0.6 Отложенная команда: «через час запусти рендер».
+    #
+    #     Стоит до общего разбора, и это выяснилось живой проверкой: фраза
+    #     «через минуту открой блокнот» выполнялась НЕМЕДЛЕННО. Разбор видел
+    #     знакомое «открой блокнот», а слова о времени считал шумом — блокнот
+    #     открывался тут же, вместо того чтобы открыться через минуту.
+    #
+    #     От напоминания отличается глаголом: «напомни выключить компьютер» —
+    #     слова в назначенный час, «выключи компьютер через час» — дело.
+    отложено = extract_schedule(text)
+    if отложено is not None:
+        когда, приказ = отложено
+        return Decision(
+            kind='schedule',
+            when=когда,
+            order=приказ,
+            reason=f"отложено на {когда:%d.%m %H:%M}: «{приказ}»",
             intent=intent,
         )
 
@@ -456,6 +480,52 @@ def extract_memory(text: str):
     "покажи проект",
     "перейди к проекту",
 )
+
+
+def extract_schedule(text: str):
+    """
+    Время и команда, если человек просит сделать что-то не сейчас.
+
+    Возвращает пару (когда, что) или None. None — не «ошибка разбора», а
+    обычный случай: большинство фраз о времени не просят ничего откладывать.
+
+    Три условия, и все обязательны:
+
+    * время названо явно — «через час», «в 7 утра», «завтра»;
+    * это не просьба напомнить (там нужны слова, а не дело);
+    * после вырезания времени осталась команда, а не пустота и не вопрос.
+    """
+    строка = (text or "").strip()
+    if not строка:
+        return None
+
+    try:
+        from . import reminders as reminders_module
+        from . import scheduled as scheduled_module
+    except ImportError:
+        import reminders as reminders_module
+        import scheduled as scheduled_module
+
+    if scheduled_module.is_reminder(строка):
+        return None
+
+    когда = reminders_module.parse_time(строка)
+    if когда is None:
+        return None
+
+    приказ = reminders_module.strip_time(строка)
+
+    # Осталось слишком мало — значит время и было всей фразой: «через час»,
+    # «в 7 утра». Откладывать нечего.
+    if len(приказ.split()) < 2:
+        return None
+
+    # Вопрос о времени — не команда: «сколько времени осталось до полуночи»
+    # спрашивают, а не приказывают.
+    if starts_with_question_word(приказ.lower()):
+        return None
+
+    return когда, приказ
 
 
 def extract_project(text: str):

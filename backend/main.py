@@ -825,6 +825,27 @@ class ScottAI:
                 )
             print(f"🔎 Решение: {decision.kind} — {decision.reason}")
 
+            # ---------------------------------------------------- отложить
+            #
+            # Разбор поймал время во фразе: «через час запусти рендер». В
+            # назначенный срок Scott выполнит это сам.
+            if decision.kind == 'schedule':
+                служба = scott_runtime.reminders
+
+                if служба is None:
+                    response = "Служба отложенных дел не запущена"
+                else:
+                    служба.add(decision.order, decision.when, kind="command")
+                    response = f"Сделаю {decision.when:%d.%m в %H:%M}: {decision.order}"
+
+                knowledge_base.add_conversation(text, response)
+                print(f"🤖 Scott: {response}")
+                return {
+                    "type": "scheduled",
+                    "response": response,
+                    "quiet_mode": quiet_mode,
+                }
+
             # ---------------------------------------------------- проект
             if decision.kind == 'project':
                 проект = projects_module.find(decision.project)
@@ -1185,9 +1206,24 @@ class ScottAI:
                 return ("Не понял, на какое время. Скажите, например, "
                         "«напомни через десять минут» или «напомни в 15:30»")
 
-            subject = reminders_module.extract_subject(original_text)
-            item = service.add(subject or "напоминание", when)
-            return f"✅ Напомню {when.strftime('%d.%m в %H:%M')}: {item.text}"
+            try:
+                from . import scheduled as scheduled_module
+            except ImportError:
+                import scheduled as scheduled_module
+
+            # «Напомни выключить компьютер» и «выключи компьютер через час» —
+            # разные просьбы. Первая требует слов в назначенный час, вторая —
+            # дела. Спутать их значит либо промолчать вместо дела, либо
+            # выключить компьютер вместо напоминания.
+            if scheduled_module.is_reminder(original_text):
+                subject = reminders_module.extract_subject(original_text)
+                item = service.add(subject or "напоминание", when)
+                return f"✅ Напомню {when.strftime('%d.%m в %H:%M')}: {item.text}"
+
+            # Отложенная команда: в назначенный час Scott её выполнит.
+            приказ = reminders_module.strip_time(original_text)
+            item = service.add(приказ or original_text, when, kind="command")
+            return f"✅ Сделаю {when.strftime('%d.%m в %H:%M')}: {item.text}"
 
         # ============= ОТКРЫТЬ ПАПКУ =============
         elif cmd_type == 'open_folder':
@@ -1454,13 +1490,73 @@ def _listener_handle(text: str) -> None:
 # закрытие окна, и перезапуск — служба хранит дела в файле и сама следит за
 # временем.
 
-def _speak_reminder(item) -> None:
+def _run_scheduled_command(item) -> None:
     """
-    Произнести напоминание вслух.
+    Выполнить то, что человек отложил на этот час.
 
-    Вызывается из потока службы, а озвучивание асинхронное, поэтому корутина
-    передаётся в главный цикл — тем же способом, каким это делает слушатель.
+    Исполняется без него — значит и отчитаться надо так, чтобы, вернувшись, он
+    понял, что произошло. Scott произносит вслух не только итог, но и саму
+    команду: «Выполняю отложенное: запусти рендер» — иначе из комнаты слышно
+    лишь «Готово», и неясно, что именно готово.
+
+    Ошибка тоже произносится. Отложенная команда, молча не сработавшая, — худший
+    исход: человек рассчитывал, что дело сделано.
     """
+    приказ = getattr(item, "text", "") or ""
+    print(f"⏰ Выполняю отложенное: {приказ}")
+
+    if _main_loop is None:
+        print("⚠️ Главный цикл ещё не готов — отложенная команда пропущена")
+        return
+
+    async def run() -> None:
+        try:
+            итог = await scott_ai.process_command(приказ, quiet_mode=False)
+            ответ = итог.get("response", "") if isinstance(итог, dict) else str(итог)
+        except Exception as e:
+            ответ = f"не получилось: {e}"
+            print(f"⚠️ Отложенная команда не выполнена: {e}")
+
+        voice = scott_runtime.scott_voice
+        if voice is None:
+            return
+
+        текст = f"Выполняю отложенное: {приказ}. {ответ}" if ответ else f"Выполняю отложенное: {приказ}"
+
+        listening = scott_runtime.listener
+        if listening is not None:
+            listening.suspend()
+        try:
+            path = await asyncio.to_thread(voice.speak_to_file, текст)
+            if path:
+                await asyncio.to_thread(voice.play_audio, path)
+        except Exception as e:
+            print(f"⚠️ Не удалось озвучить: {e}")
+        finally:
+            if listening is not None:
+                await asyncio.sleep(0.4)
+                listening.resume()
+
+    asyncio.run_coroutine_threadsafe(run(), _main_loop)
+
+
+def _fire_reminder(item) -> None:
+    """
+    Время пришло: сказать или сделать.
+
+    Вид «command» был объявлен в службе напоминаний с самого начала и не
+    использовался никем: что бы в нём ни лежало, при срабатывании оно
+    проговаривалось вслух. Теперь «через час запусти рендер» Scott не
+    напоминает, а выполняет.
+
+    Вызывается из потока службы, а исполнение и озвучивание асинхронные, поэтому
+    корутина передаётся в главный цикл — тем же способом, каким это делает
+    слушатель.
+    """
+    if getattr(item, "kind", "remind") == "command":
+        _run_scheduled_command(item)
+        return
+
     text = f"Напоминаю: {item.text}" if item.text else "Напоминание"
     print(f"⏰ {text}")
 
@@ -1494,7 +1590,7 @@ try:
     except ImportError:
         from reminders import ReminderService
 
-    scott_reminders = ReminderService(on_fire=_speak_reminder)
+    scott_reminders = ReminderService(on_fire=_fire_reminder)
     scott_reminders.start()
     scott_runtime.set_reminders(scott_reminders)
     print(f"⏰ Служба напоминаний запущена (в очереди: {len(scott_reminders.pending())})")

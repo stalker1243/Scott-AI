@@ -212,6 +212,28 @@ def extract_subject(text: str) -> str:
     return cleaned
 
 
+def strip_time(text: str) -> str:
+    """
+    Убрать из фразы время, оставив саму команду.
+
+    Из «через час запусти рендер» остаётся «запусти рендер» — именно это Scott
+    выполнит, когда придёт срок. Отличие от extract_subject в том, что здесь не
+    срезается «напомни»: в отложенной команде такого слова и нет, а вот глагол
+    действия («запусти») срезать нельзя ни в коем случае — без него от команды
+    ничего не останется.
+    """
+    cleaned = text
+    for pattern in (*(p for p, _ in FIXED_DELAYS), RELATIVE, ABSOLUTE, ABSOLUTE_HOUR,
+                    ABSOLUTE_DAYPART, TOMORROW, DAYPART):
+        cleaned = pattern.sub(" ", cleaned)
+
+    # Обращение по имени в команде не нужно: Scott и так знает, к кому она.
+    cleaned = re.sub(r"^\s*скотт[,\s]+", "", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.!?—-")
+    return cleaned
+
+
 # ==================== Хранилище и выполнение ====================
 
 class ReminderService:
