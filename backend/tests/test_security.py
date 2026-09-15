@@ -69,6 +69,51 @@ def test_заданный_руками_адрес_сильнее(доступ):
     assert доступ.listen_host("192.168.1.10") == "192.168.1.10"
 
 
+# ==================== Ключи в журнале ====================
+
+def test_болтливые_библиотеки_молчат():
+    """
+    Токен бота не должен попадать в журнал.
+
+    На уровне DEBUG urllib3 печатает полный адрес каждого запроса, а токен
+    Telegram-бота стоит прямо в адресе: `GET /bot<ТОКЕН>/getUpdates`. Ключ от
+    Scott ложился в файл на диске открытым текстом, раз в тридцать секунд; за
+    одиннадцать дней журнал вырос до шести с половиной мегабайт. Такой токен
+    надо считать утёкшим — файл копируется вместе с папкой и уезжает в отчёты
+    об ошибках.
+    """
+    import logging
+
+    try:
+        import log_hygiene
+    except ImportError:  # pragma: no cover — запуск из корня репозитория
+        from backend import log_hygiene
+
+    log_hygiene.quiet_third_party()
+
+    assert logging.getLogger("urllib3").level >= logging.WARNING
+    assert logging.getLogger("httpx").level >= logging.WARNING
+
+
+def test_свои_модули_продолжают_писать_в_журнал():
+    """
+    Пара к проверке выше. Приглушить всё разом значило бы однажды не увидеть
+    собственную ошибку — журнал ради этого и заводился.
+    """
+    import logging
+
+    try:
+        import log_hygiene
+    except ImportError:  # pragma: no cover
+        from backend import log_hygiene
+
+    log_hygiene.quiet_third_party()
+
+    assert "listener" not in log_hygiene.NOISY
+    assert "scott_voice" not in log_hygiene.NOISY
+    assert logging.getLogger("listener").level < logging.WARNING or         logging.getLogger("listener").level == logging.NOTSET
+
+
 def test_cors_is_not_wildcard(main_source):
     """
     CORS не открыт для всех источников.

@@ -253,6 +253,18 @@ logging.basicConfig(
     ]
 )
 
+# Чужие библиотеки — молчать.
+#
+# На уровне DEBUG urllib3 печатает адрес каждого запроса, а токен бота стоит
+# прямо в адресе: ключ от Scott ложился в файл на диске открытым текстом.
+# Подробности и список — в log_hygiene.
+try:
+    from log_hygiene import quiet_third_party
+except ImportError:  # pragma: no cover — запуск из корня репозитория
+    from .log_hygiene import quiet_third_party
+
+quiet_third_party()
+
 # Глобальная печать неперехваченных исключений
 def _global_excepthook(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
