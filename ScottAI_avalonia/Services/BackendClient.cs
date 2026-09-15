@@ -26,6 +26,24 @@ public class BackendClient
         _http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(30) };
     }
 
+    /// <summary>
+    /// Клиент со своим обработчиком запросов — для проверок.
+    ///
+    /// Проверкам нужен предсказуемый ответ, а не настоящая сеть. Прежде
+    /// «недоступный backend» изображался обращением на заведомо глухой порт, и
+    /// это оказалось не гарантией: на машине с несколькими сетевыми
+    /// переходниками по такому адресу иногда кто-то отвечает, и проверка
+    /// падала через прогон, без всякой связи с тем, что правили.
+    /// </summary>
+    internal BackendClient(HttpMessageHandler handler, string baseUrl = "http://127.0.0.1:8000")
+    {
+        _http = new HttpClient(handler)
+        {
+            BaseAddress = new Uri(baseUrl),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+    }
+
     public async Task<bool> HealthAsync()
     {
         try

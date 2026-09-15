@@ -58,6 +58,22 @@ public sealed class LauncherSettings
     /// </summary>
     public string IconVariant { get; set; } = "dark";
 
+    /// <summary>
+    /// Сжат ли список разделов до иконок.
+    ///
+    /// Запоминается, потому что это выбор про место на экране: человеку,
+    /// которому оно нужно, оно нужно всегда, а не до следующего запуска.
+    /// </summary>
+    public bool SidebarCollapsed { get; set; }
+
+    /// <summary>
+    /// Названия свёрнутых групп разделов.
+    ///
+    /// Именно названия, а не номера: порядок групп ещё будет меняться, а
+    /// сохранённые номера после такой правки свернули бы не те группы.
+    /// </summary>
+    public string[] CollapsedGroups { get; set; } = Array.Empty<string>();
+
 }
 
 [JsonSourceGenerationOptions(WriteIndented = true)]

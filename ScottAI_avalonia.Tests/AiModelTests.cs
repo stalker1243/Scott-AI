@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using ScottAI.Avalonia.Models;
 using ScottAI.Avalonia.Services;
@@ -15,15 +17,31 @@ namespace ScottAI.Avalonia.Tests;
 /// команды, но на вопросы не отвечает вовсе. Раньше это была третья вкладка
 /// внутри Настроек — рядом с громкостью и микрофоном.
 ///
-/// Проверяется логика выбора, а не разговор с backend: адрес здесь заведомо
-/// глухой, и запрос отваливается сразу. Так и надо — проверки не должны
-/// зависеть от того, поднят ли сейчас backend на этой машине.
+/// Проверяется логика выбора, а не разговор с backend: запрос здесь никуда не
+/// уходит вовсе. Так и надо — проверки не должны зависеть от того, поднят ли
+/// сейчас backend на этой машине.
 /// </summary>
 public class AiModelTests
 {
-    /// <summary>Порт, на котором заведомо никто не слушает.</summary>
-    private static AiModelViewModel Раздел() =>
-        new(new BackendClient("http://127.0.0.1:9"));
+    /// <summary>
+    /// Backend, которого нет.
+    ///
+    /// Прежде это изображалось обращением на заведомо глухой порт — и оказалось
+    /// не гарантией: на машине с несколькими сетевыми переходниками по такому
+    /// адресу иногда кто-то отвечает, и проверка «применение не удалось»
+    /// падала через прогон, без связи с тем, что правили. Теперь отказ
+    /// гарантирован, потому что запрос вообще никуда не уходит.
+    /// </summary>
+    private sealed class БезBackend : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken token)
+        {
+            throw new HttpRequestException("backend не отвечает");
+        }
+    }
+
+    private static AiModelViewModel Раздел() => new(new BackendClient(new БезBackend()));
 
     private static AiProvider Провайдер(string id, params string[] модели) => new()
     {

@@ -17,138 +17,126 @@
         Icon="/Assets/scott.ico">
 
     <Panel>
-    <Grid ColumnDefinitions="208,*">
+    <Grid ColumnDefinitions="Auto,*">
 
         <!-- Sidebar -->
         <Border Grid.Column="0" Background="{DynamicResource BgSidebar}"
-                BorderBrush="{DynamicResource BorderColor}" BorderThickness="0,0,1,0">
+                BorderBrush="{DynamicResource BorderColor}" BorderThickness="0,0,1,0"
+                Width="{Binding SidebarCollapsed, Converter={x:Static conv:SidebarWidthConverter.Instance}}">
+            <Border.Transitions>
+                <Transitions>
+                    <!-- Список не прыгает, а съезжает: резкий скачок ширины
+                         читается как сбой, а не как действие. -->
+                    <DoubleTransition Property="Width" Duration="0:0:0.18" />
+                </Transitions>
+            </Border.Transitions>
             <DockPanel LastChildFill="False">
                 <!-- Логотип. Подложки под ним нет намеренно: у самой иконки тёмный
                      фон со свечением по краю, и акцентный квадрат за прозрачными
                      углами выглядел бы рамкой. -->
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12"
-                            Margin="18,20,0,22" VerticalAlignment="Center">
-                    <Border Classes="logo" Width="34" Height="34" CornerRadius="10" ClipToBounds="True">
+                <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                      Margin="15,20,10,18">
+                    <Border Grid.Column="0" Classes="logo" Width="34" Height="34" CornerRadius="10"
+                            ClipToBounds="True" VerticalAlignment="Center">
                         <Image Source="{Binding Logo}" Width="34" Height="34" Stretch="UniformToFill" />
                     </Border>
-                    <TextBlock Text="ScottAI" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextPrimary}" />
-                </StackPanel>
 
-                <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="8,0">
-                    <Button Command="{Binding NavigateHomeCommand}" Classes="nav" AutomationProperties.Name="Главная"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=home}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="Home" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Главная" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
+                    <TextBlock Grid.Column="1" Text="ScottAI" FontSize="16" FontWeight="Bold"
+                               Margin="12,0,0,0" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextPrimary}"
+                               IsVisible="{Binding !SidebarCollapsed}" />
+
+                    <!-- Сжать список до иконок. Кнопка здесь, а не внизу: место
+                         освобождают, когда страница уже открыта и мешает именно
+                         список, а взгляд в это время наверху. -->
+                    <Button Grid.Column="2" Classes="navcollapse"
+                            Command="{Binding ToggleSidebarCommand}"
+                            ToolTip.Tip="Свернуть список разделов"
+                            IsVisible="{Binding !SidebarCollapsed}">
+                        <mi:MaterialIcon Kind="ChevronDoubleLeft" Width="16" Height="16" />
                     </Button>
-                    <Button Command="{Binding NavigateChatCommand}" Classes="nav" AutomationProperties.Name="Чат"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=chat}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="ChatOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Чат" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateSystemCommand}" Classes="nav" AutomationProperties.Name="Система"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=system}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="Cpu64Bit" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Система" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateActionsCommand}" Classes="nav" AutomationProperties.Name="Действия"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=actions}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="LightningBoltOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Действия" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateProtocolsCommand}" Classes="nav" AutomationProperties.Name="Протоколы"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=protocols}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="FormatListNumbered" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Протоколы" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateAnalyticsCommand}" Classes="nav" AutomationProperties.Name="Аналит."
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=analytics}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="ChartBar" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Аналитика" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateAiModelCommand}" Classes="nav" AutomationProperties.Name="Модель"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=aimodel}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="RobotOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Модель" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateAppearanceCommand}" Classes="nav" AutomationProperties.Name="Внешний вид"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=appearance}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="PaletteOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Внешний вид" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateSettingsCommand}" Classes="nav" AutomationProperties.Name="Настр."
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=settings}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="CogOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Настройки" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateProjectsCommand}" Classes="nav" AutomationProperties.Name="Проекты"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=projects}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="FolderMultipleOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Проекты" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateMemoryCommand}" Classes="nav" AutomationProperties.Name="Память"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=memory}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="HeadCogOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Память" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateProfileCommand}" Classes="nav" AutomationProperties.Name="Персонализация"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=profile}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="AccountHeartOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Персонализация" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateAboutCommand}" Classes="nav" AutomationProperties.Name="О ScottAI"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=about}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="InformationOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="О ScottAI" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateRemoteCommand}" Classes="nav" AutomationProperties.Name="Удалённо"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=remote}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="CellphoneLink" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Удалённо" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateDiagnosticsCommand}" Classes="nav" AutomationProperties.Name="Диагностика"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=diagnostics}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="Stethoscope" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Диагностика" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                    <Button Command="{Binding NavigateLogsCommand}" Classes="nav" AutomationProperties.Name="Логи"
-                            Classes.active="{Binding ActivePage, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=logs}">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <mi:MaterialIcon Kind="TextBoxSearchOutline" Width="18" Height="18" VerticalAlignment="Center" Classes="navicon" />
-                            <TextBlock Text="Логи" VerticalAlignment="Center" Classes="navlabel" />
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
+                </Grid>
+
+                <!-- В сжатом виде кнопка переезжает под логотип: рядом с ним
+                     для неё нет места, а искать её в другом углу человек не
+                     станет. -->
+                <Button DockPanel.Dock="Top" Classes="navcollapse" Margin="0,0,0,10"
+                        HorizontalAlignment="Center"
+                        Command="{Binding ToggleSidebarCommand}"
+                        ToolTip.Tip="Развернуть список разделов"
+                        IsVisible="{Binding SidebarCollapsed}">
+                    <mi:MaterialIcon Kind="ChevronDoubleRight" Width="16" Height="16" />
+                </Button>
+
+                <!-- ==================== Разделы ====================
+
+                     Заданы данными (MainWindowViewModel.Sections), а не
+                     разметкой: прежде каждый из шестнадцати был расписан здесь
+                     отдельно, по шесть строк, и любая правка требовала
+                     шестнадцати одинаковых исправлений.
+
+                     Сгруппированы по смыслу и сворачиваются: шестнадцать строк
+                     подряд человек не читает — он их просматривает и не находит
+                     нужную, потому что глазу не за что зацепиться. -->
+
+                <ScrollViewer DockPanel.Dock="Top" VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Sections}" Margin="8,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:NavSection">
+                                <StackPanel Spacing="4" Margin="0,0,0,10">
+
+                                    <!-- Заголовок группы. В сжатом списке скрыт:
+                                         там нет подписей, и сворачивать нечего. -->
+                                    <Button Classes="navgroup" IsVisible="{Binding !$parent[Window].((vm:MainWindowViewModel)DataContext).SidebarCollapsed}"
+                                            Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).ToggleSectionCommand}"
+                                            CommandParameter="{Binding}">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="{Binding Title}"
+                                                       FontSize="10" FontWeight="SemiBold"
+                                                       LetterSpacing="1.1"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextMuted}" />
+                                            <mi:MaterialIcon Grid.Column="1" Kind="ChevronDown"
+                                                             Width="14" Height="14"
+                                                             VerticalAlignment="Center"
+                                                             Foreground="{DynamicResource TextMuted}"
+                                                             IsVisible="{Binding Expanded}" />
+                                            <mi:MaterialIcon Grid.Column="1" Kind="ChevronRight"
+                                                             Width="14" Height="14"
+                                                             VerticalAlignment="Center"
+                                                             Foreground="{DynamicResource TextMuted}"
+                                                             IsVisible="{Binding !Expanded}" />
+                                        </Grid>
+                                    </Button>
+
+                                    <ItemsControl ItemsSource="{Binding Items}"
+                                                  IsVisible="{Binding ItemsVisible}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="models:NavItem">
+                                                <Button Classes="nav" Classes.active="{Binding Active}"
+                                                        Classes.narrow="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SidebarCollapsed}"
+                                                        AutomationProperties.Name="{Binding Label}"
+                                                        ToolTip.Tip="{Binding Label}"
+                                                        Margin="0,0,0,2"
+                                                        Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).GoCommand}"
+                                                        CommandParameter="{Binding Page}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                                        <mi:MaterialIcon Kind="{Binding Icon}" Width="18" Height="18"
+                                                                         VerticalAlignment="Center" Classes="navicon" />
+                                                        <TextBlock Text="{Binding Label}" VerticalAlignment="Center"
+                                                                   Classes="navlabel"
+                                                                   IsVisible="{Binding !$parent[Window].((vm:MainWindowViewModel)DataContext).SidebarCollapsed}" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
 
                 <Ellipse DockPanel.Dock="Bottom" Width="10" Height="10" Margin="0,0,0,20" HorizontalAlignment="Center"
                          Classes="statusdot" Classes.pulse="{Binding BackendStatus, Converter={x:Static conv:EqualsConverter.Instance}, ConverterParameter=online}"
@@ -501,6 +489,10 @@
                 </Transitions>
             </Setter>
         </Style>
+        <Style Selector="Button.nav.narrow">
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="0,9" />
+        </Style>
         <Style Selector="Button.nav:pointerover">
             <Setter Property="Background" Value="{DynamicResource BgElevated}" />
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
@@ -515,6 +507,34 @@
             <Setter Property="Background" Value="{DynamicResource Accent}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Foreground" Value="White" />
+        </Style>
+
+        <Style Selector="Button.navcollapse">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="7" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}" />
+        </Style>
+        <Style Selector="Button.navcollapse:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BgElevated}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+        </Style>
+
+        <!-- Заголовок группы разделов. Нажимается, но кнопкой не выглядит:
+             это подпись, которая умеет сворачиваться, а не действие. -->
+        <Style Selector="Button.navgroup">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="12,6,10,4" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="Button.navgroup:pointerover">
+            <Setter Property="Background" Value="{DynamicResource BgElevated}" />
         </Style>
 
         <Style Selector="TextBlock.navlabel">

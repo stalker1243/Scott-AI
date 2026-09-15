@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Material.Icons;
 using ScottAI.Avalonia.Models;
 using ScottAI.Avalonia.Services;
 
@@ -54,6 +56,28 @@ public partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _activePage = "home";
+
+    // ==================== Список разделов ====================
+    //
+    // Разделов шестнадцать. Шестнадцать строк подряд человек не читает — он их
+    // просматривает и не находит нужную, потому что глазу не за что зацепиться.
+    // Поэтому они собраны в пять групп, каждую можно свернуть, а весь список —
+    // сжать до иконок, когда нужно место для самой страницы.
+    //
+    // Заданы данными, а не разметкой: прежде каждый раздел был расписан в XAML
+    // отдельно, по шесть строк, и добавить к ним сворачивание значило бы
+    // править шестнадцать мест и в одном непременно ошибиться.
+
+    public IReadOnlyList<NavSection> Sections { get; }
+
+    /// <summary>
+    /// Сжат ли список до иконок.
+    ///
+    /// Запоминается между запусками: человек, которому нужно место, хочет его
+    /// всегда, а не до следующего перезапуска.
+    /// </summary>
+    [ObservableProperty]
+    private bool _sidebarCollapsed = SettingsStore.Current.SidebarCollapsed;
 
     [ObservableProperty]
     private string _backendStatus = "starting"; // starting | online | offline
@@ -129,6 +153,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
     public MainWindowViewModel()
     {
+        Sections = СобратьРазделы();
+        ОтметитьАктивный();
+
         AiModel = new AiModelViewModel(_client);
         Diagnostics = new DiagnosticsViewModel(_client);
         Memory = new MemoryViewModel(_client);
@@ -312,6 +339,193 @@ public partial class MainWindowViewModel : ViewModelBase
         finally
         {
             _quietLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Разделы по группам — в том порядке, в каком ими пользуются.
+    ///
+    /// Группировка не декоративная: «Память» и «Персонализация» — про то, что
+    /// Scott знает о человеке, «Система» и «Удалённо» — про машину, а
+    /// «Диагностика» и «Логи» открываются, только когда что-то сломалось.
+    /// Свалить их в один список значит заставить искать нужное перебором.
+    /// </summary>
+    private IReadOnlyList<NavSection> СобратьРазделы()
+    {
+        var свёрнутые = SettingsStore.Current.CollapsedGroups ?? Array.Empty<string>();
+
+        var группы = new List<NavSection>
+        {
+            new()
+            {
+                Title = "Начало",
+                Items = new List<NavItem>
+                {
+                    new() { Page = "home", Label = "Главная", Icon = MaterialIconKind.Home },
+                    new() { Page = "chat", Label = "Чат", Icon = MaterialIconKind.ChatOutline },
+                },
+            },
+            new()
+            {
+                Title = "Scott",
+                Items = new List<NavItem>
+                {
+                    new() { Page = "memory", Label = "Память", Icon = MaterialIconKind.HeadCogOutline },
+                    new() { Page = "profile", Label = "Персонализация", Icon = MaterialIconKind.AccountHeartOutline },
+                    new() { Page = "projects", Label = "Проекты", Icon = MaterialIconKind.FolderMultipleOutline },
+                    new() { Page = "protocols", Label = "Протоколы", Icon = MaterialIconKind.FormatListNumbered },
+                    new() { Page = "actions", Label = "Действия", Icon = MaterialIconKind.LightningBoltOutline },
+                },
+            },
+            new()
+            {
+                Title = "Компьютер",
+                Items = new List<NavItem>
+                {
+                    new() { Page = "system", Label = "Система", Icon = MaterialIconKind.Cpu64Bit },
+                    new() { Page = "aimodel", Label = "Модель", Icon = MaterialIconKind.RobotOutline },
+                    new() { Page = "remote", Label = "Удалённо", Icon = MaterialIconKind.CellphoneLink },
+                },
+            },
+            new()
+            {
+                Title = "Оформление",
+                Items = new List<NavItem>
+                {
+                    new() { Page = "appearance", Label = "Внешний вид", Icon = MaterialIconKind.PaletteOutline },
+                    new() { Page = "settings", Label = "Настройки", Icon = MaterialIconKind.CogOutline },
+                },
+            },
+            new()
+            {
+                Title = "Служебное",
+                Items = new List<NavItem>
+                {
+                    new() { Page = "diagnostics", Label = "Диагностика", Icon = MaterialIconKind.Stethoscope },
+                    new() { Page = "logs", Label = "Логи", Icon = MaterialIconKind.TextBoxSearchOutline },
+                    new() { Page = "analytics", Label = "Аналитика", Icon = MaterialIconKind.ChartBar },
+                    new() { Page = "about", Label = "О ScottAI", Icon = MaterialIconKind.InformationOutline },
+                },
+            },
+        };
+
+        foreach (var группа in группы)
+        {
+            группа.Expanded = !Array.Exists(свёрнутые, имя => имя == группа.Title);
+            группа.ItemsVisible = SidebarCollapsed || группа.Expanded;
+        }
+
+        return группы;
+    }
+
+    /// <summary>
+    /// Открыть раздел по имени.
+    ///
+    /// Одна команда на все шестнадцать: в шаблоне строки нельзя привязаться к
+    /// своей команде у каждого раздела, да и заводить шестнадцать одинаковых
+    /// обёрток незачем — прежние Navigate* остаются для тех, кто зовёт их по
+    /// имени (главная страница, трей, мастер первого запуска).
+    /// </summary>
+    [RelayCommand]
+    private void Go(string? page)
+    {
+        switch (page)
+        {
+            case "home": NavigateHome(); break;
+            case "chat": NavigateChat(); break;
+            case "system": NavigateSystem(); break;
+            case "actions": NavigateActions(); break;
+            case "protocols": NavigateProtocols(); break;
+            case "analytics": NavigateAnalytics(); break;
+            case "aimodel": NavigateAiModel(); break;
+            case "appearance": NavigateAppearance(); break;
+            case "settings": NavigateSettings(); break;
+            case "projects": NavigateProjects(); break;
+            case "memory": NavigateMemory(); break;
+            case "profile": NavigateProfile(); break;
+            case "about": NavigateAbout(); break;
+            case "remote": NavigateRemote(); break;
+            case "diagnostics": NavigateDiagnostics(); break;
+            case "logs": NavigateLogs(); break;
+        }
+    }
+
+    /// <summary>
+    /// Сжать список до иконок или вернуть подписи.
+    ///
+    /// В сжатом виде группы не сворачиваются: подписей нет, заголовок группы
+    /// скрыт, и часть иконок исчезала бы без видимой причины.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleSidebar()
+    {
+        SidebarCollapsed = !SidebarCollapsed;
+
+        SettingsStore.Current.SidebarCollapsed = SidebarCollapsed;
+        SettingsStore.SaveCurrent();
+    }
+
+    [RelayCommand]
+    private void ToggleSection(NavSection? группа)
+    {
+        if (группа is null || SidebarCollapsed)
+        {
+            return;
+        }
+
+        группа.Expanded = !группа.Expanded;
+        группа.ItemsVisible = группа.Expanded;
+
+        ЗапомнитьСвёрнутые();
+    }
+
+    private void ЗапомнитьСвёрнутые()
+    {
+        var свёрнутые = new List<string>();
+
+        foreach (var группа in Sections)
+        {
+            if (!группа.Expanded)
+            {
+                свёрнутые.Add(группа.Title);
+            }
+        }
+
+        SettingsStore.Current.CollapsedGroups = свёрнутые.ToArray();
+        SettingsStore.SaveCurrent();
+    }
+
+    partial void OnSidebarCollapsedChanged(bool value)
+    {
+        foreach (var группа in Sections)
+        {
+            группа.ItemsVisible = value || группа.Expanded;
+        }
+    }
+
+    /// <summary>
+    /// Отметить открытый раздел и показать его, даже если группа свёрнута.
+    ///
+    /// Иначе человек оказывается на странице, которой нет в списке, — и не
+    /// понимает, где находится.
+    /// </summary>
+    partial void OnActivePageChanged(string value) => ОтметитьАктивный();
+
+    private void ОтметитьАктивный()
+    {
+        foreach (var группа in Sections)
+        {
+            foreach (var раздел in группа.Items)
+            {
+                раздел.Active = раздел.Page == ActivePage;
+
+                if (раздел.Active && !группа.Expanded)
+                {
+                    группа.Expanded = true;
+                    группа.ItemsVisible = true;
+                    ЗапомнитьСвёрнутые();
+                }
+            }
         }
     }
 
