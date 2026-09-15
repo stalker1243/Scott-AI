@@ -102,6 +102,34 @@ class ListenerConfig:
     min_phrase: float = 0.35
     max_phrase: float = 15.0
 
+    # ==================== Конец речи, а не конец звука ====================
+    #
+    # Фраза закрывалась по тишине — то есть по падению громкости. Пока в
+    # комнате играет музыка или идёт разговор, громкость не падает никогда, и
+    # запись растёт до предела в пятнадцать секунд: человек сказал «открой
+    # браузер» за полторы секунды, а ждал ответа все пятнадцать. В живом
+    # журнале такими оказались 429 записей из 715.
+    #
+    # Поэтому конец фразы определяется ещё и по тому, кончилась ли РЕЧЬ.
+    # Проверка окна в секунду стоит около пяти миллисекунд, так что делать её
+    # можно хоть четыре раза в секунду.
+
+    # Сколько звука проверять за раз. Секунда — чтобы пауза на вдох не
+    # сходила за конец речи: в окне остаётся сказанное до неё.
+    speech_window: float = 1.0
+
+    # Как часто проверять. Чаще — лишняя работа, реже — человек ждёт.
+    speech_check_every: float = 0.25
+
+    # Сколько держаться «речи нет», чтобы закрыть фразу. Меньше — оборвём на
+    # вдохе, больше — вернёмся к ожиданию, ради избавления от которого всё и
+    # затевалось.
+    speech_gone_to_end: float = 0.6
+
+    # С какой длины фразы включать проверку. Короткая команда закрывается
+    # обычным путём, по тишине, и трогать этот путь незачем: он работает.
+    speech_check_from: float = 2.0
+
     # Хвост звука перед началом речи: человек начинает говорить раньше, чем громкость
     # переваливает порог, и без этого запаса теряется первый слог — как раз тот,
     # в котором чаще всего и звучит имя.
@@ -186,6 +214,10 @@ class ListenerStats:
     last_phrase_seconds: float = 0.0
     closed_by_length: int = 0
 
+    # Сколько фраз закрыла проверка речи — тех, что при прежнем порядке росли
+    # бы до предела, потому что в комнате не становилось тихо.
+    closed_by_speech_end: int = 0
+
     # Сколько прошло от конца речи до готового ответа — то самое «медленно»,
     # на которое жалуется человек. Ни один замер по этапам этого не показывал.
     last_answer_seconds: float = 0.0
@@ -210,11 +242,23 @@ class VoiceListener:
         check_trigger: Optional[Callable[[str], object]] = None,
         config: Optional[ListenerConfig] = None,
         on_interrupt: Optional[Callable[[str], None]] = None,
+        has_speech: Optional[Callable[[np.ndarray], bool]] = None,
     ):
         self.transcribe = transcribe
         self.handle_command = handle_command
         self.check_trigger = check_trigger
         self.config = config or ListenerConfig()
+
+        # Жаловались ли уже на сломавшуюся проверку речи: она ломается на
+        # каждом блоке, и без этого журнал утонет.
+        self._speech_check_complained = False
+
+        # Как узнать, звучит ли в куске звука речь.
+        #
+        # Передаётся снаружи, как и распознавание: слушатель не должен тянуть
+        # за собой Whisper и его зависимости — тогда его не проверить без них.
+        # Не передали — работает прежний путь, по громкости.
+        self.has_speech = has_speech
 
         # Что делать, когда Scott перебили. По умолчанию — ничего: сам
         # слушатель речью не управляет, это дело того, кто его создал.
@@ -454,6 +498,7 @@ class VoiceListener:
             "last_phrase_sec": self.stats.last_phrase_seconds,
             "last_answer_sec": self.stats.last_answer_seconds,
             "closed_by_length": self.stats.closed_by_length,
+            "closed_by_speech_end": self.stats.closed_by_speech_end,
             "max_phrase": self.config.max_phrase,
             "interruptions": self.stats.interruptions,
             "echo_ignored": self.stats.echo_ignored,
@@ -577,6 +622,21 @@ class VoiceListener:
         resume_blocks = max(1, int(self.config.resume_gap * 1000 / BLOCK_MS))
         clean_blocks = max(1, int(self.config.clean_gap * 1000 / BLOCK_MS))
 
+        # Проверка конца речи — см. настройки с тем же именем.
+        window_blocks = max(1, int(self.config.speech_window * 1000 / BLOCK_MS))
+        check_every_blocks = max(1, int(self.config.speech_check_every * 1000 / BLOCK_MS))
+        gone_blocks = max(1, int(self.config.speech_gone_to_end * 1000 / BLOCK_MS))
+        speech_from_blocks = max(1, int(self.config.speech_check_from * 1000 / BLOCK_MS))
+
+        blocks_since_check = 0
+        speech_gone_blocks = 0
+
+        # Для начала фразы счёт отдельный и начинается готовым: первая проверка
+        # должна случиться сразу, иначе начало речи ждёт лишнюю четверть
+        # секунды — ровно ту задержку, ради избавления от которой всё и
+        # затевалось.
+        blocks_since_onset_check = check_every_blocks
+
         preroll: List[np.ndarray] = []
         phrase: List[np.ndarray] = []
         loud_streak = 0
@@ -673,7 +733,38 @@ class VoiceListener:
                 gap_blocks += 1
 
                 loud_streak = loud_streak + 1 if loud else 0
-                if loud_streak >= self.config.onset_blocks:
+
+                # Громко — ещё не значит, что заговорили. Под музыку громкость
+                # держится постоянно, и фраза открывалась бы снова и снова,
+                # едва закрывшись: одна запись в пятнадцать секунд сменилась
+                # бы десятком коротких, и каждая пошла бы на распознавание.
+                #
+                # Начало фразы поэтому тоже проверяется на речь. Отказ ничего
+                # не теряет: запас перед фразой продолжает копиться, и когда
+                # речь всё-таки прозвучит, она войдёт в запись целиком.
+                речь_началась = True
+                if (self.has_speech is not None
+                        and loud_streak >= self.config.onset_blocks
+                        and not self._expecting_interrupt):
+                    blocks_since_onset_check += 1
+
+                    if blocks_since_onset_check >= check_every_blocks:
+                        blocks_since_onset_check = 0
+                        окно = np.concatenate(preroll[-window_blocks:]) if preroll else block
+
+                        try:
+                            речь_началась = bool(self.has_speech(окно))
+                        except Exception as e:
+                            if not self._speech_check_complained:
+                                self._speech_check_complained = True
+                                print(f"⚠️ Проверка речи отключилась: {e}")
+                            self.has_speech = None
+                    else:
+                        # Между проверками фразу не открываем: иначе первая же
+                        # громкая нота музыки заведёт её мимо проверки.
+                        речь_началась = False
+
+                if loud_streak >= self.config.onset_blocks and речь_началась:
                     # Человек заговорил снова. Если это случилось почти сразу
                     # после закрытия предыдущей фразы — значит её закрыли рано,
                     # на вдохе. Долгая тишина, наоборот, означает, что фраза
@@ -693,6 +784,11 @@ class VoiceListener:
                     preroll.clear()
                     silence_streak = 0
                     loud_in_phrase = loud_streak
+
+                    # Новая фраза — счёт молчания начинается заново.
+                    blocks_since_check = 0
+                    speech_gone_blocks = 0
+                    blocks_since_onset_check = check_every_blocks
             else:
                 phrase.append(block)
                 if loud:
@@ -711,8 +807,36 @@ class VoiceListener:
                     silence_blocks = max(1, int(self._silence_to_end * 1000 / BLOCK_MS))
                     limit_blocks = max_blocks
 
+                # Кончилась ли речь. Проверяется только у длинной фразы: у
+                # короткой прежний путь по тишине работает, и трогать его
+                # незачем.
+                речь_кончилась = False
+                if (self.has_speech is not None
+                        and len(phrase) >= speech_from_blocks
+                        and not self._expecting_interrupt):
+                    blocks_since_check += 1
+
+                    if blocks_since_check >= check_every_blocks:
+                        blocks_since_check = 0
+                        окно = np.concatenate(phrase[-window_blocks:])
+
+                        try:
+                            if self.has_speech(окно):
+                                speech_gone_blocks = 0
+                            else:
+                                speech_gone_blocks += check_every_blocks
+                        except Exception as e:
+                            # Сломавшаяся проверка не должна лишать Scott слуха:
+                            # возвращаемся к прежнему пути, по громкости.
+                            if not self._speech_check_complained:
+                                self._speech_check_complained = True
+                                print(f"⚠️ Проверка речи отключилась: {e}")
+                            self.has_speech = None
+
+                        речь_кончилась = speech_gone_blocks >= gone_blocks
+
                 too_long = len(phrase) >= limit_blocks
-                if silence_streak >= silence_blocks or too_long:
+                if silence_streak >= silence_blocks or too_long or речь_кончилась:
                     in_speech = False
                     loud_streak = 0
                     gap_blocks = 0
@@ -724,6 +848,8 @@ class VoiceListener:
                     # щелчок — тот выглядел как фраза за счёт этой тишины.
                     if too_long:
                         self.stats.closed_by_length += 1
+                    elif речь_кончилась:
+                        self.stats.closed_by_speech_end += 1
 
                     if loud_in_phrase >= min_blocks:
                         had_phrase = True

@@ -39,7 +39,8 @@ def speech(module, seconds: float, level: float = 0.15) -> np.ndarray:
     return (tone * level).astype(np.float32)
 
 
-def run_stream(module, stream, transcribe=None, check_trigger=None, wait=2.5, config=None):
+def run_stream(module, stream, transcribe=None, check_trigger=None, wait=2.5,
+               config=None, has_speech=None):
     """Прогнать поток через слушателя и вернуть его вместе со списком команд."""
     executed = []
     heard = []
@@ -53,6 +54,7 @@ def run_stream(module, stream, transcribe=None, check_trigger=None, wait=2.5, co
         handle_command=lambda text: executed.append(text),
         check_trigger=check_trigger,
         config=config,
+        has_speech=has_speech,
     )
     instance._running = True
     threads = [
@@ -410,3 +412,105 @@ def test_задержка_от_речи_до_ответа_измеряется(l
 
     assert executed, "команда не дошла до исполнения"
     assert instance.status()["last_answer_sec"] >= 0.2
+
+
+# ==================== Конец речи, а не конец звука ====================
+#
+# Фраза закрывалась по тишине — по падению громкости. Пока в комнате играет
+# музыка или идёт разговор, громкость не падает никогда, и запись растёт до
+# предела в пятнадцать секунд: человек сказал «открой браузер» за полторы
+# секунды, а ждал ответа все пятнадцать. В живом журнале такими оказались 429
+# записей из 715.
+
+def test_фраза_закрывается_когда_кончилась_речь(listener_module):
+    """
+    Главная проверка. Звук не прерывается ни на миг — как при играющей
+    музыке, — но речь в нём кончилась, и фраза должна закрыться, не дожидаясь
+    предела длины.
+    """
+    # Речь «кончается» на четвёртой секунде, а звук продолжается.
+    состояние = {"речь": True}
+
+    def речь_есть(окно):
+        return состояние["речь"]
+
+    поток = np.concatenate([
+        silence(listener_module, 0.4),
+        speech(listener_module, 8.0),
+    ])
+
+    executed, heard = [], []
+
+    def запись(audio):
+        heard.append(len(audio) / listener_module.SAMPLE_RATE)
+        return "Скотт, открой блокнот"
+
+    слушатель = listener_module.VoiceListener(
+        transcribe=запись,
+        handle_command=lambda текст: executed.append(текст),
+        has_speech=речь_есть,
+    )
+    слушатель._running = True
+    потоки = [
+        threading.Thread(target=слушатель._segment_loop, daemon=True),
+        threading.Thread(target=слушатель._process_loop, daemon=True),
+    ]
+    for п in потоки:
+        п.start()
+
+    # Первую половину подаём как речь, вторую — как «речи больше нет».
+    #
+    # Пауза между ними обязательна: feed только кладёт блоки в очередь, и без
+    # неё «речь кончилась» успевало сработать раньше, чем слушатель разберёт
+    # первую половину, — фраза не открывалась вовсе, и проверка падала не на
+    # том, что проверяет.
+    слушатель.feed(поток[:listener_module.SAMPLE_RATE * 4])
+    time.sleep(1.5)
+
+    состояние["речь"] = False
+    слушатель.feed(поток[listener_module.SAMPLE_RATE * 4:])
+
+    time.sleep(2.5)
+    слушатель._running = False
+
+    assert heard, "фраза не выделена вовсе"
+    assert max(heard) < 8.0, f"фраза дотянула до предела: {heard}"
+    assert слушатель.stats.closed_by_speech_end > 0
+    assert слушатель.stats.closed_by_length == 0
+
+
+def test_без_проверки_речи_всё_как_прежде(listener_module):
+    """
+    Пара к проверке выше. Не передали способ отличать речь — слушатель обязан
+    работать по-старому, а не оглохнуть.
+    """
+    поток = np.concatenate([
+        silence(listener_module, 0.4),
+        speech(listener_module, 1.0),
+        silence(listener_module, 1.6),
+    ])
+
+    слушатель, executed, heard = run_stream(listener_module, поток, wait=3.0)
+
+    assert executed, "команда не дошла"
+    assert слушатель.stats.closed_by_speech_end == 0
+
+
+def test_сломавшаяся_проверка_речи_не_лишает_слуха(listener_module):
+    """
+    Проверка речи — удобство, а не условие работы. Если она падает, Scott
+    возвращается к прежнему пути по громкости и продолжает слышать.
+    """
+    def падает(окно):
+        raise RuntimeError("модель определения речи не завелась")
+
+    поток = np.concatenate([
+        silence(listener_module, 0.4),
+        speech(listener_module, 3.0),
+        silence(listener_module, 1.6),
+    ])
+
+    слушатель, executed, _ = run_stream(listener_module, поток, wait=3.5,
+                                        has_speech=падает)
+
+    assert executed, "команда не дошла после сбоя проверки речи"
