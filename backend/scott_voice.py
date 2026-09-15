@@ -25,6 +25,20 @@ except Exception:
     silero_tts = None
     HAS_SILERO = False
 
+try:
+    from timing import stage as _замер
+except ImportError:  # pragma: no cover — запуск из корня репозитория
+    try:
+        from .timing import stage as _замер
+    except ImportError:
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _замер(name: str):
+            """Заглушка: без модуля замеров синтез должен работать как обычно."""
+            yield
+
+
 # Какой движок синтеза использовать: silero (локальный, по умолчанию) или edge
 # (облачный Microsoft). Silero работает офлайн и синтезирует фразу за ~15 мс
 # против ~1.9 с у edge-tts, поэтому он основной; edge остаётся запасным
@@ -214,10 +228,54 @@ class ScottVoice:
             if is_quiet() and not force:
                 return None
 
-            audio_file = self.speak_to_file(text)
-            if audio_file:
-                self.play_audio(audio_file, force=force)
-            return audio_file
+            try:
+                from .speech_text import split_for_speech
+            except ImportError:
+                from speech_text import split_for_speech
+
+            куски = split_for_speech(text)
+
+            # Короткий ответ синтезируется целиком: делить «Готово» нечего, и
+            # оно почти всегда уже лежит в кэше озвученных реплик.
+            if len(куски) < 2:
+                audio_file = self.speak_to_file(text)
+                if audio_file:
+                    self.play_audio(audio_file, force=force)
+                return audio_file
+
+            # Длинный ответ — по частям. Прежде он синтезировался целиком, и
+            # только потом начинал звучать: до 2,4 секунды тишины после
+            # команды, в которые человек не знает, услышали его или нет.
+            # Теперь первое предложение уходит в звук сразу, а остальное
+            # доготавливается, пока оно играет.
+            первый = None
+
+            for номер, кусок in enumerate(куски):
+                # Первый кусок замеряется отдельно: именно он и есть задержка,
+                # которую слышит человек — сколько тишины проходит между
+                # командой и первым словом ответа. Общий замер озвучки для
+                # этого не годится: он включает время, пока Scott говорит, и
+                # растёт вместе с длиной ответа.
+                if номер == 0:
+                    with _замер("02.синтез_речи.до_первого_слова"):
+                        файл = self.speak_to_file(кусок)
+                else:
+                    файл = self.speak_to_file(кусок)
+
+                if not файл:
+                    continue
+
+                if первый is None:
+                    первый = файл
+
+                # Ждём только последний: очередь проигрывателя и без того
+                # последовательна, а ожидание каждого куска свело бы всю затею
+                # на нет — синтез следующего начинался бы после того, как
+                # предыдущий отзвучал.
+                последний = номер == len(куски) - 1
+                self.play_audio(файл, force=force, wait=последний)
+
+            return первый
         except Exception as e:
             print(f"❌ Ошибка синтеза речи: {e}")
             return None
@@ -404,7 +462,7 @@ class ScottVoice:
             traceback.print_exc()
             return None
     
-    def play_audio(self, audio_file: str, force: bool = False):
+    def play_audio(self, audio_file: str, force: bool = False, wait: bool = True):
         """
         Воспроизвести аудио файл
 
@@ -413,6 +471,12 @@ class ScottVoice:
             force: играть даже в тихом режиме. Нужно единственному месту —
                 кнопке «Прослушать» в настройках голоса: там человек просит
                 звук прямо сейчас и ждёт его.
+            wait: дождаться, пока фраза отзвучит. Ждать нужно на последнем
+                куске ответа: слушатель держит микрофон приостановленным всё
+                время речи, иначе Scott услышит сам себя и примет свой ответ
+                за команду. На промежуточных кусках ждать нельзя — синтез
+                следующего начинался бы только после того, как отзвучал
+                предыдущий, и говорить по частям не имело бы смысла.
         """
         try:
             if audio_file.endswith('.mp3'):
@@ -433,7 +497,13 @@ class ScottVoice:
                 from .speech_player import get_player, PLAYBACK_AVAILABLE
 
             if PLAYBACK_AVAILABLE:
-                get_player().play_and_wait(audio_file, force=force)
+                if wait:
+                    get_player().play_and_wait(audio_file, force=force)
+                else:
+                    # Не ждём: нужно вернуться к синтезу следующего куска, пока
+                    # этот играет. Очередь проигрывателя сама пропустит фразы
+                    # по одной.
+                    get_player().play(audio_file, force=force)
                 return
 
             # Тихий режим соблюдается и на запасном пути: иначе на машине
