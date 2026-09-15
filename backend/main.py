@@ -1393,7 +1393,21 @@ def _listener_transcribe(audio) -> str:
     делает /speech_to_text для загруженных файлов, здесь незачем.
     """
     model = _get_whisper_model()
-    with timing_stage("01.распознавание.whisper"):
+
+    # Длина записи пишется в замер, и это не любопытство: половина фраз
+    # распознаётся за полсекунды, а каждая двадцатая занимает пять и доходит до
+    # одиннадцати. Без длины непонятно, в чём дело — в долгой ли записи или в
+    # том, что распознавание иногда само по себе застревает, и лечить надо
+    # разное.
+    секунды = None
+    try:
+        секунды = round(len(audio) / 16000, 2)
+    except Exception:
+        pass
+
+    # Микрофон и загруженный файл замеряются отдельно: это два разных пути с
+    # разной ценой, и в общей статистике они смешивались.
+    with timing_stage("01.распознавание.микрофон", meta={"секунд_записи": секунды}):
         return model.transcribe(audio, language="ru")
 
 
@@ -2207,6 +2221,14 @@ def _get_whisper_model():
     return _whisper_model_cache
 
 
+def _размер_файла(path: str):
+    """Размер записи для замеров. Не знать его не повод ронять распознавание."""
+    try:
+        return os.path.getsize(path)
+    except Exception:
+        return None
+
+
 def _transcribe_audio_file(file_path: str) -> str:
     """Транскрибировать аудио файл, пробуя Whisper, затем SpeechRecognition."""
     # Попробуем Whisper, если он доступен
@@ -2326,7 +2348,7 @@ async def speech_to_text(file: UploadFile = File(...)):
         # внутри async-хендлера она замораживает ВЕСЬ event loop, включая
         # /health — из-за этого фронтенд (особенно в hands-free режиме, где
         # запросы идут часто) периодически показывал "backend недоступен".
-        with timing_stage("01.распознавание.whisper"):
+        with timing_stage("01.распознавание.файл", meta={"байт": _размер_файла(temp_file)}):
             text = await asyncio.to_thread(_transcribe_audio_file, temp_file)
         return JSONResponse(
             status_code=200 if text else 400,

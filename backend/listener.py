@@ -174,6 +174,22 @@ class ListenerStats:
     interruptions: int = 0
     echo_ignored: int = 0
 
+    # Сколько длилась последняя фраза и сколько их закрылось по пределу длины.
+    #
+    # Второе — главный признак того, что Scott отвечает медленно НЕ из-за
+    # распознавания. Фраза, дошедшая до предела, означает, что тишина после
+    # речи так и не наступила: человек сказал «открой браузер» за полторы
+    # секунды, а запись шла все пятнадцать — и ровно столько он ждал ответа.
+    # В живом журнале такими оказались 429 записей из 715, и замеры
+    # распознавания этого не видели вовсе: они начинаются, когда запись уже
+    # закрыта.
+    last_phrase_seconds: float = 0.0
+    closed_by_length: int = 0
+
+    # Сколько прошло от конца речи до готового ответа — то самое «медленно»,
+    # на которое жалуется человек. Ни один замер по этапам этого не показывал.
+    last_answer_seconds: float = 0.0
+
     started_at: float = 0.0
     recent: List[str] = field(default_factory=list)
 
@@ -428,6 +444,17 @@ class VoiceListener:
             # почему Scott стал медлительнее, будет негде.
             "silence_to_end": round(self._silence_to_end, 2),
             "cutoffs": self.stats.cutoffs,
+
+            # Длина последней фразы и сколько их оборвалось по пределу.
+            #
+            # Сюда смотрят, когда Scott «отвечает медленно»: фраза, дошедшая до
+            # предела, означает, что тишина после речи не наступила, и человек
+            # ждал ответа все пятнадцать секунд записи. Замеры распознавания
+            # этого не показывают — они начинаются, когда запись уже закрыта.
+            "last_phrase_sec": self.stats.last_phrase_seconds,
+            "last_answer_sec": self.stats.last_answer_seconds,
+            "closed_by_length": self.stats.closed_by_length,
+            "max_phrase": self.config.max_phrase,
             "interruptions": self.stats.interruptions,
             "echo_ignored": self.stats.echo_ignored,
             "recent": list(self.stats.recent[-10:]),
@@ -695,14 +722,25 @@ class VoiceListener:
                     # входят запас перед фразой и пауза после неё, вместе почти
                     # полторы секунды. Проверка по длине буфера пропускала любой
                     # щелчок — тот выглядел как фраза за счёт этой тишины.
+                    if too_long:
+                        self.stats.closed_by_length += 1
+
                     if loud_in_phrase >= min_blocks:
                         had_phrase = True
                         audio = np.concatenate(phrase)
+                        self.stats.last_phrase_seconds = round(len(audio) / SAMPLE_RATE, 2)
                         try:
                             # Метка ставится здесь, а не при разборе: пока фраза
                             # ждёт очереди, Scott успевает договорить, и по
                             # состоянию уже не понять, перебивали его или нет.
-                            self._phrases.put_nowait((audio, self._expecting_interrupt))
+                            # Время закрытия фразы едет вместе со звуком: по
+                            # нему считается то, чего не показывал ни один
+                            # замер, — сколько человек ждёт от конца своей речи
+                            # до ответа. Замеры по этапам этого не давали:
+                            # каждый из них быстрый, а ждать человеку всё равно
+                            # приходится.
+                            self._phrases.put_nowait(
+                                (audio, self._expecting_interrupt, time.time()))
                         except queue.Full:
                             self.stats.last_error = "Не успеваю обрабатывать — фраза пропущена"
                     phrase = []
@@ -745,7 +783,7 @@ class VoiceListener:
     def _process_loop(self) -> None:
         while self._running:
             try:
-                audio, while_speaking = self._phrases.get(timeout=0.5)
+                audio, while_speaking, закрыта = self._phrases.get(timeout=0.5)
             except queue.Empty:
                 continue
 
@@ -784,6 +822,12 @@ class VoiceListener:
             get_player().stop()
 
             self._dispatch(text)
+
+            # Сколько прошло от конца речи до готового ответа. Это и есть
+            # «быстро» или «медленно» с точки зрения человека: он не знает и
+            # знать не хочет, сколько заняли распознавание, разбор и синтез по
+            # отдельности.
+            self.stats.last_answer_seconds = round(time.time() - закрыта, 2)
 
     def _handle_interruption(self, text: str) -> None:
         """

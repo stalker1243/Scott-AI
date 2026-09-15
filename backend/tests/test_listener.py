@@ -325,3 +325,88 @@ def test_resume_drops_stale_audio(listener_module):
 
     assert instance._blocks.qsize() == 0
     assert not instance.is_suspended
+
+
+# ==================== Почему Scott отвечает медленно ====================
+#
+# Замеры распознавания начинаются, когда запись уже закрыта, и потому не видят
+# главного: сколько человек ждал, пока Scott слушал. В живом журнале 429
+# записей из 715 оказались ровно пятнадцатисекундными — длиной в предел фразы.
+# Это значит, что тишина после речи не наступала, и человек, сказавший «открой
+# браузер» за полторы секунды, ждал ответа все пятнадцать.
+#
+# Отсюда два счётчика: длина последней фразы и сколько их оборвалось по
+# пределу. По ним видно, в чём дело, — без них об этом можно только догадываться.
+
+def test_фраза_по_пределу_попадает_в_счётчик(listener_module):
+    config = listener_module.ListenerConfig(max_phrase=1.0)
+    stream = np.concatenate([
+        silence(listener_module, 0.4),
+        speech(listener_module, 4.0),
+        silence(listener_module, 1.2),
+    ])
+
+    instance, _, _ = run_stream(listener_module, stream, wait=3.0, config=config)
+
+    assert instance.stats.closed_by_length > 0
+
+
+def test_фраза_закрытая_тишиной_в_счётчик_не_идёт(listener_module):
+    """
+    Пара к проверке выше, и она важнее: счётчик, растущий при нормальной речи,
+    ни о чём не говорит.
+    """
+    stream = np.concatenate([
+        silence(listener_module, 0.4),
+        speech(listener_module, 1.0),
+        silence(listener_module, 1.6),
+    ])
+
+    instance, _, _ = run_stream(listener_module, stream, wait=3.0)
+
+    assert instance.stats.closed_by_length == 0
+
+
+def test_длина_услышанной_фразы_видна_снаружи(listener_module):
+    """Без неё «Scott отвечает медленно» не с чем сопоставить."""
+    stream = np.concatenate([
+        silence(listener_module, 0.4),
+        speech(listener_module, 1.0),
+        silence(listener_module, 1.6),
+    ])
+
+    instance, _, _ = run_stream(listener_module, stream, wait=3.0)
+
+    состояние = instance.status()
+
+    assert состояние["last_phrase_sec"] > 0
+    assert состояние["max_phrase"] == instance.config.max_phrase
+    assert состояние["closed_by_length"] == 0
+
+
+def test_задержка_от_речи_до_ответа_измеряется(listener_module):
+    """
+    Главная цифра для человека: сколько он ждёт после того, как договорил.
+
+    Ни один замер по этапам её не показывал. Распознавание, разбор и синтез
+    каждый по отдельности быстрые — а ждать всё равно приходится, и без этого
+    числа спорить с «Scott медленный» было нечем.
+    """
+    stream = np.concatenate([
+        silence(listener_module, 0.4),
+        speech(listener_module, 1.0),
+        silence(listener_module, 1.6),
+    ])
+
+    # Распознавание намеренно медленное: на разогретой машине весь путь
+    # укладывается в миллисекунды, и округлённая до сотых задержка оказывается
+    # нулём — проверка тогда не проверяет ничего.
+    def медленно(audio):
+        time.sleep(0.2)
+        return "Скотт, открой блокнот"
+
+    instance, executed, _ = run_stream(listener_module, stream, wait=3.0,
+                                       transcribe=медленно)
+
+    assert executed, "команда не дошла до исполнения"
+    assert instance.status()["last_answer_sec"] >= 0.2
