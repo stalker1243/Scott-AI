@@ -25,6 +25,19 @@ public partial class DiagnosticsViewModel : ViewModelBase
 
     public ObservableCollection<HealthCheck> Checks { get; } = new();
 
+    /// <summary>
+    /// Что Scott услышал за последнее время.
+    ///
+    /// Сюда смотрят, когда «Scott меня не слышит» или «голосом он умеет
+    /// меньше, чем в чате». Разбор у голоса и чата общий, поэтому дело
+    /// почти всегда в тексте: Scott расслышал не то или не узнал в сказанном
+    /// своё имя. Пока этого не видно, чинить приходится вслепую.
+    /// </summary>
+    public ObservableCollection<HeardEntry> Heard { get; } = new();
+
+    [ObservableProperty] private string _heardSummary = "";
+    [ObservableProperty] private bool _hasHeard;
+
     [ObservableProperty] private string _summary = "";
     [ObservableProperty] private string _state = "ok";
     [ObservableProperty] private bool _loading;
@@ -83,10 +96,68 @@ public partial class DiagnosticsViewModel : ViewModelBase
             {
                 Checks.Add(проверка);
             }
+
+            await ОбновитьУслышанное();
         }
         finally
         {
             Loading = false;
+        }
+    }
+
+    private async Task ОбновитьУслышанное()
+    {
+        var ответ = await _client.HeardAsync();
+
+        Heard.Clear();
+        HeardSummary = "";
+
+        if (ответ is null)
+        {
+            HasHeard = false;
+            return;
+        }
+
+        foreach (var запись in ответ.Heard)
+        {
+            Heard.Add(запись);
+        }
+
+        HasHeard = Heard.Count > 0;
+
+        if (!HasHeard)
+        {
+            return;
+        }
+
+        // Главное число здесь — доля прошедших мимо. Если Scott слышит
+        // сказанное, но узнаёт своё имя в трети случаев, лечить надо имя, а не
+        // разбор команд.
+        var мимо = ответ.Summary.Outcomes.TryGetValue("мимо", out var м) ? м : 0;
+        var выполнено = ответ.Summary.Outcomes.TryGetValue("выполнена", out var в) ? в : 0;
+
+        HeardSummary = $"Услышано {ответ.Summary.Total}: выполнено {выполнено}, "
+                       + $"прошло мимо {мимо}";
+    }
+
+    /// <summary>Забыть услышанное. Это речь человека, и он вправе её стереть.</summary>
+    [RelayCommand]
+    private async Task ClearHeard()
+    {
+        var согласен = await DialogService.ConfirmAsync(
+            "Забыть услышанное?",
+            "Scott сотрёт список фраз, которые он расслышал. На его работу это не "
+            + "влияет — список нужен, чтобы разбираться, почему он вас не понял.",
+            "Забыть");
+
+        if (!согласен)
+        {
+            return;
+        }
+
+        if (await _client.ClearHeardAsync())
+        {
+            await ОбновитьУслышанное();
         }
     }
 

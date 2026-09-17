@@ -766,6 +766,40 @@ public class BackendClient
     }
 
     /// <summary>Что работает прямо сейчас: микрофон, динамики, речь, модель, сеть.</summary>
+    /// <summary>
+    /// Что Scott услышал и что из этого вышло.
+    ///
+    /// Голосом он умеет меньше, чем в чате, и разбор тут ни при чём — он у них
+    /// общий. Дело в тексте, который до разбора доходит: с микрофона он
+    /// приходит искажённым, и Scott не узнаёт своё имя. Пока этого не видно,
+    /// чинить приходится вслепую.
+    /// </summary>
+    public async Task<HeardResponse?> HeardAsync(int limit = 50)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<HeardResponse>($"/listen/heard?limit={limit}");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Забыть услышанное. Это речь человека, и он вправе её стереть.</summary>
+    public async Task<bool> ClearHeardAsync()
+    {
+        try
+        {
+            var ответ = await _http.PostAsync("/listen/heard/clear", null);
+            return ответ.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public async Task<HealthReport?> HealthChecksAsync()
     {
         try

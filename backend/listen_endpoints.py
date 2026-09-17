@@ -30,6 +30,44 @@ def _unavailable() -> JSONResponse:
     )
 
 
+@router.get("/heard")
+async def heard(limit: int = 50) -> Dict:
+    """
+    Что Scott услышал и что из этого вышло.
+
+    Голосом он умеет меньше, чем в чате, — и это первое, что замечает человек.
+    Но разбор у голоса и чата ОДИН И ТОТ ЖЕ: дело не в возможностях, а в
+    тексте, который до разбора доходит. Здесь видно, каким он приходит.
+
+    Смотреть надо на долю прошедших мимо: если Scott слышит сказанное, но не
+    узнаёт в нём своё имя, лечить надо имя, а не разбор команд.
+    """
+    try:
+        from . import heard_log
+    except ImportError:
+        import heard_log
+
+    записи = heard_log.read(limit)
+
+    return {
+        "success": True,
+        "heard": list(reversed(записи)),
+        "summary": heard_log.summary(),
+    }
+
+
+@router.post("/heard/clear")
+async def clear_heard() -> Dict:
+    """Забыть услышанное. Это речь человека, и он вправе её стереть."""
+    try:
+        from . import heard_log
+    except ImportError:
+        import heard_log
+
+    heard_log.clear()
+    return {"success": True, "message": "Журнал услышанного очищен"}
+
+
 @router.get("/status")
 async def status() -> Dict:
     """

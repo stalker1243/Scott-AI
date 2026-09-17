@@ -1012,6 +1012,7 @@ class VoiceListener:
                 self.stats.ignored += 1
                 self.stats.last_dispatch = "мимо"
                 print(f"🔇 Мимо: «{text}»")
+                self._записать_услышанное(text, "мимо")
                 return
             command = (getattr(result, "command_text", "") or "").strip()
             if not command:
@@ -1019,6 +1020,7 @@ class VoiceListener:
                 self.stats.triggered += 1
                 self.stats.last_dispatch = "имя без команды"
                 print("🎧 Scott слышит своё имя, но команды не было")
+                self._записать_услышанное(text, "имя без команды")
                 return
 
         self.stats.triggered += 1
@@ -1029,10 +1031,34 @@ class VoiceListener:
         print(f"🎤 Команда: «{command}»")
         try:
             self.handle_command(command)
+            self._записать_услышанное(text, "выполнена", command)
         except Exception as e:
             self.stats.last_dispatch = "ошибка"
             self.stats.last_error = f"Команда не выполнена: {e}"
             print(f"⚠️ {self.stats.last_error}")
+            self._записать_услышанное(text, "ошибка", command)
+
+    def _записать_услышанное(self, text: str, исход: str, command: str = "") -> None:
+        """
+        Сохранить услышанное вместе с исходом.
+
+        Без этого о том, что Scott расслышал, узнать неоткуда: распознанное
+        уходило в вывод и нигде не оставалось. За один вечер таким образом
+        пропали девятнадцать фраз из двадцати девяти — и почему именно, сказать
+        было нечего.
+
+        Сбой записи не должен мешать слушать, поэтому ошибки глохнут здесь же.
+        """
+        try:
+            try:
+                from . import heard_log
+            except ImportError:
+                import heard_log
+
+            heard_log.record(text, исход, command,
+                             seconds=self.stats.last_phrase_seconds or None)
+        except Exception:
+            pass
 
 
 def _preferred_input_device() -> Optional[int]:
