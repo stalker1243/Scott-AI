@@ -20,6 +20,24 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def журнал_в_сторону(tmp_path, monkeypatch):
+    """
+    Журнал услышанного — в свою папку.
+
+    Слушатель записывает в него каждую услышанную фразу, и проверки не
+    исключение: сотня одинаковых «Скотт, открой блокнот» с интервалом в три
+    секунды уже попала в настоящий журнал человека и чуть не сошла там за
+    находку. Проверки не должны писать в его записи — ни в настройки, ни сюда.
+    """
+    try:
+        import heard_log
+    except ImportError:  # pragma: no cover — запуск из корня репозитория
+        from backend import heard_log
+
+    monkeypatch.setattr(heard_log, "LOG_PATH", tmp_path / "heard.jsonl")
+
+
 @pytest.fixture
 def listener_module():
     import listener
