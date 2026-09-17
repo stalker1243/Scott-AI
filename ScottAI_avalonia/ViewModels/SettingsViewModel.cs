@@ -35,6 +35,16 @@ public partial class SettingsViewModel : ViewModelBase
     // движков сразу: локального Silero и облачного Edge TTS.
     public ObservableCollection<VoiceOption> Voices { get; } = new();
 
+    /// <summary>
+    /// Характеры звучания — обработка, которой пропускается синтезированная речь.
+    ///
+    /// Голосов у локальной модели пять, и все обычные человеческие: сделать
+    /// звучание узнаваемым сменой голоса нельзя, а обработкой — можно.
+    /// </summary>
+    public ObservableCollection<VoiceCharacter> Characters { get; } = new();
+
+    [ObservableProperty] private VoiceCharacter? _selectedCharacter;
+
     [ObservableProperty] private VoiceOption? _selectedVoice;
     [ObservableProperty] private bool _voicesLoading;
     [ObservableProperty] private string? _voiceStatus;
@@ -86,6 +96,7 @@ public partial class SettingsViewModel : ViewModelBase
         _client = client;
         _ = LoadVersions();
         _ = LoadVoices();
+        _ = LoadCharacters();
         _ = LoadDeviceSettings();
         _ = LoadAudioSettings();
 
@@ -213,6 +224,63 @@ public partial class SettingsViewModel : ViewModelBase
         finally
         {
             VoicesLoading = false;
+        }
+    }
+
+    private async Task LoadCharacters()
+    {
+        var ответ = await _client.VoiceCharactersAsync();
+
+        if (ответ is null)
+        {
+            return;
+        }
+
+        Characters.Clear();
+        foreach (var характер in ответ.Characters)
+        {
+            Characters.Add(характер);
+        }
+
+        // Выбранным показываем тот, которым Scott говорит сейчас: список,
+        // показывающий не то, что происходит, хуже отсутствующего.
+        SelectedCharacter = Characters.FirstOrDefault(х => х.Id == ответ.Current)
+                            ?? Characters.FirstOrDefault();
+        Отметить();
+    }
+
+    private void Отметить()
+    {
+        foreach (var характер in Characters)
+        {
+            характер.Selected = характер.Id == SelectedCharacter?.Id;
+        }
+    }
+
+    /// <summary>
+    /// Выбрать характер звучания.
+    ///
+    /// Применяется сразу, без кнопки «применить»: звучание проверяют на слух,
+    /// а не по памяти — кнопкой «Прослушать» тут же, рядом.
+    /// </summary>
+    [RelayCommand]
+    private async Task PickCharacter(VoiceCharacter? характер)
+    {
+        if (характер is null || характер.Id == SelectedCharacter?.Id)
+        {
+            return;
+        }
+
+        SelectedCharacter = характер;
+        Отметить();
+
+        if (await _client.SelectVoiceCharacterAsync(характер.Id))
+        {
+            ToastService.Success($"Звучание: {характер.Name}");
+        }
+        else
+        {
+            ToastService.Error("Не удалось применить характер звучания");
         }
     }
 

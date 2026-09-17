@@ -137,11 +137,19 @@ def synthesize(text: str, out_path: str, voice: Optional[str] = None) -> Optiona
     try:
         model = get_model()
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        # put_accent и put_yo передаются явно, хотя у модели они и так по
+        # умолчанию включены: полагаться на чужое умолчание в том, от чего
+        # зависит разборчивость речи, не стоит. Первое ставит ударения в
+        # словах, где их можно определить, второе различает «е» и «ё» — без
+        # него «ещё» звучит как «еще», а «всё» как «все», и смысл фразы
+        # меняется на слух.
         model.save_wav(
             text=text,
             speaker=voice,
             sample_rate=SAMPLE_RATE,
             audio_path=str(out_path),
+            put_accent=True,
+            put_yo=True,
         )
         return str(out_path) if Path(out_path).exists() else None
     except Exception as e:

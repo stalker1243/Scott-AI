@@ -36,7 +36,7 @@ async def write_settings(request: Dict) -> Dict:
     открыт, и на лету его не переключить. Делаем это сами, чтобы человеку не
     приходилось догадываться, почему выбор «не сработал».
     """
-    known = {"input_device", "output_device", "volume", "quiet"}
+    known = {"input_device", "output_device", "volume", "quiet", "character"}
     changes = {k: v for k, v in request.items() if k in known}
 
     if not changes:
@@ -57,6 +57,29 @@ async def write_settings(request: Dict) -> Dict:
         "settings": settings,
         "listening_restarted": restarted,
         "message": _describe_change(before, settings),
+    }
+
+
+@router.get("/characters")
+async def list_characters() -> Dict:
+    """
+    Характеры звучания — обработка, которой пропускается синтезированная речь.
+    
+    Голосов у локальной модели пять, и все обычные человеческие: сделать
+    звучание узнаваемым сменой голоса нельзя, а обработкой — можно.
+    """
+    try:
+        from . import voice_character
+    except ImportError:
+        import voice_character
+
+    return {
+        "success": True,
+        "characters": [
+            {"id": имя, "title": подпись}
+            for имя, подпись in voice_character.CHARACTERS.items()
+        ],
+        "current": audio_settings.get_character(),
     }
 
 

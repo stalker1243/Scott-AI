@@ -163,6 +163,39 @@
                     </Border>
                 </StackPanel>
 
+                <!-- ==================== Характер звучания ====================
+
+                     Голосов у локальной модели пять, и все обычные
+                     человеческие: сделать звучание узнаваемым сменой голоса
+                     нельзя, а обработкой готового звука — можно. Стоит она
+                     тридцать миллисекунд на фразу и применяется один раз:
+                     в кэш реплика ложится уже обработанной. -->
+
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Характер звучания" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondary}" />
+                    <TextBlock Text="Обработка голоса после синтеза. Слышно сразу — проверьте кнопкой «Прослушать» выше."
+                               FontSize="12" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" />
+
+                    <ItemsControl ItemsSource="{Binding Characters}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="models:VoiceCharacter">
+                                <RadioButton GroupName="Характер" Margin="0,0,0,6"
+                                             IsChecked="{Binding Selected}"
+                                             Command="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).PickCharacterCommand}"
+                                             CommandParameter="{Binding}">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimary}" />
+                                        <TextBlock Text="{Binding Hint}" FontSize="12" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextMuted}" />
+                                    </StackPanel>
+                                </RadioButton>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
             </StackPanel>
 
             <!-- Прочее -->

@@ -767,6 +767,38 @@ public class BackendClient
 
     /// <summary>Что работает прямо сейчас: микрофон, динамики, речь, модель, сеть.</summary>
     /// <summary>
+    /// Характеры звучания и тот, что выбран сейчас.
+    ///
+    /// Голосов у локальной модели пять, и все обычные человеческие: сделать
+    /// звучание узнаваемым сменой голоса нельзя, а обработкой — можно.
+    /// </summary>
+    public async Task<VoiceCharactersResponse?> VoiceCharactersAsync()
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<VoiceCharactersResponse>("/audio/characters");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Выбрать характер звучания.</summary>
+    public async Task<bool> SelectVoiceCharacterAsync(string id)
+    {
+        try
+        {
+            var ответ = await _http.PostAsJsonAsync("/audio/settings", new { character = id });
+            return ответ.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Что Scott услышал и что из этого вышло.
     ///
     /// Голосом он умеет меньше, чем в чате, и разбор тут ни при чём — он у них

@@ -44,6 +44,14 @@ DEFAULTS: Dict = {
 
     # Тихий режим: Scott продолжает слушать, понимать и выполнять — но молчит.
     "quiet": False,
+
+    # Характер звучания: обработка уже синтезированной речи.
+    #
+    # Голосов у локальной модели всего пять, и все обычные человеческие —
+    # сделать звучание узнаваемым сменой голоса нельзя. Зато можно обработать
+    # готовый звук: «чёткий», «из динамика», «синтетический». Перечень и
+    # объяснения — в voice_character.
+    "character": "natural",
 }
 
 # Выше сотни звук не станет громче — он начнёт хрипеть: значения выходят за
@@ -102,6 +110,20 @@ def _sanitize(settings: Dict) -> Dict:
     clean["volume"] = max(0, min(MAX_VOLUME, volume))
 
     clean["quiet"] = bool(settings.get("quiet", False))
+
+    # Неизвестный характер — не повод остаться без голоса: берём обычный.
+    характер = settings.get("character", "natural")
+    try:
+        try:
+            from . import voice_character
+        except ImportError:
+            import voice_character
+
+        clean["character"] = (характер if характер in voice_character.CHARACTERS
+                              else "natural")
+    except Exception:
+        clean["character"] = "natural"
+
     return clean
 
 
@@ -122,6 +144,11 @@ def get_settings() -> Dict:
 def get_volume() -> float:
     """Громкость как множитель для звуковой волны: 0.0 — тишина, 1.0 — как есть."""
     return _load()["volume"] / 100.0
+
+
+def get_character() -> str:
+    """Характер звучания — какой обработкой пропускать синтезированную речь."""
+    return _load().get("character", "natural")
 
 
 def is_quiet() -> bool:

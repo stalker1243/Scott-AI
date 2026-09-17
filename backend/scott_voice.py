@@ -280,6 +280,31 @@ class ScottVoice:
             print(f"❌ Ошибка синтеза речи: {e}")
             return None
 
+    def _придать_характер(self, path: str, character: str) -> None:
+        """
+        Обработать синтезированный файл по выбранному характеру.
+
+        Голосов у локальной модели пять, и все обычные человеческие: сделать
+        звучание узнаваемым сменой голоса нельзя, а обработкой — можно. Стоит
+        это тридцать миллисекунд на фразу, и только один раз: файл ложится в
+        кэш уже обработанным.
+
+        Беда здесь не повод остаться без ответа — необработанный голос всё
+        равно голос.
+        """
+        if character == "natural":
+            return
+
+        try:
+            try:
+                from . import voice_character
+            except ImportError:
+                import voice_character
+
+            voice_character.apply_to_file(path, character)
+        except Exception as e:
+            print(f"⚠️ Характер голоса не применён: {e}")
+
     def _find_russian_voice(self, voices):
         """Найти первый доступный русский голос в pyttsx3"""
         if not voices:
@@ -425,7 +450,19 @@ class ScottVoice:
             # Ключ считается по ПОДГОТОВЛЕННОМУ тексту: разные исходники, звучащие
             # одинаково, разумно делить один файл. Прежние файлы кэша при
             # изменении подготовки просто перестают совпадать и создаются заново.
-            hash_text = hashlib.md5(f"{voice}:{DEFAULT_RATE}:{DEFAULT_PITCH}:{spoken_text}".encode()).hexdigest()[:8]
+            # Характер звучания входит в ключ обязательно: файлы кэша лежат
+            # обработанными, и без этого после смены характера вернулся бы
+            # старый файл, обработанный по-прежнему, — человек решил бы, что
+            # настройка не работает.
+            try:
+                from .audio_settings import get_character
+            except ImportError:
+                from audio_settings import get_character
+            character = get_character()
+
+            hash_text = hashlib.md5(
+                f"{voice}:{DEFAULT_RATE}:{DEFAULT_PITCH}:{character}:{spoken_text}".encode()
+            ).hexdigest()[:8]
             save_file = self.audio_dir / f"scott_{hash_text}.{extension}"
             save_file = save_file.resolve()
 
@@ -437,6 +474,7 @@ class ScottVoice:
                 print(f"🎙️ Локальный синтез Silero (голос: {voice})")
                 silero_file = silero_tts.synthesize(spoken_text, str(save_file), voice)
                 if silero_file:
+                    self._придать_характер(silero_file, character)
                     return silero_file
                 # Локальный движок не справился — не оставляем Scott немым,
                 # пробуем облачный edge-tts прежним голосом.
