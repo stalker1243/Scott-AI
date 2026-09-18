@@ -64,7 +64,29 @@ WORD_NUMBERS = {
     "одну": 1, "один": 1, "две": 2, "два": 2, "три": 3, "четыре": 4, "пять": 5,
     "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
     "пятнадцать": 15, "двадцать": 20, "тридцать": 30, "сорок": 40, "сорок пять": 45,
+
+    # Часы словами. Голосом время почти всегда называют так: «в восемь
+    # вечера», «завтра в девять». Прежде все образцы требовали цифр, и такие
+    # фразы не разбирались вовсе — напоминание просто не ставилось, а
+    # отложенная команда выполнялась немедленно.
+    "одиннадцать": 11, "двенадцать": 12, "тринадцать": 13, "четырнадцать": 14,
+    "шестнадцать": 16, "семнадцать": 17, "восемнадцать": 18,
+    "девятнадцать": 19, "двадцать один": 21, "двадцать два": 22,
+    "двадцать три": 23,
+
+    # Падежные формы: «к семи часам», «к девяти утра». Предлог «к» требует
+    # дательного, и без этих форм фраза не разбиралась — а говорят так часто.
+    "двум": 2, "трём": 3, "трем": 3, "четырём": 4, "четырем": 4, "пяти": 5,
+    "шести": 6, "семи": 7, "восьми": 8, "девяти": 9, "десяти": 10,
+    "одиннадцати": 11, "двенадцати": 12,
 }
+
+# Часы словами — отдельным перечнем для образцов: в WORD_NUMBERS есть и
+# «сорок пять», которое часом быть не может.
+HOUR_WORDS = "|".join(
+    сорт for сорт in sorted(WORD_NUMBERS, key=len, reverse=True)
+    if 1 <= WORD_NUMBERS[сорт] <= 23
+)
 
 # Устойчивые выражения, где числа нет вовсе или оно слито со словом.
 # Проверяются ПЕРВЫМИ: общий образец ниже разбирает «через полчаса» как число
@@ -99,6 +121,23 @@ ABSOLUTE_DAYPART = re.compile(
 
 ABSOLUTE_HOUR = re.compile(
     r"(?:в|к|на)\s+(?P<hour>\d{1,2})\s*(?:часов|часа|час)\b",
+    re.IGNORECASE,
+)
+
+# То же словами: «в восемь вечера», «завтра в девять», «к семи часам».
+#
+# Голосом время называют именно так, а цифры в записи появляются редко —
+# Whisper пишет их словами, если человек их произнёс словами. Прежде такие
+# фразы не разбирались вовсе: напоминание не ставилось, а отложенная команда
+# выполнялась немедленно, потому что времени в ней «не было».
+ABSOLUTE_DAYPART_WORD = re.compile(
+    rf"(?:(?:в|к|на)\s+)?(?P<hour>{HOUR_WORDS})\s+"
+    r"(?:утра|утром|дня|днём|днем|вечера|вечером|ночи|ночью)\b",
+    re.IGNORECASE,
+)
+
+ABSOLUTE_HOUR_WORD = re.compile(
+    rf"(?:в|к|на)\s+(?P<hour>{HOUR_WORDS})(?:\s+(?:часов|часа|час|часам))?\b",
     re.IGNORECASE,
 )
 
@@ -162,9 +201,21 @@ def parse_time(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
             return now + timedelta(weeks=amount)
         return now + timedelta(days=amount)
 
-    match = ABSOLUTE.search(lowered) or ABSOLUTE_HOUR.search(lowered) or ABSOLUTE_DAYPART.search(lowered)
+    # Порядок важен: со временем суток («в восемь вечера») проверяется раньше
+    # голого часа, иначе «восемь» разберётся без «вечера» и уедет на утро.
+    match = (ABSOLUTE.search(lowered)
+             or ABSOLUTE_DAYPART.search(lowered)
+             or ABSOLUTE_DAYPART_WORD.search(lowered)
+             or ABSOLUTE_HOUR.search(lowered)
+             or ABSOLUTE_HOUR_WORD.search(lowered))
     if match:
-        hour = int(match.group("hour"))
+        # Час мог прийти словом: «в восемь вечера».
+        сказанный_час = match.group("hour")
+        hour = (int(сказанный_час) if сказанный_час.isdigit()
+                else WORD_NUMBERS.get(сказанный_час.lower(), -1))
+
+        if hour < 0:
+            return None
         minute = int(match.groupdict().get("minute") or 0)
         if not (0 <= hour <= 23 and 0 <= minute <= 59):
             return None
@@ -196,7 +247,8 @@ def extract_subject(text: str) -> str:
     """
     cleaned = text
     for pattern in (*(p for p, _ in FIXED_DELAYS), RELATIVE, ABSOLUTE, ABSOLUTE_HOUR,
-                    ABSOLUTE_DAYPART, TOMORROW, DAYPART):
+                    ABSOLUTE_DAYPART, ABSOLUTE_DAYPART_WORD, ABSOLUTE_HOUR_WORD,
+                    TOMORROW, DAYPART):
         cleaned = pattern.sub(" ", cleaned)
 
     cleaned = re.sub(
@@ -224,7 +276,8 @@ def strip_time(text: str) -> str:
     """
     cleaned = text
     for pattern in (*(p for p, _ in FIXED_DELAYS), RELATIVE, ABSOLUTE, ABSOLUTE_HOUR,
-                    ABSOLUTE_DAYPART, TOMORROW, DAYPART):
+                    ABSOLUTE_DAYPART, ABSOLUTE_DAYPART_WORD, ABSOLUTE_HOUR_WORD,
+                    TOMORROW, DAYPART):
         cleaned = pattern.sub(" ", cleaned)
 
     # Обращение по имени в команде не нужно: Scott и так знает, к кому она.

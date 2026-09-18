@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import subprocess
 import webbrowser
@@ -217,11 +218,20 @@ ALWAYS_FOLDER = {
 # Пуск, и на просьбу «открой фотографии» человек чаще ждёт программу. Такие
 # слова считаются папкой, только если сказано слово «папка» — иначе фраза
 # уходит в обычный поиск приложений.
+# Формы перечислены явно, а не добираются окончаниями.
+#
+# Сравнение идёт по целому слову: подстрокой «фото» находилось в
+# «фотосинтезе», и «покажи процессы фотосинтеза» оказывалось папкой с
+# картинками. Допуск на любое окончание вернул бы ту же беду, поэтому падежи
+# записаны руками — их немного, а предсказуемость важнее краткости.
 FOLDER_IF_EXPLICIT = {
-    "documents": ("документы", "документами", "documents"),
-    "pictures": ("изображения", "картинки", "фотографии", "фото", "pictures"),
+    "documents": ("документы", "документами", "документов", "документах",
+                  "documents"),
+    "pictures": ("изображения", "изображениями", "картинки", "картинками",
+                 "фотографии", "фотографиями", "фотографий", "фото",
+                 "pictures"),
     "music": ("музыка", "музыку", "музыкой", "music", "аудио"),
-    "videos": ("видео", "фильмы", "videos", "movies"),
+    "videos": ("видео", "фильмы", "фильмами", "videos", "movies"),
 }
 
 FOLDER_ALIASES = {**ALWAYS_FOLDER, **FOLDER_IF_EXPLICIT}
@@ -264,16 +274,37 @@ def match_folder(text: str) -> Optional[str]:
     lowered = text.lower().strip()
     explicit = "папк" in lowered or "директор" in lowered
 
+    # Слово «папка» не единственный знак. «Покажи документы» и «зайди в
+    # документы» — тоже про каталог: программу этими глаголами не просят
+    # открыть, так не говорят. Прежде такая фраза уходила в модель как вопрос,
+    # и человек вместо папки получал рассуждение о документах.
+    if not explicit:
+        explicit = any(lowered.startswith(глагол) for глагол in
+                       ("покажи", "покажите", "показать", "зайди в", "зайти в",
+                        "перейди в", "перейти в"))
+
     for key, names in ALWAYS_FOLDER.items():
-        if any(name in lowered for name in names):
+        if any(_названа(name, lowered) for name in names):
             return key
 
     if explicit:
         for key, names in FOLDER_IF_EXPLICIT.items():
-            if any(name in lowered for name in names):
+            if any(_названа(name, lowered) for name in names):
                 return key
 
     return None
+
+
+def _названа(name: str, lowered: str) -> bool:
+    """
+    Названа ли папка — целым словом, а не куском чужого.
+
+    Прежде сравнение шло подстрокой, и «покажи процессы фотосинтеза»
+    оказывалось папкой с картинками: в «фотосинтеза» есть «фото». Заметить это
+    можно было только на такой фразе — обычные «покажи фото» работали верно.
+    """
+    return re.search(rf"(?<![а-яёa-z]){re.escape(name)}(?![а-яёa-z])",
+                     lowered) is not None
 
 
 def user_folder(key: str) -> Optional[str]:
