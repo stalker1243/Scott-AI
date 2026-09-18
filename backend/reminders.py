@@ -93,7 +93,10 @@ HOUR_WORDS = "|".join(
 # «пол» плюс единицу «часа» и отказывается, не найдя такого числа.
 FIXED_DELAYS = [
     (re.compile(r"через\s+полтора\s+час\w*", re.IGNORECASE), timedelta(minutes=90)),
-    (re.compile(r"через\s+полчаса", re.IGNORECASE), timedelta(minutes=30)),
+    # «Пол часа» раздельно — так это пишет Whisper, когда человек сказал
+    # «полчаса»: проверка слухом поймала, что отложенная команда из-за пробела
+    # выполнялась немедленно.
+    (re.compile(r"через\s+пол\s*часа", re.IGNORECASE), timedelta(minutes=30)),
     (re.compile(r"через\s+час\b", re.IGNORECASE), timedelta(hours=1)),
     (re.compile(r"через\s+минуту", re.IGNORECASE), timedelta(minutes=1)),
     (re.compile(r"через\s+сутки|через\s+день", re.IGNORECASE), timedelta(days=1)),
