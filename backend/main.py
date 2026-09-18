@@ -1397,6 +1397,35 @@ def _set_main_loop(loop) -> None:
     _main_loop = loop
 
 
+def _похоже_на_команду(текст: str) -> bool:
+    """
+    Команда ли это — для продолжения разговора без имени.
+
+    Сразу после ответа Scott слушает следующую фразу без обращения по имени: в
+    журнале услышанного видно, как человек сказал «открой сайт ggsl.com» и
+    получил молчание, потому что имени не было, — а через полминуты повторил то
+    же самое уже с именем.
+
+    Но в это окно попадает всё, что сказано в комнате. Поэтому принимаются
+    только ДЕЙСТВИЯ: вопрос из чужого разговора заставил бы Scott влезть в него
+    с ответом, а это хуже, чем промолчать. Разбор тот же, что и у обычной
+    команды, — своего понимания смысла здесь не заводим.
+    """
+    try:
+        решение = understanding.understand(
+            текст,
+            intent_engine=fast_intent_engine,
+            parser=command_parser,
+            answerer=question_answerer,
+            find_protocol=(scott_runtime.protocols.match
+                           if scott_runtime.protocols else None),
+        )
+    except Exception:
+        return False
+
+    return решение.kind in ("action", "schedule", "remember", "project", "protocol")
+
+
 def _есть_ли_речь(окно) -> bool:
     """
     Звучит ли речь в последней секунде записи.
@@ -1783,6 +1812,7 @@ try:
         check_trigger=check_voice_trigger,
         on_interrupt=_listener_interrupted,
         has_speech=_есть_ли_речь,
+        looks_like_command=_похоже_на_команду,
     )
     scott_runtime.set_listener(scott_listener)
     print("🎧 Слушатель готов (микрофон включается по команде из лаунчера)")
