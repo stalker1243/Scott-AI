@@ -300,8 +300,16 @@ class ReminderService:
     незаметно для человека, а «через час» должно пережить это без потерь.
     """
 
-    def __init__(self, on_fire: Optional[Callable[[Reminder], None]] = None):
+    def __init__(self, on_fire: Optional[Callable[[Reminder], None]] = None,
+                 on_tick: Optional[Callable[[], None]] = None):
         self.on_fire = on_fire
+
+        # Что ещё проверять на каждом тике.
+        #
+        # Сюда подключаются протоколы с расписанием: заводить ради них второй
+        # поток, который просыпается раз в полминуты, незачем — этот уже
+        # просыпается и считает время.
+        self.on_tick = on_tick
         self._items: List[Reminder] = []
         self._lock = threading.Lock()
         self._thread: Optional[threading.Thread] = None
@@ -383,6 +391,14 @@ class ReminderService:
         while self._running:
             time.sleep(TICK_SECONDS)
             self._fire_due()
+
+            if self.on_tick is not None:
+                try:
+                    self.on_tick()
+                except Exception as e:
+                    # Чужая беда не должна останавливать напоминания: они и
+                    # так самое хрупкое место — их ждут в конкретную минуту.
+                    print(f"⚠️ Проверка расписаний не удалась: {e}")
 
     def _fire_due(self) -> None:
         now = datetime.now()

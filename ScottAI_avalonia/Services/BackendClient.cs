@@ -323,9 +323,11 @@ public class BackendClient
     }
 
     public async Task<(bool Success, string Message)> AddProtocolAsync(
-        string name, List<ProtocolStep> steps, List<string> phrases, string description)
+        string name, List<ProtocolStep> steps, List<string> phrases, string description,
+        string schedule = "")
     {
-        var res = await _http.PostAsJsonAsync("/protocols", new { name, steps, phrases, description });
+        var res = await _http.PostAsJsonAsync(
+            "/protocols", new { name, steps, phrases, description, schedule });
         var body = await res.Content.ReadFromJsonAsync<SimpleResponse>();
         return (body?.Success ?? false, body?.Message ?? body?.Error ?? $"HTTP {(int)res.StatusCode}");
     }

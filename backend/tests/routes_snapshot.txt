@@ -22,6 +22,7 @@ GET /api/version/requirements
 GET /api/version/status
 GET /api/version/update-check
 GET /attachments/ability
+GET /audio/characters
 GET /audio/settings
 GET /code/instructions
 GET /code/tools
@@ -45,6 +46,7 @@ GET /ifttt/rules
 GET /ifttt/stats
 GET /list-processes
 GET /listen/devices
+GET /listen/heard
 GET /listen/status
 GET /macros/get
 GET /macros/list
@@ -122,6 +124,7 @@ POST /ifttt/set-logic
 POST /ifttt/update-rule
 POST /internal/execute
 POST /kill-process
+POST /listen/heard/clear
 POST /listen/say
 POST /listen/start
 POST /listen/stop
@@ -147,6 +150,9 @@ POST /protocols/{name}/run
 POST /reminders/add
 POST /reminders/cancel
 POST /reminders/clear
+POST /remote/command
+POST /remote/lan
+POST /remote/pair
 POST /remote/pairing
 POST /remote/telegram
 POST /search-content

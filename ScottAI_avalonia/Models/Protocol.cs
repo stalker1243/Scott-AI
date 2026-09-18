@@ -52,10 +52,26 @@ public class Protocol
     [JsonPropertyName("last_run")]
     public string? LastRun { get; set; }
 
+    /// <summary>
+    /// Расписание словами: «по будням в 09:00».
+    ///
+    /// С ним протокол перестаёт быть ускорителем набора и становится
+    /// автоматизацией: человек приходит к готовому, ничего не сказав.
+    /// </summary>
+    [JsonPropertyName("schedule_text")]
+    public string ScheduleText { get; set; } = "";
+
+    public bool HasSchedule => ScheduleText.Length > 0;
+
     /// <summary>Шаги одной строкой — то, что видно в списке.</summary>
     public string StepsLine => string.Join(" → ", Steps.Select(s => s.Text));
 
     public string Counter => Runs == 0 ? "ни разу не запускался" : $"запусков: {Runs}";
+
+    /// <summary>Строка о расписании для списка — или о том, что его нет.</summary>
+    public string ScheduleLine => HasSchedule
+        ? $"сам: {ScheduleText}"
+        : "запускается по просьбе";
 
     /// <summary>Как позвать протокол голосом.</summary>
     public string CallHint => Phrases.Count > 0

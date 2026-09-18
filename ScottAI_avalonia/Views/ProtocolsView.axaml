@@ -41,6 +41,11 @@
                          TextWrapping="Wrap" VerticalContentAlignment="Top"
                          PlaceholderText="за работу&#x0a;начали" />
 
+                <TextBlock Text="Когда запускать самому — словами: «по будням в 09:00», «каждый день в 23:00» (необязательно)"
+                           Foreground="{DynamicResource TextMuted}" FontSize="12" />
+                <TextBox Text="{Binding NewSchedule}"
+                         PlaceholderText="по будням в 09:00" />
+
                 <TextBox Text="{Binding NewDescription}" PlaceholderText="Описание (необязательно)" />
 
                 <Button Content="Сохранить" Command="{Binding AddCommand}"
@@ -63,6 +68,8 @@
                                                    FontSize="12" TextWrapping="Wrap" />
                                         <TextBlock Text="{Binding CallHint}" Foreground="{DynamicResource TextMuted}"
                                                    FontSize="11" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ScheduleLine}" Foreground="{DynamicResource Accent}"
+                                                   FontSize="11" IsVisible="{Binding HasSchedule}" />
                                         <TextBlock Text="{Binding Counter}" Foreground="{DynamicResource TextMuted}"
                                                    FontSize="11" />
                                     </StackPanel>

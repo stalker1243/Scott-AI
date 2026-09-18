@@ -40,6 +40,12 @@ class ProtocolIn(BaseModel):
     phrases: List[str] = []
     description: str = ""
 
+    # Расписание словами: «по будням в 09:00», «каждый день в 23:00».
+    #
+    # Строкой, а не часами с номерами дней: человек пишет то же, что сказал бы
+    # вслух, — тот же подход, что и у шагов протокола.
+    schedule: str = ""
+
 
 class ProtocolPatch(BaseModel):
     name: Optional[str] = None
@@ -47,6 +53,7 @@ class ProtocolPatch(BaseModel):
     phrases: Optional[List[str]] = None
     description: Optional[str] = None
     enabled: Optional[bool] = None
+    schedule: Optional[str] = None
 
 
 @router.get("")
@@ -84,6 +91,7 @@ async def add_protocol(body: ProtocolIn) -> Dict:
         steps=body.steps,
         phrases=body.phrases,
         description=body.description,
+        schedule=body.schedule,
     )
 
 

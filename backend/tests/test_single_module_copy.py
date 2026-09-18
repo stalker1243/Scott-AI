@@ -17,6 +17,7 @@ Python, не узнав в этом имени уже выполняющийся
 псевдоним не поможет тому, кто импортирует main до его установки.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -44,9 +45,17 @@ def test_warming_speech_cache_does_not_import_backend():
         "print('MAIN' if 'main' in sys.modules else 'ЧИСТО')"
     )
 
+    # Дочернему процессу приходится назначить кодировку явно. На Windows его
+    # `print` уходит в трубу в кодировке системы (здесь cp1251), а читаем мы
+    # utf-8 — и слово «ЧИСТО» не доезжает вовсе: чтение падает внутри потока
+    # subprocess, stdout остаётся None, и тест винит прогрев кэша в том, чего
+    # тот не делал.
+    окружение = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
     готово = subprocess.run(
         [sys.executable, "-c", код],
-        cwd=BACKEND, capture_output=True, text=True, encoding="utf-8", timeout=180,
+        cwd=BACKEND, capture_output=True, text=True, encoding="utf-8",
+        env=окружение, timeout=180,
     )
 
     assert "ЧИСТО" in (готово.stdout or ""), (

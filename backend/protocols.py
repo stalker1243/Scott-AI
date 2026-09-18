@@ -39,6 +39,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+try:
+    from . import protocol_schedule
+except ImportError:
+    import protocol_schedule
+
 STORE_PATH = Path(__file__).resolve().parent / "data" / "protocols.json"
 
 # Слова, которыми человек зовёт протокол: «запусти протокол уборка»,
@@ -87,6 +92,13 @@ class Protocol:
     description: str = ""
     enabled: bool = True
 
+    # Когда Scott запускает протокол сам.
+    #
+    # Пусто — не запускает: протокол ждёт, пока его позовут. С расписанием он
+    # превращается из ускорителя набора в настоящую автоматизацию — «по будням
+    # в девять» человек приходит к готовому рабочему столу, ничего не сказав.
+    schedule: Any = None
+
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     runs: int = 0
     last_run: Optional[str] = None
@@ -95,7 +107,26 @@ class Protocol:
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["steps"] = [asdict(step) for step in self.steps]
+        data["schedule"] = self.schedule.to_dict() if self.schedule else None
+
+        # Расписание словами — интерфейсу и ответу голосом: «по будням в
+        # 09:00» понятнее, чем часы и список номеров дней.
+        data["schedule_text"] = self.schedule.human() if self.schedule else ""
         return data
+
+    def due(self, now: Optional[datetime] = None) -> bool:
+        """Пора ли запускать по расписанию."""
+        if not self.enabled or not self.schedule:
+            return False
+
+        последний = None
+        if self.last_run:
+            try:
+                последний = datetime.fromisoformat(self.last_run)
+            except ValueError:
+                последний = None
+
+        return self.schedule.due(now or datetime.now(), последний)
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "Protocol":
@@ -126,6 +157,20 @@ class Protocol:
         protocol.runs = int(data.get("runs") or 0)
         protocol.last_run = data.get("last_run")
         protocol.created = data.get("created") or protocol.created
+
+        # Расписание принимается и разобранным, и словами: файл могли написать
+        # руками, и требовать там часы с номерами дней недели значило бы
+        # закрыть эту дверь.
+        сырое = data.get("schedule")
+        if isinstance(сырое, dict):
+            protocol.schedule = protocol_schedule.Schedule(
+                hour=сырое.get("hour", 9),
+                minute=сырое.get("minute", 0),
+                days=сырое.get("days") or [],
+                enabled=bool(сырое.get("enabled", True)),
+            )
+        elif isinstance(сырое, str) and сырое.strip():
+            protocol.schedule = protocol_schedule.parse(сырое)
 
         return protocol
 
@@ -246,7 +291,7 @@ class ProtocolStore:
         return None
 
     def add(self, name: str, steps: List[Any], phrases: Optional[List[str]] = None,
-            description: str = "") -> Dict[str, Any]:
+            description: str = "", schedule: str = "") -> Dict[str, Any]:
         name = (name or "").strip()
         if not name:
             return {"success": False, "error": "У протокола должно быть имя"}
@@ -254,11 +299,22 @@ class ProtocolStore:
         if self.get(name):
             return {"success": False, "error": f"Протокол «{name}» уже есть"}
 
+        # Расписание проверяется до создания: непонятое лучше вернуть ошибкой,
+        # чем сохранить протокол, который никогда не сработает, — человек
+        # будет ждать его каждое утро и не дождётся.
+        if schedule and protocol_schedule.parse(schedule) is None:
+            return {
+                "success": False,
+                "error": "Не понял расписание. Напишите, например: "
+                         "«по будням в 09:00» или «каждый день в 23:00»",
+            }
+
         protocol = Protocol.from_dict({
             "name": name,
             "steps": steps,
             "phrases": phrases or [],
             "description": description,
+            "schedule": schedule,
         })
 
         if not protocol.steps:
@@ -296,6 +352,23 @@ class ProtocolStore:
             if "enabled" in changes:
                 protocol.enabled = bool(changes["enabled"])
 
+            if "schedule" in changes:
+                строка = (changes["schedule"] or "").strip()
+
+                if not строка:
+                    # Пустая строка снимает расписание: протокол снова ждёт,
+                    # пока его позовут.
+                    protocol.schedule = None
+                else:
+                    разобранное = protocol_schedule.parse(строка)
+                    if разобранное is None:
+                        return {
+                            "success": False,
+                            "error": "Не понял расписание. Напишите, например: "
+                                     "«по будням в 09:00» или «каждый день в 23:00»",
+                        }
+                    protocol.schedule = разобранное
+
             if changes.get("name"):
                 protocol.name = changes["name"].strip()
 
@@ -317,6 +390,19 @@ class ProtocolStore:
     def mark_run(self, protocol: Protocol) -> None:
         with self._lock:
             protocol.runs += 1
+            protocol.last_run = datetime.now().isoformat(timespec="seconds")
+            self._save()
+
+    def mark_attempt(self, protocol: Protocol) -> None:
+        """
+        Отметить время попытки, не засчитывая её в число запусков.
+
+        Нужно расписанию. Протокол, упавший на первом шаге, без отметки
+        пробовался бы заново на каждом тике службы — весь льготный получас
+        подряд. А в счётчике запусков ему делать нечего: он не выполнился, и
+        цифра рядом с именем должна об этом молчать.
+        """
+        with self._lock:
             protocol.last_run = datetime.now().isoformat(timespec="seconds")
             self._save()
 

@@ -31,6 +31,12 @@ public partial class ProtocolsViewModel : ViewModelBase
     [ObservableProperty] private string _newSteps = "";
     [ObservableProperty] private string _newPhrases = "";
     [ObservableProperty] private string _newDescription = "";
+
+    /// <summary>
+    /// Расписание словами: «по будням в 09:00». Пусто — протокол ждёт, пока
+    /// позовут, и это обычный случай.
+    /// </summary>
+    [ObservableProperty] private string _newSchedule = "";
     [ObservableProperty] private bool _saving;
 
     /// <summary>Какой протокол сейчас выполняется — по нему гаснут кнопки запуска.</summary>
@@ -88,7 +94,8 @@ public partial class ProtocolsViewModel : ViewModelBase
         try
         {
             var (success, message) = await _client.AddProtocolAsync(
-                NewName.Trim(), steps, SplitLines(NewPhrases), NewDescription.Trim());
+                NewName.Trim(), steps, SplitLines(NewPhrases), NewDescription.Trim(),
+                NewSchedule.Trim());
 
             if (!success)
             {
@@ -102,6 +109,7 @@ public partial class ProtocolsViewModel : ViewModelBase
             NewSteps = "";
             NewPhrases = "";
             NewDescription = "";
+            NewSchedule = "";
             ShowForm = false;
             await Refresh();
         }

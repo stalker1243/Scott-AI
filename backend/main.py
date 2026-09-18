@@ -1673,6 +1673,103 @@ def _handle_remote(text: str, device: Dict) -> str:
     return _remote_reply(text, device)["text"]
 
 
+def _сказать_из_потока(текст: str) -> None:
+    """
+    Озвучить из потока службы напоминаний и дождаться конца речи.
+
+    Ждать обязательно: без ожидания объявление «по расписанию — протокол
+    Работа» началось бы одновременно с открытием окон и заглохло бы под ними.
+    Минута — с запасом на любую фразу такой длины.
+    """
+    if _main_loop is None:
+        return
+
+    try:
+        asyncio.run_coroutine_threadsafe(_произнести(текст), _main_loop).result(timeout=60)
+    except Exception as e:
+        print(f"⚠️ Не удалось озвучить: {e}")
+
+
+def _запустить_протоколы_по_расписанию() -> None:
+    """
+    Запустить протоколы, которым настало время.
+
+    Вызывается службой напоминаний на каждом тике — раз в пятнадцать секунд.
+    Отдельного потока для этого не нужно: этот и так просыпается и смотрит на
+    часы.
+
+    Пропущенное не догоняется: если компьютер был выключен в девять утра,
+    протокол «Работа» не запустится в семь вечера. Человек ждал его утром, а
+    вечером он уже помеха — подробности в protocol_schedule.
+    """
+    хранилище = scott_runtime.protocols
+    if хранилище is None or _main_loop is None:
+        return
+
+    for протокол in хранилище.all():
+        if not протокол.due():
+            continue
+
+        словами = протокол.schedule.human()
+        print(f"⏰ По расписанию ({словами}): протокол «{протокол.name}»")
+
+        # Сначала вслух, потом дело. Протокол открывает окна и меняет
+        # громкость сам по себе — человек, сидящий рядом, должен услышать
+        # причину до того, как это начнётся, а не гадать, что происходит.
+        _сказать_из_потока(f"По расписанию: протокол {протокол.name}.")
+
+        try:
+            # Тот же путь, что и у протокола, вызванного голосом: своего
+            # исполнения здесь заводить нельзя — разойдётся с обычным.
+            итог = asyncio.run_coroutine_threadsafe(
+                scott_ai.run_protocol(протокол), _main_loop
+            ).result(timeout=300)
+        except Exception as e:
+            print(f"⚠️ Протокол «{протокол.name}» по расписанию не выполнился: {e}")
+            хранилище.mark_attempt(протокол)
+            _сказать_из_потока(f"Протокол {протокол.name} по расписанию не выполнился.")
+            continue
+
+        # Удавшийся запуск run_protocol засчитывает сам — второй раз отмечать
+        # нельзя, иначе счётчик растёт вдвое. А вот неудавшийся он не
+        # отмечает, и без отметки протокол пошёл бы по кругу на каждом тике
+        # весь льготный получас.
+        if not getattr(итог, "ok", False):
+            хранилище.mark_attempt(протокол)
+
+            # Итог целиком: «остановлен на шаге „открой браузер“, выполнено 1
+            # из 3». Человека рядом может не быть, и короткого «не вышло» ему
+            # потом не хватит, чтобы понять, где чинить.
+            _сказать_из_потока(итог.summary())
+
+
+async def _произнести(текст: str) -> None:
+    """
+    Сказать вслух то, что случилось без человека.
+
+    Слух на время речи снимается. Иначе Scott услышит сам себя и разберёт
+    собственные слова как команду — на этом уже обжигались: в журнале
+    услышанного оказывались фразы, которых человек не говорил.
+    """
+    voice = scott_runtime.scott_voice
+    if voice is None or not текст:
+        return
+
+    listening = scott_runtime.listener
+    if listening is not None:
+        listening.suspend()
+    try:
+        path = await asyncio.to_thread(voice.speak_to_file, текст)
+        if path:
+            await asyncio.to_thread(voice.play_audio, path)
+    except Exception as e:
+        print(f"⚠️ Не удалось озвучить: {e}")
+    finally:
+        if listening is not None:
+            await asyncio.sleep(0.4)
+            listening.resume()
+
+
 def _run_scheduled_command(item) -> None:
     """
     Выполнить то, что человек отложил на этот час.
@@ -1700,25 +1797,8 @@ def _run_scheduled_command(item) -> None:
             ответ = f"не получилось: {e}"
             print(f"⚠️ Отложенная команда не выполнена: {e}")
 
-        voice = scott_runtime.scott_voice
-        if voice is None:
-            return
-
         текст = f"Выполняю отложенное: {приказ}. {ответ}" if ответ else f"Выполняю отложенное: {приказ}"
-
-        listening = scott_runtime.listener
-        if listening is not None:
-            listening.suspend()
-        try:
-            path = await asyncio.to_thread(voice.speak_to_file, текст)
-            if path:
-                await asyncio.to_thread(voice.play_audio, path)
-        except Exception as e:
-            print(f"⚠️ Не удалось озвучить: {e}")
-        finally:
-            if listening is not None:
-                await asyncio.sleep(0.4)
-                listening.resume()
+        await _произнести(текст)
 
     asyncio.run_coroutine_threadsafe(run(), _main_loop)
 
@@ -1773,7 +1853,8 @@ try:
     except ImportError:
         from reminders import ReminderService
 
-    scott_reminders = ReminderService(on_fire=_fire_reminder)
+    scott_reminders = ReminderService(on_fire=_fire_reminder,
+                                      on_tick=_запустить_протоколы_по_расписанию)
     scott_reminders.start()
     scott_runtime.set_reminders(scott_reminders)
     print(f"⏰ Служба напоминаний запущена (в очереди: {len(scott_reminders.pending())})")
