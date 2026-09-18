@@ -105,6 +105,23 @@ public class BackendLauncher
         _ = Task.Run(() => DrainOutput(_process));
         _ = Task.Run(() => DrainErrors(_process));
 
+        // Заметить смерть backend.
+        //
+        // Прежде лаунчер о ней молчал: в его журнале за всю жизнь была одна
+        // строка «запуск», и когда 18 сентября Scott умер посреди проверки,
+        // единственным свидетельством остались слова человека вслух — «по
+        // ходу, бакенд окончательно отвалился». Теперь остаётся запись с кодом
+        // выхода и последними строками ошибок.
+        try
+        {
+            _process.EnableRaisingEvents = true;
+            _process.Exited += (_, _) => ОтметитьСмерть();
+        }
+        catch
+        {
+            // Не вышло подписаться — не повод не запускаться.
+        }
+
         Status = "запускаю Scott…";
         return await WaitUntilReadyAsync(client);
     }
@@ -162,13 +179,51 @@ public class BackendLauncher
         }
     }
 
+    private void ОтметитьСмерть()
+    {
+        int? код = null;
+        try
+        {
+            код = _process?.ExitCode;
+        }
+        catch
+        {
+            // Процесс уже прибран системой — кода не узнать.
+        }
+
+        BackendOutputLog.NoteExit(код);
+
+        var последние = string.Join(Environment.NewLine, RecentErrors());
+        LauncherLog.Write(код is null
+            ? "backend завершился (код неизвестен)"
+            : $"backend завершился, код {код}");
+
+        if (!string.IsNullOrWhiteSpace(последние))
+        {
+            LauncherLog.Write("последние строки ошибок backend:"
+                              + Environment.NewLine + последние);
+        }
+    }
+
     private static void DrainOutput(Process process)
     {
         try
         {
             while (!process.StandardOutput.EndOfStream)
             {
-                process.StandardOutput.ReadLine();
+                var строка = process.StandardOutput.ReadLine();
+                if (string.IsNullOrWhiteSpace(строка))
+                {
+                    continue;
+                }
+
+                // Раньше прочитанное просто выбрасывалось, и это стоило целого
+                // разбирательства: 18 сентября backend умер посреди проверки, а
+                // почему — выяснить оказалось нечем. Всё, что Scott печатает о
+                // себе, шло сюда и терялось: прогрев моделей, выбор устройства,
+                // предсмертные жалобы. В журнале ошибок было пусто, потому что
+                // Scott пишет о себе через print, а не через logging.
+                BackendOutputLog.Write(строка);
             }
         }
         catch
