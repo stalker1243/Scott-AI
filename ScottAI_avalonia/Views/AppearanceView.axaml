@@ -18,7 +18,7 @@
 
             <StackPanel Spacing="10">
                 <TextBlock Text="Стиль" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
-                <TextBlock Text="Classic — обычное окно, Glass — с настоящим размытием рабочего стола под ним, Terminal Pro — строгий и плоский."
+                <TextBlock Text="Classic — обычное окно, Glass — с настоящим размытием рабочего стола под ним, Terminal Pro — строгий и плоский, Dashboard — тёплый графит с янтарём, вид приборной панели."
                            FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" />
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <Button Content="Classic" Command="{Binding SetStyleClassicCommand}" Classes="tab"
@@ -27,6 +27,8 @@
                             Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=glass}" />
                     <Button Content="Terminal Pro" Command="{Binding SetStyleTerminalCommand}" Classes="tab"
                             Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=terminal}" />
+                    <Button Content="Dashboard" Command="{Binding SetStyleDashboardCommand}" Classes="tab"
+                            Classes.tabactive="{Binding CurrentStyle, Converter={x:Static myconv:EqualsConverter.Instance}, ConverterParameter=dashboard}" />
                 </StackPanel>
             </StackPanel>
 
@@ -82,7 +84,7 @@
             <StackPanel Spacing="10">
                 <TextBlock Text="Значок программы" FontWeight="SemiBold" Foreground="{DynamicResource TextSecondary}" />
                 <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextMuted}"
-                           Text="Меняется значок в трее, заголовке окна и логотип слева. Тёмный лучше виден на тёмной панели задач, светлый — на светлой. Значок самого файла программы остаётся прежним: он вшит при сборке." />
+                           Text="Меняется значок в трее, заголовке окна и логотип слева. Выберите белый знак на чёрном фоне или чёрный на белом. Выбор не зависит от темы окна. Значок файла программы всегда тёмный: он вшит при сборке." />
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <Button Classes="iconpick" AutomationProperties.Name="Тёмный значок"
                             Command="{Binding SetIconCommand}" CommandParameter="dark"

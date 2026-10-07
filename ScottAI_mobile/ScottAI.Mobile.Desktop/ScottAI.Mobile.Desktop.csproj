@@ -9,6 +9,7 @@
 
   <PropertyGroup>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\ScottAI.Mobile\Assets\scott.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

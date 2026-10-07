@@ -6,7 +6,7 @@
 import subprocess
 import os
 import webbrowser
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 import psutil
 import re
 import time
@@ -17,6 +17,27 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 import platform
 import shutil
+
+WEBSITE_ALIASES = {
+    'гугл': 'https://www.google.com', 'google': 'https://www.google.com',
+    'яндекс': 'https://ya.ru', 'yandex': 'https://ya.ru',
+    'ютуб': 'https://www.youtube.com', 'youtube': 'https://www.youtube.com',
+    'гитхаб': 'https://github.com', 'github': 'https://github.com',
+    'википедия': 'https://ru.wikipedia.org', 'wikipedia': 'https://ru.wikipedia.org',
+}
+
+
+def website_url(name: str) -> str:
+    value = name.strip().strip('.,!?').casefold()
+    if value in WEBSITE_ALIASES:
+        return WEBSITE_ALIASES[value]
+    value = name.strip().rstrip('.,!?')
+    if '://' not in value:
+        value = 'https://' + value
+    parsed = urlsplit(value)
+    if parsed.scheme not in {'http', 'https'} or not parsed.hostname or any(c.isspace() for c in value):
+        raise ValueError('Назовите сайт или его адрес, например google.com')
+    return value
 
 # Импортируем веб-скрейпер
 try:
@@ -375,11 +396,11 @@ class CommandExecutor:
     def open_website(self, url: str) -> str:
         """Открыть сайт"""
         try:
-            if not url.startswith("http"):
-                url = f"https://{url}"
+            url = website_url(url)
             
             print(f"🌐 Открываю сайт: {url}")
-            webbrowser.open(url)
+            if not webbrowser.open(url):
+                return '❌ Браузер не смог открыть сайт'
             
             return f"✅ Открыл сайт: {url}"
         except Exception as e:

@@ -206,6 +206,20 @@ def test_accents_can_be_disabled(speech):
     assert "+" not in speech.prepare_for_speech("Громкость увеличена", accents=False)
 
 
+def test_device_report_uses_correct_accents_and_preserves_explicit_marks(speech):
+    result = speech.prepare_for_speech('Яркость повышена. Запущено пять процессов. Программное обеспечение обновлено.')
+    assert '+Яркость' in result
+    assert 'Зап+ущено' in result
+    assert 'обесп+ечение' in result
+    assert speech.put_accents(result) == result
+    assert speech.put_accents('+Яркость') == '+Яркость'
+
+
+def test_chat_terms_and_abbreviations_are_speakable(speech):
+    result = speech.prepare_for_speech('API Token, PDF, DOCX, Backend и Qt.', accents=False)
+    assert result == 'эй пи ай токен, пи ди эф, док икс, бэкенд и кьют.'
+
+
 def test_unknown_words_untouched(speech):
     """Слова, которых нет в словаре ударений, не трогаются."""
     assert speech.prepare_for_speech("Кот сидит на окне", accents=True).count("+") == 0

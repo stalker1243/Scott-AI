@@ -1,0 +1,17 @@
+{
+  "soft": {
+    "title": "Мягкий",
+    "description": "Тёплый и спокойный, для повседневных ответов.",
+    "instruct": "Native Russian male voice, around 35 to 45 years old, a warm medium-low baritone. Very clear consonants and complete word endings, natural standard Russian pronunciation. Speak as a calm, reassuring professional assistant. Gentle confident delivery, measured natural pace and smooth short pauses. Clean close-microphone studio sound."
+  },
+  "neutral": {
+    "title": "Нейтральный",
+    "description": "Ровный и собранный, с акцентом на разборчивость.",
+    "instruct": "Native Russian male voice, around 35 to 45 years old, a balanced medium-low baritone. Very clear consonants and complete word endings, natural standard Russian pronunciation. Speak as a composed, precise professional assistant. Neutral confident delivery, steady conversational pace and well-defined short pauses. Clean close-microphone studio sound."
+  },
+  "firm": {
+    "title": "Чуть строгий",
+    "description": "Уверенный и сдержанный, с лёгкой строгостью.",
+    "instruct": "Native Russian male voice, around 35 to 45 years old, a resonant medium-low baritone. Very clear consonants and complete word endings, natural standard Russian pronunciation. Speak as a calm, dependable professional assistant. Slightly authoritative, restrained and courteous delivery, precise measured pacing and purposeful short pauses. Clean close-microphone studio sound."
+  }
+}

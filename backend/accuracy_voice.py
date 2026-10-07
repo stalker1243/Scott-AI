@@ -26,6 +26,8 @@
 from __future__ import annotations
 
 import tempfile
+import math
+import re
 import wave
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -33,7 +35,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 
-def _озвучить(текст: str, путь: str) -> Optional[np.ndarray]:
+def _озвучить(текст: str, путь: str, voice=None) -> Optional[np.ndarray]:
     """
     Произнести фразу и вернуть звук так, как его слышит распознавание.
 
@@ -52,7 +54,7 @@ def _озвучить(текст: str, путь: str) -> Optional[np.ndarray]:
     if not произносимое:
         return None
 
-    if not silero_tts.synthesize(произносимое, путь):
+    if not silero_tts.synthesize(произносимое, путь, voice):
         return None
 
     with wave.open(путь) as файл:
@@ -61,15 +63,73 @@ def _озвучить(текст: str, путь: str) -> Optional[np.ndarray]:
 
     звук = данные.astype(np.float32) / 32768.0
 
-    # Распознавание ждёт 16 кГц, синтез отдаёт 48: берём каждый третий отсчёт.
-    if частота != 16000 and частота % 16000 == 0:
-        звук = звук[:: частота // 16000]
+    if частота != 16000:
+        from scipy.signal import resample_poly
+        factor = math.gcd(частота, 16000)
+        звук = resample_poly(звук, 16000 // factor, частота // factor).astype(np.float32)
 
     return звук
 
 
+def _normalize(value):
+    if isinstance(value, str):
+        return re.sub(r'\s+', ' ', value.casefold().replace('ё', 'е')).strip(' .,!?;:')
+    if isinstance(value, dict):
+        return {k: _normalize(v) for k, v in value.items()}
+    return value
+
+
+def _same_decision(before, after):
+    if after is None or (before.kind, before.action or '') != (after.kind, after.action or ''):
+        return False
+    if before.kind == 'refused':
+        return before.message == after.message
+    if before.parsed is not None and before.kind != 'question':
+        if after.parsed is None:
+            return False
+        if (_parameter(before) != _parameter(after)
+                or _normalize(before.parsed.context) != _normalize(after.parsed.context)):
+            return False
+    for field in ('service', 'query', 'memory', 'project', 'order'):
+        if _normalize(getattr(before, field, None)) != _normalize(getattr(after, field, None)):
+            return False
+    before_when, after_when = getattr(before, 'when', None), getattr(after, 'when', None)
+    if (before_when is None) != (after_when is None):
+        return False
+    if before_when is not None and abs((before_when - after_when).total_seconds()) > 1:
+        return False
+    return True
+
+
+def _parameter(decision):
+    value = _normalize(decision.parsed.main_param)
+    if decision.action in {'open_app', 'close_app'}:
+        from app_resolver import ALIASES
+        # These aliases also reach the real app/process resolvers.
+        value = ALIASES.get(value, value)
+        if value == 'google chrome':
+            value = 'chrome'
+    elif decision.action == 'reminder':
+        # Compare what the real reminder executor uses, including the due
+        # time. Commas and digit spelling must not mask wrong times/subjects.
+        from datetime import datetime
+        from reminders import parse_time, extract_subject
+        due = parse_time(value, datetime(2026, 1, 1, 12))
+        return (_normalize(extract_subject(value)), due) if due else ('invalid_time', value)
+    elif decision.action == 'system_command':
+        from speech_text import expand_numbers
+        value = _normalize(expand_numbers(value))
+    elif decision.action == 'open_website':
+        from command_executor import website_url
+        try:
+            value = website_url(value)
+        except ValueError:
+            pass
+    return value
+
+
 def check(understanding, engines: Dict, recognizer,
-          phrases: Optional[List[Dict]] = None) -> Dict:
+          phrases: Optional[List[Dict]] = None, synthesize=None) -> Dict:
     """
     Прогнать набор через синтез, слух и разбор.
 
@@ -97,7 +157,7 @@ def check(understanding, engines: Dict, recognizer,
             рассмотрено += 1
             путь = str(Path(папка) / f"ф{номер}.wav")
 
-            звук = _озвучить(фраза, путь)
+            звук = (synthesize or _озвучить)(фраза, путь)
             if звук is None:
                 промахи.append({
                     "сказано": фраза,
@@ -112,11 +172,7 @@ def check(understanding, engines: Dict, recognizer,
             было = understanding.understand(фраза, **engines)
             стало = understanding.understand(услышано, **engines) if услышано else None
 
-            одинаково = (
-                стало is not None
-                and стало.kind == было.kind
-                and (стало.action or "") == (было.action or "")
-            )
+            одинаково = _same_decision(было, стало)
 
             if одинаково:
                 попаданий += 1
@@ -124,8 +180,8 @@ def check(understanding, engines: Dict, recognizer,
                 промахи.append({
                     "сказано": фраза,
                     "услышано": услышано or "(тишина)",
-                    "ожидалось": accuracy._описать(было.kind, было.action or ""),
-                    "вышло": (accuracy._описать(стало.kind, стало.action or "")
+                    "ожидалось": accuracy._описать(было.kind, было.action or "", getattr(было.parsed, 'main_param', '')),
+                    "вышло": (accuracy._описать(стало.kind, стало.action or "", getattr(стало.parsed, 'main_param', ''))
                               if стало else "—"),
                 })
 

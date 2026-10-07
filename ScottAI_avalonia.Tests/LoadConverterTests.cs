@@ -19,6 +19,7 @@ namespace ScottAI.Avalonia.Tests;
 /// при пустом. Второе, кстати, и случилось: часть тела дважды наливалась сверху
 /// вниз, пока заливку не переложили на градиент по силуэту.
 /// </summary>
+[Collection("avalonia")]
 public class LoadConverterTests
 {
     private static readonly CultureInfo Культура = CultureInfo.InvariantCulture;

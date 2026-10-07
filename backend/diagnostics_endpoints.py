@@ -6,6 +6,7 @@
 """
 
 from typing import Dict
+import asyncio
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, JSONResponse
@@ -28,7 +29,7 @@ async def checks() -> Dict:
     Отвечает на вопрос «что сломано», тогда как /system — на вопрос «как всё
     устроено». Второй спрашивают редко, первый — почти всегда.
     """
-    return health_checks.run_all()
+    return await asyncio.to_thread(health_checks.run_all)
 
 
 @router.get("/checks/text")
@@ -39,13 +40,13 @@ async def checks_text() -> Dict:
     Главный способ рассказать о поломке: вместо «у меня не работает» — восемь
     строк, по которым видно, что именно.
     """
-    return {"success": True, "text": health_checks.as_text()}
+    return {"success": True, "text": await asyncio.to_thread(health_checks.as_text)}
 
 
 @router.get("/system")
 async def system_info() -> Dict:
     """Сведения о машине: ОС, память, видеокарта, версии, текущие настройки."""
-    return diagnostics.collect_system_info()
+    return await asyncio.to_thread(diagnostics.collect_system_info)
 
 
 @router.get("/gpu")
@@ -57,7 +58,7 @@ async def gpu_info() -> Dict:
     командой, собран без CUDA и видеокарту не использует, сколько бы её ни
     было в компьютере.
     """
-    return diagnostics.collect_gpu_info()
+    return await asyncio.to_thread(diagnostics.collect_gpu_info)
 
 
 @router.get("/errors")
@@ -98,7 +99,7 @@ async def build_report(data: Dict = None) -> Dict:
     архив отдельным файлом.
     """
     note = (data or {}).get("note") if isinstance(data, dict) else None
-    result = diagnostics.build_report(note)
+    result = await asyncio.to_thread(diagnostics.build_report, note)
     if not result.get("success"):
         return JSONResponse(status_code=500, content=result)
     return result

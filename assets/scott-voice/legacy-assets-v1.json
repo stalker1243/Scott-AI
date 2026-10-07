@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "reference_sha256": "78f48237579b5323bd5e738095fa17f4c30f1f76d8976e66ef128b850eea42f3",
+  "files": {
+    "experiments/voice_design/voice_worker.py": "d20ff7184f0ff340cca6dd430d536b1f466424a50b33c79673e82a2cc8d65e1b",
+    "experiments/voice_design/trial_utils.py": "1f7da95686afcab7c7718f5337570ad08c3145ced2bb976b25c95d9b4f21834c",
+    "experiments/voice_design/generate_samples.py": "1fc7315f7d99fbdfd472a86116af6ecb203d71849ef9a68f558b387a7d184fab",
+    "experiments/voice_design/evaluate_samples.py": "fe250b07b58435299a731838d9d9489d660efe1e86f5ca7dafb23e57c477daa1",
+    "experiments/voice_design/create_scott_voice.py": "c6f6aade7fcc5751f0142dff54c8ff3ae0d96362968d41fe415e5c03afc83273",
+    "experiments/voice_design/robotic_profiles.json": "b6c5ca994600cb4c06cb7c6e3cc7cf6ee54f02696d6720d91988a1dc74a64ceb",
+    "reports/voice-design/reference/reference.json": "4d41ff9ff3b56503d50d4f1c92bcaac720dcae0b07369450741e16b41d4fcb1c",
+    "reports/voice-design/reference/scott-reference.wav": "78f48237579b5323bd5e738095fa17f4c30f1f76d8976e66ef128b850eea42f3",
+    "backend/scott_voice_process.py": "3c1336fcdf0b7ba1bfc82fbf74de370f842f9347118d882449d1d53c7f194c89",
+    "backend/voice_cache.py": "79a61887bc514dbd49834763bd88ce42dd1c5f1698c267e7fd1bc0392feb356b",
+    "backend/speech_text.py": "c250ccb5cec32a849687ef908e6d0e9f47fce72c060a4e0fdc7e8553ca33aa36"
+  }
+}

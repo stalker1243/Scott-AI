@@ -39,7 +39,7 @@ class QuestionAnswerer:
         'when': ['когда', 'во сколько', 'в какое время', 'when', 'what time'],
         'where': ['где', 'куда', 'откуда', 'where', 'to where', 'from where'],
         'why': ['почему', 'зачем', 'why', 'what for'],
-        'how': ['как', 'каким образом', 'how', 'in what way'],
+        'how': ['как', 'чем', 'каким', 'каким образом', 'how', 'in what way'],
         'how_much': ['сколько', 'как много', 'how much', 'how many'],
     }
 

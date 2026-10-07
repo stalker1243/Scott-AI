@@ -1,0 +1,26 @@
+IDI_ICON1 ICON "../ScottAI_avalonia/Assets/scott.ico"
+
+#include <windows.h>
+#include "ScottVersion.h"
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION SCOTT_FILE_VERSION
+PRODUCTVERSION SCOTT_FILE_VERSION
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Scott AI"
+            VALUE "FileVersion", SCOTT_APP_VERSION
+            VALUE "ProductName", "Scott AI"
+            VALUE "ProductVersion", SCOTT_APP_VERSION
+            VALUE "OriginalFilename", "ScottAIQt.exe"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

@@ -1,0 +1,5 @@
+# This environment reuses the installed CUDA torch through system-site-packages.
+# TorchAudio must match that torch build; setup.ps1 installs it from PyTorch.
+qwen-tts==0.1.1
+transformers==4.57.3
+accelerate==1.12.0

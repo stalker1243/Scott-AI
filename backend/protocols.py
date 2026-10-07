@@ -31,7 +31,10 @@
 from __future__ import annotations
 
 import json
+import asyncio
+import os
 import re
+import tempfile
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -58,6 +61,7 @@ LAUNCH_WORDS = ("запусти", "выполни", "включи", "актив�
 # протокол, который зовёт сам себя, иначе вешает Scott наглухо.
 MAX_STEPS = 40
 MAX_DEPTH = 3
+MAX_REPEATS = 20
 
 
 @dataclass
@@ -72,6 +76,7 @@ class Step:
 
     text: str
     pause: float = 0.0
+    enabled: bool = True
 
     def __post_init__(self) -> None:
         self.text = (self.text or "").strip()
@@ -91,6 +96,8 @@ class Protocol:
 
     description: str = ""
     enabled: bool = True
+    repeat_count: int = 1
+    stop_on_error: bool = True
 
     # Когда Scott запускает протокол сам.
     #
@@ -135,7 +142,7 @@ class Protocol:
 
         for item in raw_steps:
             if isinstance(item, dict):
-                steps.append(Step(text=item.get("text", ""), pause=item.get("pause", 0)))
+                steps.append(Step(text=item.get("text", ""), pause=item.get("pause", 0), enabled=bool(item.get("enabled", True))))
             elif isinstance(item, str):
                 # Протокол, записанный одним списком фраз без пауз. Такой вид
                 # удобно писать руками, и отказываться его читать незачем.
@@ -147,6 +154,8 @@ class Protocol:
             "phrases": [p for p in (data.get("phrases") or []) if isinstance(p, str) and p.strip()],
             "description": data.get("description", "") or "",
             "enabled": bool(data.get("enabled", True)),
+            "repeat_count": int(data.get("repeat_count", 1)),
+            "stop_on_error": bool(data.get("stop_on_error", True)),
         }
 
         protocol = Protocol(**known)
@@ -212,6 +221,8 @@ class StepResult:
     text: str
     ok: bool
     response: str = ""
+    index: int = 0
+    iteration: int = 1
 
 
 @dataclass
@@ -222,10 +233,11 @@ class RunResult:
     steps: List[StepResult] = field(default_factory=list)
     stopped_at: Optional[int] = None
     error: str = ""
+    total: int = 0
 
     @property
     def ok(self) -> bool:
-        return not self.error and self.stopped_at is None
+        return not self.error and self.stopped_at is None and all(step.ok for step in self.steps)
 
     def summary(self) -> str:
         """Что сказать человеку."""
@@ -238,7 +250,11 @@ class RunResult:
             failed = self.steps[self.stopped_at] if self.stopped_at < len(self.steps) else None
             на_чём = f" на шаге «{failed.text}»" if failed else ""
             return (f"Протокол «{self.name}» остановлен{на_чём}. "
-                    f"Выполнено шагов: {done} из {len(self.steps)}.")
+                    f"Выполнено шагов: {done} из {self.total or len(self.steps)}.")
+
+        failed = sum(not step.ok for step in self.steps)
+        if failed:
+            return f"Протокол «{self.name}» завершён с ошибками: {failed} из {len(self.steps)} шагов."
 
         return f"Протокол «{self.name}» выполнен. Шагов: {done}."
 
@@ -268,13 +284,63 @@ class ProtocolStore:
             print(f"⚠️ Не удалось прочитать протоколы: {e}")
             self._items = []
 
-    def _save(self) -> None:
+    def _write(self, items: List[Protocol]) -> None:
+        """Replace the file only after the entire new catalog has been written."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        filename = None
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            payload = [item.to_dict() for item in self._items]
-            self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception as e:
-            print(f"⚠️ Не удалось сохранить протоколы: {e}")
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
+                                             prefix=self.path.name + ".", suffix=".tmp", delete=False) as stream:
+                filename = stream.name
+                json.dump([item.to_dict() for item in items], stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(filename, self.path)
+        finally:
+            if filename and os.path.exists(filename):
+                os.unlink(filename)
+
+    def _commit(self, items: List[Protocol]) -> Optional[str]:
+        try:
+            self._write(items)
+        except (OSError, ValueError) as error:
+            return f"Не удалось сохранить протоколы: {error}"
+        existing = {p.id: p for p in self._items}
+        committed = []
+        for candidate in items:
+            retained = existing.get(candidate.id)
+            if retained is not None:
+                retained.__dict__.update(candidate.__dict__)
+            committed.append(retained if retained is not None else candidate)
+        self._items = committed
+        return None
+
+    def _find(self, name: str = "", protocol_id: str = "") -> Optional[Protocol]:
+        return next((p for p in self._items if p.id == protocol_id), None) if protocol_id else next(
+            (p for p in self._items if normalize(p.name) == normalize(name)), None)
+
+    @staticmethod
+    def _validate(data: Dict[str, Any]) -> Protocol:
+        name = (data.get("name") or "").strip()
+        if not normalize(name) or len(name) > 100:
+            raise ValueError("Имя должно содержать от 1 до 100 символов")
+        repeat = data.get("repeat_count", 1)
+        if isinstance(repeat, bool) or not isinstance(repeat, int) or not 1 <= repeat <= MAX_REPEATS:
+            raise ValueError(f"Число повторов — от 1 до {MAX_REPEATS}")
+        schedule = data.get("schedule")
+        if isinstance(schedule, str) and schedule.strip() and protocol_schedule.parse(schedule) is None:
+            raise ValueError("Не понял расписание. Напишите, например: «по будням в 09:00»")
+        candidate = Protocol.from_dict({**data, "name": name})
+        if not candidate.steps or len(candidate.steps) > MAX_STEPS:
+            raise ValueError(f"В протоколе должно быть от 1 до {MAX_STEPS} шагов")
+        if not any(step.enabled for step in candidate.steps):
+            raise ValueError("Включите хотя бы один шаг")
+        if any(len(step.text) > 2000 for step in candidate.steps):
+            raise ValueError("Фраза шага не должна превышать 2000 символов")
+        if len(candidate.description) > 2000 or len(candidate.phrases) > 20 or any(len(p) > 200 for p in candidate.phrases):
+            raise ValueError("Описание — до 2000 символов, голосовые фразы — до 20 по 200 символов")
+        candidate.phrases = list(dict.fromkeys(p.strip() for p in candidate.phrases))
+        return candidate
 
     # ---- управление ----
 
@@ -283,115 +349,71 @@ class ProtocolStore:
             return list(self._items)
 
     def get(self, name: str) -> Optional[Protocol]:
-        target = normalize(name)
         with self._lock:
-            for item in self._items:
-                if normalize(item.name) == target:
-                    return item
-        return None
+            return self._find(name)
+
+    def get_by_id(self, protocol_id: str) -> Optional[Protocol]:
+        with self._lock:
+            return self._find(protocol_id=protocol_id)
 
     def add(self, name: str, steps: List[Any], phrases: Optional[List[str]] = None,
-            description: str = "", schedule: str = "") -> Dict[str, Any]:
-        name = (name or "").strip()
-        if not name:
-            return {"success": False, "error": "У протокола должно быть имя"}
-
-        if self.get(name):
-            return {"success": False, "error": f"Протокол «{name}» уже есть"}
-
-        # Расписание проверяется до создания: непонятое лучше вернуть ошибкой,
-        # чем сохранить протокол, который никогда не сработает, — человек
-        # будет ждать его каждое утро и не дождётся.
-        if schedule and protocol_schedule.parse(schedule) is None:
-            return {
-                "success": False,
-                "error": "Не понял расписание. Напишите, например: "
-                         "«по будням в 09:00» или «каждый день в 23:00»",
-            }
-
-        protocol = Protocol.from_dict({
-            "name": name,
-            "steps": steps,
-            "phrases": phrases or [],
-            "description": description,
-            "schedule": schedule,
-        })
-
-        if not protocol.steps:
-            return {"success": False, "error": "В протоколе нет ни одного шага"}
-
-        if len(protocol.steps) > MAX_STEPS:
-            return {"success": False, "error": f"Слишком много шагов, предел — {MAX_STEPS}"}
-
+            description: str = "", schedule: str = "", enabled: bool = True,
+            repeat_count: int = 1, stop_on_error: bool = True) -> Dict[str, Any]:
+        try:
+            protocol = self._validate(dict(name=name, steps=steps, phrases=phrases or [], description=description,
+                                          schedule=schedule, enabled=enabled, repeat_count=repeat_count, stop_on_error=stop_on_error))
+        except (ValueError, TypeError) as error:
+            return {"success": False, "error": str(error)}
         with self._lock:
-            self._items.append(protocol)
-            self._save()
+            if self._find(protocol.name):
+                return {"success": False, "error": f"Протокол «{protocol.name}» уже есть"}
+            error = self._commit([*self._items, protocol])
+            if error:
+                return {"success": False, "error": error}
 
         return {"success": True, "protocol": protocol.to_dict()}
 
-    def update(self, name: str, **changes) -> Dict[str, Any]:
-        protocol = self.get(name)
-        if not protocol:
-            return {"success": False, "error": f"Протокол «{name}» не найден"}
+    def update(self, original_name: str, **changes) -> Dict[str, Any]:
+        return self._update(name=original_name, changes=changes)
 
+    def update_by_id(self, protocol_id: str, **changes) -> Dict[str, Any]:
+        return self._update(protocol_id=protocol_id, changes=changes)
+
+    def _update(self, name: str = "", protocol_id: str = "", changes: Optional[Dict] = None) -> Dict[str, Any]:
         with self._lock:
-            if "steps" in changes:
-                fresh = Protocol.from_dict({"name": protocol.name, "steps": changes["steps"]})
-                if not fresh.steps:
-                    return {"success": False, "error": "В протоколе нет ни одного шага"}
-                if len(fresh.steps) > MAX_STEPS:
-                    return {"success": False, "error": f"Слишком много шагов, предел — {MAX_STEPS}"}
-                protocol.steps = fresh.steps
-
-            if "phrases" in changes:
-                protocol.phrases = [p for p in changes["phrases"] if isinstance(p, str) and p.strip()]
-
-            if "description" in changes:
-                protocol.description = changes["description"] or ""
-
-            if "enabled" in changes:
-                protocol.enabled = bool(changes["enabled"])
-
-            if "schedule" in changes:
-                строка = (changes["schedule"] or "").strip()
-
-                if not строка:
-                    # Пустая строка снимает расписание: протокол снова ждёт,
-                    # пока его позовут.
-                    protocol.schedule = None
-                else:
-                    разобранное = protocol_schedule.parse(строка)
-                    if разобранное is None:
-                        return {
-                            "success": False,
-                            "error": "Не понял расписание. Напишите, например: "
-                                     "«по будням в 09:00» или «каждый день в 23:00»",
-                        }
-                    protocol.schedule = разобранное
-
-            if changes.get("name"):
-                protocol.name = changes["name"].strip()
-
-            self._save()
-
-        return {"success": True, "protocol": protocol.to_dict()}
+            protocol = self._find(name, protocol_id)
+            if protocol is None:
+                return {"success": False, "error": "Протокол не найден"}
+            allowed = {key: value for key, value in (changes or {}).items() if key in
+                       {"name", "steps", "phrases", "description", "enabled", "schedule", "repeat_count", "stop_on_error"}}
+            try:
+                candidate = self._validate({**protocol.to_dict(), **allowed})
+            except (ValueError, TypeError) as error:
+                return {"success": False, "error": str(error)}
+            if any(p.id != protocol.id and normalize(p.name) == normalize(candidate.name) for p in self._items):
+                return {"success": False, "error": f"Протокол «{candidate.name}» уже есть"}
+            items = [candidate if p.id == protocol.id else p for p in self._items]
+            error = self._commit(items)
+            if error:
+                return {"success": False, "error": error}
+            return {"success": True, "protocol": candidate.to_dict()}
 
     def delete(self, name: str) -> Dict[str, Any]:
-        protocol = self.get(name)
-        if not protocol:
-            return {"success": False, "error": f"Протокол «{name}» не найден"}
+        return self._delete(name=name)
 
+    def delete_by_id(self, protocol_id: str) -> Dict[str, Any]:
+        return self._delete(protocol_id=protocol_id)
+
+    def _delete(self, name: str = "", protocol_id: str = "") -> Dict[str, Any]:
         with self._lock:
-            self._items = [p for p in self._items if p.id != protocol.id]
-            self._save()
-
-        return {"success": True, "message": f"Протокол «{protocol.name}» удалён"}
+            protocol = self._find(name, protocol_id)
+            if protocol is None:
+                return {"success": False, "error": "Протокол не найден"}
+            error = self._commit([p for p in self._items if p.id != protocol.id])
+            return {"success": False, "error": error} if error else {"success": True, "message": f"Протокол «{protocol.name}» удалён"}
 
     def mark_run(self, protocol: Protocol) -> None:
-        with self._lock:
-            protocol.runs += 1
-            protocol.last_run = datetime.now().isoformat(timespec="seconds")
-            self._save()
+        self._mark(protocol.id, successful=True)
 
     def mark_attempt(self, protocol: Protocol) -> None:
         """
@@ -402,9 +424,19 @@ class ProtocolStore:
         подряд. А в счётчике запусков ему делать нечего: он не выполнился, и
         цифра рядом с именем должна об этом молчать.
         """
+        self._mark(protocol.id, successful=False)
+
+    def _mark(self, protocol_id: str, successful: bool) -> None:
         with self._lock:
-            protocol.last_run = datetime.now().isoformat(timespec="seconds")
-            self._save()
+            protocol = self._find(protocol_id=protocol_id)
+            if protocol is None:
+                return
+            candidate = Protocol.from_dict(protocol.to_dict())
+            candidate.runs += int(successful)
+            candidate.last_run = datetime.now().isoformat(timespec="seconds")
+            error = self._commit([candidate if p.id == protocol_id else p for p in self._items])
+            if error:
+                raise OSError(error)
 
     # ---- поиск по фразе ----
 
@@ -454,6 +486,10 @@ def _refuse(protocol: Protocol, depth: int) -> Optional[RunResult]:
 
     if not protocol.enabled:
         return RunResult(name=protocol.name, error="протокол отключён")
+    if not 1 <= protocol.repeat_count <= MAX_REPEATS or not any(step.enabled for step in protocol.steps):
+        return RunResult(name=protocol.name, error="нет включённых шагов или неверное число повторов")
+    if len(protocol.steps) > MAX_STEPS:
+        return RunResult(name=protocol.name, error=f"слишком много шагов, предел — {MAX_STEPS}")
 
     return None
 
@@ -461,8 +497,9 @@ def _refuse(protocol: Protocol, depth: int) -> Optional[RunResult]:
 async def run_async(protocol: Protocol,
                     execute: Callable[[str], Any],
                     sleep: Optional[Callable[[float], Any]] = None,
-                    stop_on_error: bool = True,
-                    depth: int = 0) -> RunResult:
+                    stop_on_error: Optional[bool] = None,
+                    depth: int = 0,
+                    progress: Optional[Callable[[Dict[str, Any]], None]] = None) -> RunResult:
     """
     То же, что `run`, но для исполнителя-корутины.
 
@@ -476,19 +513,27 @@ async def run_async(protocol: Protocol,
     if refusal is not None:
         return refusal
 
-    result = RunResult(name=protocol.name)
-
-    for index, step in enumerate(protocol.steps):
+    result = RunResult(name=protocol.name, total=sum(s.enabled for s in protocol.steps) * protocol.repeat_count)
+    stop_on_error = protocol.stop_on_error if stop_on_error is None else stop_on_error
+    for iteration, index, step in _execution_steps(protocol):
+        # Command coroutines may finish without yielding. Let status/cancel
+        # requests run between commands even when all pauses are zero.
+        await asyncio.sleep(0)
+        if progress:
+            progress({"current": len(result.steps) + 1, "total": result.total, "text": step.text, "iteration": iteration})
         try:
             answer = await execute(step.text)
             ok, response = _read_answer(answer)
         except Exception as e:
             ok, response = False, str(e)
 
-        result.steps.append(StepResult(text=step.text, ok=ok, response=response))
+        result.steps.append(StepResult(text=step.text, ok=ok, response=response, index=index, iteration=iteration))
+        if progress:
+            progress({"current": len(result.steps), "total": result.total, "text": step.text, "iteration": iteration,
+                      "step": asdict(result.steps[-1])})
 
         if not ok and stop_on_error:
-            result.stopped_at = index
+            result.stopped_at = len(result.steps) - 1
             return result
 
         if step.pause and sleep:
@@ -500,7 +545,7 @@ async def run_async(protocol: Protocol,
 def run(protocol: Protocol,
         execute: Callable[[str], Any],
         sleep: Optional[Callable[[float], Any]] = None,
-        stop_on_error: bool = True,
+        stop_on_error: Optional[bool] = None,
         depth: int = 0) -> RunResult:
     """
     Выполнить протокол, отдавая каждый шаг наружу.
@@ -519,25 +564,32 @@ def run(protocol: Protocol,
     if refusal is not None:
         return refusal
 
-    result = RunResult(name=protocol.name)
-
-    for index, step in enumerate(protocol.steps):
+    result = RunResult(name=protocol.name, total=sum(s.enabled for s in protocol.steps) * protocol.repeat_count)
+    stop_on_error = protocol.stop_on_error if stop_on_error is None else stop_on_error
+    for iteration, index, step in _execution_steps(protocol):
         try:
             answer = execute(step.text)
             ok, response = _read_answer(answer)
         except Exception as e:
             ok, response = False, str(e)
 
-        result.steps.append(StepResult(text=step.text, ok=ok, response=response))
+        result.steps.append(StepResult(text=step.text, ok=ok, response=response, index=index, iteration=iteration))
 
         if not ok and stop_on_error:
-            result.stopped_at = index
+            result.stopped_at = len(result.steps) - 1
             return result
 
         if step.pause and sleep:
             sleep(step.pause)
 
     return result
+
+
+def _execution_steps(protocol: Protocol):
+    for iteration in range(1, protocol.repeat_count + 1):
+        for index, step in enumerate(protocol.steps):
+            if step.enabled:
+                yield iteration, index, step
 
 
 def _read_answer(answer: Any) -> tuple[bool, str]:

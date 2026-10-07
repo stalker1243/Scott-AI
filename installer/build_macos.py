@@ -98,6 +98,8 @@ def build_icns(target: Path) -> bool:
     исходники = {
         "ic07": ROOT / "ScottAI_avalonia" / "Assets" / "icon-128.png",
         "ic08": ROOT / "ScottAI_avalonia" / "Assets" / "icon-256.png",
+        "ic09": ROOT / "ScottAI_avalonia" / "Assets" / "icon-512.png",
+        "ic10": ROOT / "ScottAI_avalonia" / "Assets" / "icon-1024.png",
     }
 
     куски = []

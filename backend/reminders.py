@@ -140,7 +140,15 @@ ABSOLUTE_DAYPART_WORD = re.compile(
 )
 
 ABSOLUTE_HOUR_WORD = re.compile(
-    rf"(?:в|к|на)\s+(?P<hour>{HOUR_WORDS})(?:\s+(?:часов|часа|час|часам))?\b",
+    rf"\b(?:в|к|на)\s+(?P<hour>{HOUR_WORDS})(?:\s+(?:часов|часа|час|часам))?\b"
+    r"(?!\s*(?:%|процент\w*))",
+    re.IGNORECASE,
+)
+
+# Whisper can write "в девять" as "в 9" without adding "часов".
+# Do not extract a partial decimal, clock time, or percentage as an hour.
+ABSOLUTE_BARE_HOUR = re.compile(
+    r"\b(?:в|к)\s+(?P<hour>\d{1,2})\b(?!\d|[.,:]\d|\s*(?:%|процент\w*))",
     re.IGNORECASE,
 )
 
@@ -210,7 +218,8 @@ def parse_time(text: str, now: Optional[datetime] = None) -> Optional[datetime]:
              or ABSOLUTE_DAYPART.search(lowered)
              or ABSOLUTE_DAYPART_WORD.search(lowered)
              or ABSOLUTE_HOUR.search(lowered)
-             or ABSOLUTE_HOUR_WORD.search(lowered))
+             or ABSOLUTE_HOUR_WORD.search(lowered)
+             or ABSOLUTE_BARE_HOUR.search(lowered))
     if match:
         # Час мог прийти словом: «в восемь вечера».
         сказанный_час = match.group("hour")
@@ -250,7 +259,7 @@ def extract_subject(text: str) -> str:
     """
     cleaned = text
     for pattern in (*(p for p, _ in FIXED_DELAYS), RELATIVE, ABSOLUTE, ABSOLUTE_HOUR,
-                    ABSOLUTE_DAYPART, ABSOLUTE_DAYPART_WORD, ABSOLUTE_HOUR_WORD,
+                    ABSOLUTE_DAYPART, ABSOLUTE_DAYPART_WORD, ABSOLUTE_HOUR_WORD, ABSOLUTE_BARE_HOUR,
                     TOMORROW, DAYPART):
         cleaned = pattern.sub(" ", cleaned)
 
@@ -279,7 +288,7 @@ def strip_time(text: str) -> str:
     """
     cleaned = text
     for pattern in (*(p for p, _ in FIXED_DELAYS), RELATIVE, ABSOLUTE, ABSOLUTE_HOUR,
-                    ABSOLUTE_DAYPART, ABSOLUTE_DAYPART_WORD, ABSOLUTE_HOUR_WORD,
+                    ABSOLUTE_DAYPART, ABSOLUTE_DAYPART_WORD, ABSOLUTE_HOUR_WORD, ABSOLUTE_BARE_HOUR,
                     TOMORROW, DAYPART):
         cleaned = pattern.sub(" ", cleaned)
 

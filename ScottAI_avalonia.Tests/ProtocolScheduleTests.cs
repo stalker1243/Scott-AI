@@ -13,6 +13,7 @@ namespace ScottAI.Avalonia.Tests;
 /// расписания у него нет. Человек при этом будет уверен, что Scott разбудит его
 /// в девять.
 /// </summary>
+[Collection("avalonia")]
 public class ProtocolScheduleTests
 {
     private static Protocol Разобрать(string json) =>

@@ -12,6 +12,7 @@ namespace ScottAI.Avalonia.Tests;
 /// умеет, — и список из четырёх строк создавал впечатление, что умеет он ровно
 /// четыре вещи.
 /// </summary>
+[Collection("avalonia")]
 public class HomeExamplesTests
 {
     [Fact]

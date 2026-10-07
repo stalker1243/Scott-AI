@@ -6,6 +6,7 @@
 """
 
 from typing import Dict
+import asyncio
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -91,7 +92,7 @@ async def start() -> Dict:
     if scott_runtime.listener is None:
         return _unavailable()
 
-    result = scott_runtime.listener.start()
+    result = await asyncio.to_thread(scott_runtime.listener.start)
     if not result.get("success"):
         return JSONResponse(status_code=503, content=result)
     return {**result, **scott_runtime.listener.status()}
@@ -102,13 +103,14 @@ async def stop() -> Dict:
     """Перестать слушать."""
     if scott_runtime.listener is None:
         return _unavailable()
-    return {**scott_runtime.listener.stop(), **scott_runtime.listener.status()}
+    result = await asyncio.to_thread(scott_runtime.listener.stop)
+    return {**result, **scott_runtime.listener.status()}
 
 
 @router.get("/devices")
 async def devices() -> Dict:
     """Микрофоны, доступные в системе, — чтобы выбрать нужный, если их несколько."""
-    return {"success": True, "devices": listener_module.list_input_devices()}
+    return {"success": True, "devices": await asyncio.to_thread(listener_module.list_input_devices)}
 
 @router.post("/say")
 async def say_as_heard(request: Dict) -> Dict:
@@ -136,7 +138,7 @@ async def say_as_heard(request: Dict) -> Dict:
     listener = scott_runtime.listener
 
     # Тот же путь, которым идут настоящие услышанные фразы.
-    listener._dispatch(text)
+    await asyncio.to_thread(listener._dispatch, text)
 
     состояние = listener.status()
 

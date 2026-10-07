@@ -1,0 +1,55 @@
+name: Проверки выпуска Qt
+
+on:
+  push:
+    branches: [new-launcher]
+    tags: ['v2.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend на чистой Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Библиотеки для CPU
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1+cpu
+          python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+      - name: Изолированные тесты backend
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python backend/run_tests.py
+
+  qt:
+    name: Qt на чистой Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.2'
+          arch: win64_mingw
+          tools: 'tools_mingw1310'
+          cache: true
+      - name: Собрать и проверить Qt
+        shell: pwsh
+        run: |
+          $compiler = Join-Path (Split-Path (Split-Path $env:QT_ROOT_DIR -Parent) -Parent) 'Tools/mingw1310_64'
+          $env:PATH = "$compiler/bin;$env:QT_ROOT_DIR/bin;" + $env:PATH
+          cmake -S ScottAI_qt -B ScottAI_qt/build -G Ninja "-DCMAKE_CXX_COMPILER=$compiler/bin/g++.exe" "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE) { throw 'Configure failed' }
+          cmake --build ScottAI_qt/build --parallel 4
+          if ($LASTEXITCODE) { throw 'Build failed' }
+          ctest --test-dir ScottAI_qt/build --output-on-failure
+          if ($LASTEXITCODE) { throw 'Qt checks failed' }

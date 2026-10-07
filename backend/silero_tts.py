@@ -43,6 +43,7 @@ SAMPLE_RATE = int(os.getenv("SILERO_SAMPLE_RATE", "48000"))
 _model = None
 _model_device = None
 _load_lock = threading.Lock()
+_synthesis_lock = threading.Lock()
 
 
 def _resolve_device() -> str:
@@ -68,7 +69,7 @@ def unload_model() -> None:
     вступало бы в силу только после перезапуска backend.
     """
     global _model, _model_device
-    with _load_lock:
+    with _synthesis_lock, _load_lock:
         _model = None
         _model_device = None
     print("🎙️ Модель Silero выгружена — поднимется заново на выбранном устройстве")
@@ -115,7 +116,14 @@ def get_model():
             speaker="v4_ru",
             trust_repo=True,
         )
-        model.to(torch.device(device))
+        try:
+            model.to(torch.device(device))
+        except Exception as error:
+            if device == 'cpu':
+                raise
+            print(f'⚠️ Silero: устройство {device} недоступно ({str(error)[:120]}), использую CPU')
+            model.to(torch.device('cpu'))
+            device = 'cpu'
         _model = model
         _model_device = device
         print(f"✅ Silero TTS готов на {device.upper()} (голоса: {', '.join(SILERO_VOICES)})")
@@ -129,13 +137,13 @@ def synthesize(text: str, out_path: str, voice: Optional[str] = None) -> Optiona
     Ошибку намеренно не пробрасываем: вызывающий код (ScottVoice.speak_to_file)
     по None откатывается на edge-tts, чтобы Scott не онемел из-за сбоя одного движка.
     """
+    global _model_device
     voice = voice or DEFAULT_SILERO_VOICE
     if voice not in SILERO_VOICES:
         print(f"⚠️ Неизвестный голос Silero «{voice}», беру {DEFAULT_SILERO_VOICE}")
         voice = DEFAULT_SILERO_VOICE
 
     try:
-        model = get_model()
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         # put_accent и put_yo передаются явно, хотя у модели они и так по
         # умолчанию включены: полагаться на чужое умолчание в том, от чего
@@ -143,14 +151,22 @@ def synthesize(text: str, out_path: str, voice: Optional[str] = None) -> Optiona
         # словах, где их можно определить, второе различает «е» и «ё» — без
         # него «ещё» звучит как «еще», а «всё» как «все», и смысл фразы
         # меняется на слух.
-        model.save_wav(
-            text=text,
-            speaker=voice,
-            sample_rate=SAMPLE_RATE,
-            audio_path=str(out_path),
-            put_accent=True,
-            put_yo=True,
-        )
+        with _synthesis_lock:
+            model = get_model()
+            options = dict(text=text, speaker=voice, sample_rate=SAMPLE_RATE,
+                           audio_path=str(out_path), put_accent=True, put_yo=True)
+            try:
+                model.save_wav(**options)
+            except RuntimeError as error:
+                message = str(error).casefold()
+                if _model_device == 'cpu' or not any(marker in message for marker in (
+                    'cuda', 'cudnn', 'cublas', 'hip', 'hsa', 'miopen', 'rocblas', 'out of memory', 'invalid device function')):
+                    raise
+                import torch
+                print(f'⚠️ Silero: ошибка GPU ({str(error)[:120]}), повторяю синтез на CPU')
+                model.to(torch.device('cpu'))
+                _model_device = 'cpu'
+                model.save_wav(**options)
         return str(out_path) if Path(out_path).exists() else None
     except Exception as e:
         print(f"❌ Silero TTS не смог синтезировать: {e}")

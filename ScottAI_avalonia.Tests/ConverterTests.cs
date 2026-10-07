@@ -17,6 +17,7 @@ namespace ScottAI.Avalonia.Tests;
 /// Ровно так и вышло с молчанием: значок был правильный, а подпись говорила
 /// «Тихий режим» на кнопке, которая означала совсем другое.
 /// </summary>
+[Collection("avalonia")]
 public class ConverterTests
 {
     private static readonly CultureInfo Культура = CultureInfo.InvariantCulture;

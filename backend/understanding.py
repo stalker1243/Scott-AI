@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import vocabulary
+import voice_commands
+from command_parser import ParsedCommand
 
 # ==================== Что может быть решено ====================
 
@@ -139,7 +141,7 @@ ACTION_COMMAND_TYPES = {
     'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
     'get_currency', 'get_weather', 'get_news', 'system_info', 'manage_window',
     'file_operation', 'system_command', 'open_url',
-    'list_processes', 'open_folder', 'reminder', 'write_code', 'run_code',
+    'list_processes', 'open_folder', 'reminder', 'write_code', 'run_code', 'voice_settings',
 }
 
 # Оболочка — никогда через общий путь.
@@ -250,6 +252,13 @@ def understand(text: str, *, intent_engine, parser, answerer,
                 intent=intent,
             )
 
+    voice_command = voice_commands.parse(strip_command_wrapper(text))
+    if voice_command is not None:
+        parsed = ParsedCommand('voice_settings', voice_command.action,
+                               {'voice_value': voice_command.value}, 1.0)
+        return Decision(kind='action', action='voice_settings', param=voice_command.action,
+                        parsed=parsed, intent=intent, reason='настройка озвучки Scott')
+
     # 0.5 Просьба запомнить.
     #
     #     Стоит до всего остального, потому что «запомни, что я работаю в
@@ -306,6 +315,8 @@ def understand(text: str, *, intent_engine, parser, answerer,
     #    пересечении их словарей уже не раз ловились ошибки.
     for service, markers, filler in WEB_SERVICES:
         if any(marker in lower for marker in markers):
+            if intent.is_question and not intent.is_command:
+                return Decision(kind='question', intent=intent, reason='вопрос о веб-сервисе')
             query = extract_web_query(text, filler | SITE_WORDS)
             return Decision(
                 kind='web',
@@ -351,13 +362,14 @@ def understand(text: str, *, intent_engine, parser, answerer,
 
     # 3. Вопрос — если это не явный приказ. Порядок важен: «Можешь открыть
     #    блокнот?» оформлено вопросом, но is_command об этом знает.
-    if not intent.is_command and answerer.is_question(text):
+    if not intent.is_command and (getattr(intent, 'is_question', False) or starts_with_question_word(lower)
+                                  or answerer.is_question(text)):
         return Decision(kind='question', reason="вопрос по форме", intent=intent)
 
     # 4. Разбор команды. Если намерение уверено, что это приказ, сначала
     #    снимаем вежливую обёртку: разборщик заметно надёжнее на чистом
     #    императиве («открой блокнот»), чем на «Скотт, можешь открыть блокнот?».
-    command_text = strip_command_wrapper(text) if intent.is_command else text
+    command_text = strip_command_wrapper(text)
     parsed = parser.parse(command_text)
     notes = []
 
@@ -498,7 +510,7 @@ def strip_command_wrapper(text: str) -> str:
     if t.endswith('?'):
         t = t[:-1].strip()
 
-    name_prefixes = ('скотт,', 'скотт ', 'scott,', 'scott ')
+    name_prefixes = ('скотт,', 'скотт ', 'скот,', 'скот ', 'скотти,', 'скотти ', 'scott,', 'scott ')
     lower_t = t.lower()
     for name in name_prefixes:
         if lower_t.startswith(name):

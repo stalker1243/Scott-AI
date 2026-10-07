@@ -20,6 +20,7 @@ namespace ScottAI.Avalonia.Tests;
 /// Проверки работают в своей временной папке, а не в настоящей: иначе они
 /// портили бы настройки человека, который их запускает.
 /// </summary>
+[Collection("avalonia")]
 public class SettingsStoreTests : IDisposable
 {
     private readonly string _папка;

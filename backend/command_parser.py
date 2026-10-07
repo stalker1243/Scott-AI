@@ -204,6 +204,7 @@ class CommandParser:
         Преобразует текст пользователя в структурированную команду
         """
         text = user_input.lower().strip()
+        text = re.sub(r'\bза\s+гугли\b', 'загугли', text)
         
         # Определяем тип команды
         command_type, confidence = self._detect_command_type(text)
@@ -284,7 +285,9 @@ class CommandParser:
         
         # Удаляем стоп-слова
         words = clean_text.split()
-        words = [w.strip() for w in words if w.strip() and w.lower() not in self.STOP_WORDS]
+        words = [w.strip(',!?;:') for w in words if w.strip(',!?;:') and w.strip(',!?;:').lower() not in self.STOP_WORDS]
+        if command_type in {'open_app', 'close_app', 'open_website', 'search'} and words:
+            words[-1] = words[-1].rstrip('.!?')
         
         # Специфическая логика для каждого типа команды
         if command_type == 'get_currency':
@@ -312,6 +315,12 @@ class CommandParser:
             # выделяет название приложения, а резолвинг (app_resolver.py)
             # ищет ЛЮБОЕ установленное приложение без списка.
             pass
+
+        elif command_type == 'close_app':
+            # The advertised "заверши процесс chrome" targets chrome itself.
+            # Do not send the grammatical object marker to the process finder.
+            if words and words[0] in {'процесс', 'процессы', 'программу', 'приложение'}:
+                words = words[1:]
 
         elif command_type == 'system_command':
             # Системные команды

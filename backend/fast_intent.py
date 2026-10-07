@@ -177,7 +177,7 @@ class FastIntentEngine:
         (re.compile(r'\bсделай\s+(?:по)?тише\b', re.I), 'volume_down'),
         (re.compile(r'\b(?:прибавь|подними|повысь|увеличь|добавь)\s+(?:громкость|громкости|звук|звука)\b', re.I), 'volume_up'),
         (re.compile(r'\b(?:убавь|опусти|понизь|уменьши|снизь)\s+(?:громкость|громкости|звук|звука)\b', re.I), 'volume_down'),
-        (re.compile(r'\b(?:прибавь|подними|повысь|увеличь)\s+ярк(?:ость|ости)\b', re.I), 'brightness_up'),
+        (re.compile(r'\b(?:прибавь?|подними|повысь|увеличь)\s+ярк(?:ость|ости)\b', re.I), 'brightness_up'),
         (re.compile(r'\b(?:убавь|опусти|понизь|уменьши)\s+ярк(?:ость|ости)\b', re.I), 'brightness_down'),
         (re.compile(r'^(?:скотт[,\s]+)?(?:сделай\s+)?ярче\b', re.I), 'brightness_up'),
         (re.compile(r'^(?:скотт[,\s]+)?(?:сделай\s+)?темнее\b', re.I), 'brightness_down'),

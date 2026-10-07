@@ -1,0 +1,5 @@
+[
+  {"id": "restrained", "title": "Сдержанный", "description": "Лёгкий цифровой оттенок, ближе к исходному голосу.", "carrier_hz": 58, "body_mix": 0.16, "presence": 0.06, "delay_ms": 4.2, "resonance": 0.04},
+  {"id": "scott", "title": "Scott Voice", "description": "Заметная металлическая окраска с сохранением ясных согласных.", "carrier_hz": 72, "body_mix": 0.32, "presence": 0.10, "delay_ms": 5.1, "resonance": 0.07},
+  {"id": "digital", "title": "Цифровой", "description": "Более выраженное роботизированное звучание.", "carrier_hz": 86, "body_mix": 0.52, "presence": 0.12, "delay_ms": 6.0, "resonance": 0.12}
+]

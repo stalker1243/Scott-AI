@@ -1,0 +1,5 @@
+/build/
+/build-*/
+/screenshots/
+/CMakeUserPresets.json
+*.user

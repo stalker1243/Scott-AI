@@ -1,7 +1,7 @@
 ; Установщик Scott AI.
 ;
-; Собирается из installer/dist — папки, которую готовит build.py: встроенный
-; Python, backend и лаунчер (self-contained, .NET у человека не нужен).
+; Собирается из installer/dist-qt или dist, которые готовит build.py:
+; встроенный Python, backend и лаунчер с необходимыми Qt/.NET библиотеками.
 ; Тяжёлого здесь нет: torch и модели речи ставятся при первом запуске, когда
 ; уже известно, есть ли в машине видеокарта NVIDIA.
 ;
@@ -22,10 +22,18 @@
 
 #define AppName "Scott AI"
 #define AppPublisher "Scott AI"
-#define AppExe "ScottAI.exe"
+#ifndef AppExe
+  #define AppExe "ScottAI.exe"
+#endif
 
 [Setup]
+#ifdef ValidationBuild
+; Изолированная проверка установщика не меняет регистрацию основной установки.
+AppId={{561D9490-1773-4732-9F3A-36012049AC31}
+CreateUninstallRegKey=no
+#else
 AppId={{8F3C5A21-6B4D-4E7A-9C12-5D8E3F1A7B60}
+#endif
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -34,11 +42,27 @@ DefaultDirName={autopf}\ScottAI
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
+#if AppExe == "ScottAIQt.exe"
+OutputBaseFilename=ScottAI-{#AppVersion}-Qt-setup
+#else
 OutputBaseFilename=ScottAI-{#AppVersion}-setup
+#endif
 SetupIconFile=..\ScottAI_avalonia\Assets\scott.ico
 UninstallDisplayIcon={app}\launcher\{#AppExe}
 UninstallDisplayName={#AppName}
+#if Ver >= EncodeVer(6, 6, 0)
+WizardStyle=modern dark polar includetitlebar
+#else
 WizardStyle=modern
+#endif
+WizardSizePercent=115,110
+WizardImageFile=assets\wizard-sidebar.bmp
+WizardSmallImageFile=assets\wizard-small.bmp
+WizardImageStretch=yes
+WizardImageBackColor=$160D09
+SetupLogging=yes
+DisableWelcomePage=no
+ShowLanguageDialog=no
 Compression=lzma2/max
 SolidCompression=yes
 
@@ -52,7 +76,6 @@ ExtraDiskSpaceRequired=5368709120
 ; с собой — логи, кэш речи, настройки backend, — и в Program Files это
 ; упиралось бы в права. Заодно человеку не нужно объяснять запрос UAC.
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
 
 ; Закрывать программы, которые держат наши файлы. Само по себе это не
 ; помогает против backend (у него нет окна), поэтому есть ещё и PrepareToInstall
@@ -102,8 +125,8 @@ Name: "{userstartup}\{#AppName}"; Filename: "{app}\launcher\{#AppExe}"; Tasks: a
 Filename: "{app}\launcher\{#AppExe}"; Description: "Запустить {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Всё, что программа создаёт во время работы: логи, кэш синтезированной речи,
-; данные backend. Без этого после удаления остаётся папка с мусором.
+; Удаляем рабочие библиотеки и временные файлы. История, вложения и настройки
+; сохраняются; удалить их можно отдельным выбором при удалении приложения.
 ;
 ; Отдельно — библиотеки, которые ставит мастер первого запуска. Их здесь не
 ; было при установке, поэтому сам Inno Setup их не удалит: проверено живьём —
@@ -111,16 +134,26 @@ Filename: "{app}\launcher\{#AppExe}"; Description: "Запустить {#AppName
 Type: filesandordirs; Name: "{app}\runtime\Lib\site-packages"
 Type: filesandordirs; Name: "{app}\runtime\Scripts"
 Type: filesandordirs; Name: "{app}\backend\logs"
-Type: filesandordirs; Name: "{app}\backend\data"
 Type: filesandordirs; Name: "{app}\backend\__pycache__"
 Type: filesandordirs; Name: "{app}\audio_cache"
 Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\reports"
 
 [Messages]
-russian.WelcomeLabel2=Будет установлен [name/ver].%n%nПри первом запуске Scott докачает библиотеки для распознавания речи и модели — от 1 до 4 ГБ в зависимости от того, есть ли в компьютере видеокарта NVIDIA. Понадобится интернет.
+russian.WelcomeLabel1=Добро пожаловать в Scott AI
+russian.WelcomeLabel2=Диалоги, голос и ваши любимые модели — в одном приложении.%n%nВыберите папку и ярлыки. API Token можно добавить после установки.%n%nДля первой настройки речи понадобится интернет и до 5 ГБ свободного места. Скачивание выполняется при первом запуске.
+russian.FinishedHeadingLabel=Scott AI установлен
+russian.FinishedLabel=Всё готово к первому запуску.%n%nВыберите модель, добавьте свой API Token и начните диалог. Настройки голоса и оформления доступны внутри приложения.
 
 [Code]
+procedure InitializeWizard;
+begin
+  WizardForm.WelcomeLabel1.Font.Size := 20;
+  WizardForm.WelcomeLabel1.Font.Style := [fsBold];
+  WizardForm.FinishedHeadingLabel.Font.Size := 20;
+  WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
+  WizardForm.NextButton.Caption := 'Далее';
+end;
 // Закрыть работающий Scott перед обновлением.
 //
 // Штатный механизм Windows (RestartManager) справляется с окном лаунчера, но
@@ -134,16 +167,21 @@ procedure StopRunningScott;
 var
   ResultCode: Integer;
   Script: String;
+  AppPrefix: String;
 begin
+  AppPrefix := ExpandConstant('{app}') + '\';
+  StringChangeEx(AppPrefix, '''', '''''', True);
   // Двойных кавычек в команде нет намеренно: она сама передаётся в кавычках,
   // и вложенные разорвали бы её. Поэтому вместо -Filter используется
   // Where-Object с одинарными кавычками.
   Script :=
-    'Get-Process -Name ''ScottAI'',''ScottAI.Avalonia'' -ErrorAction SilentlyContinue | ' +
-    'Stop-Process -Force -ErrorAction SilentlyContinue; ' +
     'Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ' +
-    'Where-Object { $_.Name -eq ''python.exe'' -and $_.ExecutablePath -like ''' +
-    ExpandConstant('{app}') + '\*'' } | ' +
+    'Where-Object { $_.Name -in @(''ScottAI.exe'',''ScottAI.Avalonia.exe'',''ScottAIQt.exe'') -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith(''' +
+    AppPrefix + ''',[System.StringComparison]::OrdinalIgnoreCase) } | ' +
+    'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; ' +
+    'Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ' +
+    'Where-Object { $_.Name -eq ''python.exe'' -and $_.ExecutablePath -and $_.ExecutablePath.StartsWith(''' +
+    AppPrefix + ''',[System.StringComparison]::OrdinalIgnoreCase) } | ' +
     'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }';
 
   Exec('powershell.exe',
@@ -168,9 +206,20 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   CachePath: String;
+  PersonalDataPath: String;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
+    PersonalDataPath := ExpandConstant('{app}') + '\backend\data';
+    // Тихое удаление всегда сохраняет данные. Кнопка «Нет» выбрана по умолчанию.
+    if (not UninstallSilent) and DirExists(PersonalDataPath) then
+    begin
+      if MsgBox('Удалить историю диалогов, вложения, память и настройки моделей?' + #13#10 + #13#10 +
+                'Настройки содержат введённые API Token. Выберите «Нет», чтобы сохранить ' +
+                'данные для повторной установки в эту же папку.',
+                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+        DelTree(PersonalDataPath, True, True, True);
+    end;
     CachePath := ExpandConstant('{%USERPROFILE}') + '\.cache';
 
     // В тихом режиме диалоги подавляются, и Inno отвечает на них утвердительно

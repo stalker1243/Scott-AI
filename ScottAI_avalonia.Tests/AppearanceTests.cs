@@ -75,6 +75,54 @@ public class AppearanceTests : IDisposable
     }
 
     [Fact]
+    public void Приборная_панель_включается_и_переживает_перезапуск()
+    {
+        var раздел = new AppearanceViewModel();
+
+        раздел.SetStyleDashboardCommand.Execute(null);
+
+        Assert.Equal(AppStyle.Dashboard, ThemeService.CurrentStyle);
+        Assert.Equal("dashboard", SettingsStore.Current.Style);
+
+        // Восстановление из файла — отдельный путь, и стиль, забытый в нём,
+        // молча откатывался бы к Classic при каждом запуске.
+        ThemeService.ApplyStyle(AppStyle.Classic);
+        ThemeService.ApplySaved(SettingsStore.Current);
+
+        Assert.Equal(AppStyle.Dashboard, ThemeService.CurrentStyle);
+    }
+
+    [Fact]
+    public void У_приборной_панели_свой_янтарный_акцент()
+    {
+        // Синий акцент Classic на графите с тёплым текстом выглядит чужим:
+        // стиль держится именно на температуре цвета.
+        var раздел = new AppearanceViewModel();
+
+        раздел.SetStyleDashboardCommand.Execute(null);
+
+        Assert.Equal("#FFB020", ThemeService.CurrentAccentHex);
+    }
+
+    [Theory]
+    [InlineData(AppStyle.Classic)]
+    [InlineData(AppStyle.Terminal)]
+    [InlineData(AppStyle.Dashboard)]
+    public void Непрозрачный_фон_совпадает_с_фоном_окна(AppStyle стиль)
+    {
+        // BgOpaque — фон мастера первого запуска, который обязан закрывать
+        // окно целиком. Раньше он выбирался своей цепочкой условий, и стиль,
+        // в неё не попавший, получал чужой цвет: графитовое окно с синим
+        // мастером поверх.
+        ThemeService.ApplyStyle(стиль);
+
+        var окно = (SolidColorBrush)global::Avalonia.Application.Current!.Resources["BgWindow"]!;
+        var мастер = (SolidColorBrush)global::Avalonia.Application.Current!.Resources["BgOpaque"]!;
+
+        Assert.Equal(окно.Color, мастер.Color);
+    }
+
+    [Fact]
     public void Смена_цвета_доходит_до_оформления_и_запоминается()
     {
         var раздел = new AppearanceViewModel();

@@ -10,19 +10,22 @@
 отсюда нельзя — импорты замкнулись бы в кольцо.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 try:
     from . import runtime as scott_runtime
     from . import protocols as protocols_module
+    from .protocol_jobs import ProtocolJobs
 except ImportError:
     import runtime as scott_runtime
     import protocols as protocols_module
+    from protocol_jobs import ProtocolJobs
 
 router = APIRouter(prefix="/protocols", tags=["protocols"])
+jobs = ProtocolJobs()
 
 
 def _store():
@@ -30,15 +33,19 @@ def _store():
 
 
 class StepIn(BaseModel):
-    text: str
-    pause: float = 0.0
+    text: str = Field(min_length=1, max_length=2000)
+    pause: float = Field(default=0.0, ge=0, le=60, allow_inf_nan=False)
+    enabled: bool = True
 
 
 class ProtocolIn(BaseModel):
     name: str
-    steps: List[Any] = []
-    phrases: List[str] = []
+    steps: List[Union[str, StepIn]] = Field(default_factory=list, min_length=1, max_length=40)
+    phrases: List[str] = Field(default_factory=list, max_length=20)
     description: str = ""
+    enabled: bool = True
+    repeat_count: int = Field(default=1, ge=1, le=20)
+    stop_on_error: bool = True
 
     # Расписание словами: «по будням в 09:00», «каждый день в 23:00».
     #
@@ -49,11 +56,13 @@ class ProtocolIn(BaseModel):
 
 class ProtocolPatch(BaseModel):
     name: Optional[str] = None
-    steps: Optional[List[Any]] = None
+    steps: Optional[List[Union[str, StepIn]]] = Field(default=None, min_length=1, max_length=40)
     phrases: Optional[List[str]] = None
     description: Optional[str] = None
     enabled: Optional[bool] = None
     schedule: Optional[str] = None
+    repeat_count: Optional[int] = Field(default=None, ge=1, le=20)
+    stop_on_error: Optional[bool] = None
 
 
 @router.get("")
@@ -65,6 +74,49 @@ async def list_protocols() -> Dict:
 
     items = sorted(store.all(), key=lambda p: p.created, reverse=True)
     return {"success": True, "protocols": [item.to_dict() for item in items]}
+
+
+@router.get("/jobs/current")
+async def current_job() -> Dict:
+    return {"success": True, "job": jobs.current()}
+
+
+@router.get("/jobs/{job_id}")
+async def get_job(job_id: str) -> Dict:
+    job = jobs.get(job_id)
+    return {"success": True, "job": job} if job else {"success": False, "error": "Запуск не найден"}
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str) -> Dict:
+    return jobs.cancel(job_id)
+
+
+@router.patch("/id/{protocol_id}")
+async def update_by_id(protocol_id: str, body: ProtocolPatch) -> Dict:
+    store = _store()
+    if store is None:
+        return {"success": False, "error": "Протоколы не загружены"}
+    return store.update_by_id(protocol_id, **body.model_dump(exclude_none=True))
+
+
+@router.delete("/id/{protocol_id}")
+async def delete_by_id(protocol_id: str) -> Dict:
+    store = _store()
+    if store is None:
+        return {"success": False, "error": "Протоколы не загружены"}
+    return store.delete_by_id(protocol_id)
+
+
+@router.post("/id/{protocol_id}/start")
+async def start_by_id(protocol_id: str) -> Dict:
+    store = _store()
+    protocol = store.get_by_id(protocol_id) if store else None
+    if protocol is None:
+        return {"success": False, "error": "Протокол не найден"}
+    if scott_runtime.run_protocol is None:
+        return {"success": False, "error": "Ассистент ещё не готов"}
+    return jobs.start(protocol, scott_runtime.run_protocol)
 
 
 @router.get("/{name}")
@@ -88,10 +140,13 @@ async def add_protocol(body: ProtocolIn) -> Dict:
 
     return store.add(
         name=body.name,
-        steps=body.steps,
+        steps=body.model_dump()["steps"],
         phrases=body.phrases,
         description=body.description,
         schedule=body.schedule,
+        enabled=body.enabled,
+        repeat_count=body.repeat_count,
+        stop_on_error=body.stop_on_error,
     )
 
 

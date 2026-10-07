@@ -21,6 +21,17 @@ pytestmark = pytest.mark.unit
 NOW = datetime(2026, 9, 5, 14, 0)
 
 
+@pytest.mark.parametrize('phrase', [
+    'установи громкость на сорок пять процентов',
+    'установи громкость на пять процентов',
+    'поставь яркость на десять процентов',
+    'поиск пять минут спустя',
+])
+def test_number_inside_word_or_percentage_is_not_a_time(phrase):
+    import reminders
+    assert reminders.parse_time(phrase, NOW) is None
+
+
 @pytest.fixture
 def rem():
     import reminders
@@ -66,6 +77,21 @@ def test_fixed_expressions(rem, phrase, expected):
 def test_absolute_time_today(rem):
     """Время, которое ещё не наступило, — сегодня."""
     assert rem.parse_time("напомни в 15:30 забрать заказ", NOW) == NOW.replace(hour=15, minute=30)
+
+
+@pytest.mark.parametrize('phrase', [
+    'Напомни, завтра в 9 позвонить маме.',
+    'напомни завтра к 9 позвонить маме',
+    'напомни позвонить маме завтра в 9.',
+])
+def test_digit_hour_without_unit_keeps_time_and_subject(rem, phrase):
+    assert rem.parse_time(phrase, NOW) == datetime(2026, 9, 6, 9)
+    assert rem.extract_subject(phrase) == 'позвонить маме'
+
+
+@pytest.mark.parametrize('phrase', ['в 9,5 процентов', 'в 9%', 'к 10 процентов'])
+def test_percentage_is_not_a_bare_hour(rem, phrase):
+    assert rem.parse_time(phrase, NOW) is None
 
 
 def test_absolute_time_moves_to_tomorrow(rem):

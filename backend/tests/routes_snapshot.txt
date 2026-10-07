@@ -1,10 +1,18 @@
+DELETE /chats
+DELETE /chats/{chat_id}
+DELETE /chats/{chat_id}/messages
 DELETE /memories/{memory_id}
 DELETE /projects/{project_id}
+DELETE /protocols/id/{protocol_id}
 DELETE /protocols/{name}
 DELETE /remote/devices/{device_id}
 GET /abilities
 GET /ai/memory-stats
 GET /ai/providers
+GET /chats
+GET /chats/assets/{asset_id}
+GET /chats/capabilities
+GET /chats/{chat_id}
 GET /ai/status
 GET /analytics/command-types
 GET /analytics/comprehensive
@@ -61,6 +69,8 @@ GET /profiles/list
 GET /profiles/stats
 GET /projects
 GET /protocols
+GET /protocols/jobs/current
+GET /protocols/jobs/{job_id}
 GET /protocols/{name}
 GET /reminders
 GET /remote/log
@@ -76,6 +86,9 @@ GET /versions/history
 GET /versions/items
 GET /versions/stats
 GET /voice/available
+GET /voice/install
+PATCH /chats/{chat_id}
+PATCH /protocols/id/{protocol_id}
 PATCH /protocols/{name}
 POST /ai/clear-memory
 POST /ai/configure
@@ -83,6 +96,8 @@ POST /ai/execute
 POST /ai/set-model
 POST /ai/temperature
 POST /ai/toggle
+POST /chats
+POST /chats/{chat_id}/messages
 POST /analytics/export
 POST /api/version/update-settings
 POST /ask
@@ -136,6 +151,7 @@ POST /macros/start-recording
 POST /macros/stop-recording
 POST /memories
 POST /memories/clear
+POST /memories/settings
 POST /open-program
 POST /personality
 POST /profiles/create
@@ -146,6 +162,8 @@ POST /projects
 POST /projects/{project_id}/current
 POST /projects/{project_id}/open
 POST /protocols
+POST /protocols/id/{protocol_id}/start
+POST /protocols/jobs/{job_id}/cancel
 POST /protocols/{name}/run
 POST /reminders/add
 POST /reminders/cancel
@@ -172,6 +190,11 @@ POST /voice/parse-macro
 POST /voice/parse-macro-action
 POST /voice/parse-rule
 POST /voice/select
+GET /voice/prepare
+POST /voice/prepare
+POST /voice/prepare/cancel
+POST /voice/install
+POST /voice/install/cancel
 POST /voice/suggest-name
 POST /web/github/search
 POST /web/youtube/search

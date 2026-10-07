@@ -15,9 +15,10 @@ torch зависит от того, есть ли в компьютере вид
 
 Запуск:
 
-    python installer/build.py                # собрать в installer/dist
+    python installer/build.py                # Qt: installer/dist-qt
     python installer/build.py --clean        # предварительно очистив
     python installer/build.py --installer    # и упаковать в установочный .exe
+    python installer/build.py --launcher avalonia --installer  # прежний интерфейс
 """
 
 from __future__ import annotations
@@ -123,6 +124,47 @@ def copy_backend(dest: Path) -> None:
     log(f"backend скопирован: {len(list(target.glob('*.py')))} модулей")
 
 
+def copy_voice_assets(dest: Path) -> None:
+    """Only the optional worker and synthetic reference; no weights or personal data."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('voice_install_builder', ROOT/'backend/scott_voice_install.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    target = dest/'voice-assets'
+    if target.exists():
+        current = module.asset_sources(ROOT)
+        previous = module.asset_sources(dest)
+        if any(module.checksum(current[name]) != module.checksum(previous[name]) for name in module.ASSETS):
+            raise RuntimeError('Пакет Scott Voice изменился; пересоберите установщик с --clean.')
+        log('пакет Scott Voice уже проверен')
+        return
+    result = module.bundle_assets(target, ROOT)
+    log(f"пакет Scott Voice: {result['files']} файлов, {result['bytes']/1024:.0f} КиБ; веса ставятся отдельно")
+
+
+def build_qt_launcher(dest: Path, qt_root: Path, compiler_root: Path) -> None:
+    project = ROOT / 'ScottAI_qt'
+    output = dest / 'launcher'
+    output.mkdir(parents=True, exist_ok=True)
+    tool = qt_root / 'bin' / 'windeployqt.exe'
+    if not tool.is_file() or not (compiler_root / 'bin' / 'g++.exe').is_file():
+        raise RuntimeError('Не найден Qt / MinGW. Укажите --qt-root и --compiler-root')
+    subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(project / 'build.ps1'),
+                    '-QtRoot', str(qt_root), '-CompilerRoot', str(compiler_root)], check=True, cwd=ROOT)
+    executable = output / 'ScottAIQt.exe'
+    shutil.copy2(project / 'build' / 'ScottAIQt.exe', executable)
+    environment = dict(os.environ)
+    environment['PATH'] = str(compiler_root / 'bin') + os.pathsep + str(qt_root / 'bin') + os.pathsep + environment.get('PATH', '')
+    subprocess.run([str(tool), '--release', '--no-translations', '--compiler-runtime', '--qmldir', str(project),
+                    '--dir', str(output), str(executable)], check=True, env=environment, cwd=ROOT)
+    licenses = dest/'licenses'
+    shutil.copytree(INSTALLER/'licenses',licenses,dirs_exist_ok=True)
+    sbom = qt_root/'sbom'
+    if sbom.is_dir():
+        shutil.copytree(sbom,licenses/'qt-sbom',dirs_exist_ok=True)
+    log(f'Qt-лаунчер и библиотеки подготовлены: {output}')
+
+
 def build_launcher(dest: Path) -> None:
     """
     Собрать лаунчер так, чтобы он не требовал установленного .NET.
@@ -158,10 +200,13 @@ def copy_extras(dest: Path) -> None:
     # VERSION.json обязателен: по нему программа понимает, какая версия
     # установлена. Без него она считает свою версию нулевой и предлагает
     # обновиться на ту, что уже стоит.
-    for name in (".env.example", "README.md", "VERSION.json"):
+    for name in (".env.example", "README.md", "VERSION.json", "LICENSE"):
         source = ROOT / name
         if source.exists():
             shutil.copy2(source, dest / name)
+    notes = ROOT/'docs'/f'release-notes-{read_version()}.md'
+    if notes.is_file():
+        shutil.copy2(notes,dest/'RELEASE-NOTES.md')
 
     log("сопроводительные файлы скопированы")
 
@@ -198,6 +243,7 @@ def find_iscc() -> Optional[Path]:
     каким способом его поставили.
     """
     candidates = [
+        CACHE / 'inno' / 'ISCC.exe',
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe",
         Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"),
         Path(r"C:\Program Files\Inno Setup 6\ISCC.exe"),
@@ -210,7 +256,7 @@ def find_iscc() -> Optional[Path]:
     return Path(found) if found else None
 
 
-def build_installer(dest: Path) -> bool:
+def build_installer(dest: Path, app_exe: str = 'ScottAI.exe') -> bool:
     """Упаковать готовый дистрибутив в один установочный .exe."""
     iscc = find_iscc()
     if iscc is None:
@@ -219,6 +265,8 @@ def build_installer(dest: Path) -> bool:
         return False
 
     version = read_version()
+    if not (INSTALLER / 'assets' / 'wizard-sidebar.bmp').is_file():
+        subprocess.run(['powershell.exe', '-NoProfile', '-File', str(INSTALLER / 'export_wizard_art.ps1')], check=True)
     script = INSTALLER / "scott.iss"
     release = INSTALLER / "release"
     release.mkdir(parents=True, exist_ok=True)
@@ -230,6 +278,7 @@ def build_installer(dest: Path) -> bool:
             f"/DAppVersion={version}",
             f"/DDistDir={dest}",
             f"/DOutputDir={release}",
+            f"/DAppExe={app_exe}",
             str(script),
         ],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -242,7 +291,7 @@ def build_installer(dest: Path) -> bool:
         print(result.stderr[-1000:])
         return False
 
-    package = release / f"ScottAI-{version}-setup.exe"
+    package = release / f"ScottAI-{version}{'-Qt' if app_exe == 'ScottAIQt.exe' else ''}-setup.exe"
     if package.exists():
         log(f"установщик готов: {package} ({package.stat().st_size / 1024 ** 2:.0f} МБ)")
     return True
@@ -253,26 +302,45 @@ def main() -> int:
     parser.add_argument("--clean", action="store_true", help="очистить папку сборки перед началом")
     parser.add_argument("--skip-launcher", action="store_true", help="не собирать лаунчер (быстрее для проверки)")
     parser.add_argument("--installer", action="store_true", help="упаковать результат в установочный .exe")
+    parser.add_argument('--launcher', choices=['qt', 'avalonia'], default='qt', help='лаунчер для Windows (по умолчанию Qt)')
+    parser.add_argument('--qt-root', type=Path, default=Path(r'C:\Qt\6.11.2\mingw_64'))
+    parser.add_argument('--compiler-root', type=Path, default=Path(r'C:\Qt\Tools\mingw1310_64'))
+    parser.add_argument('--output', type=Path, help='новая папка дистрибутива внутри проекта; не перезаписывает существующую')
     args = parser.parse_args()
+    destination = INSTALLER / 'dist-qt' if args.launcher == 'qt' else DIST
+    if args.output is not None:
+        destination = args.output.resolve()
+        if not destination.is_relative_to(ROOT.resolve()) or destination==ROOT.resolve():
+            parser.error('--output должен находиться внутри проекта')
+        if destination.exists():
+            parser.error('--output уже существует; выберите новую папку')
+        if args.clean:
+            parser.error('--output создаёт новую папку и не требует --clean')
 
-    if args.clean and DIST.exists():
-        shutil.rmtree(DIST)
+    if args.clean and destination.exists():
+        if destination.resolve().parent != INSTALLER.resolve():
+            raise RuntimeError('Папка сборки должна находиться внутри installer')
+        shutil.rmtree(destination)
         log("папка сборки очищена")
 
-    DIST.mkdir(parents=True, exist_ok=True)
+    destination.mkdir(parents=True, exist_ok=True)
 
     print("Собираю дистрибутив Scott AI")
-    prepare_python(DIST)
-    copy_backend(DIST)
-    copy_extras(DIST)
+    prepare_python(destination)
+    copy_backend(destination)
+    copy_voice_assets(destination)
+    copy_extras(destination)
     if not args.skip_launcher:
-        build_launcher(DIST)
-    report_size(DIST)
+        if args.launcher == 'qt':
+            build_qt_launcher(destination, args.qt_root, args.compiler_root)
+        else:
+            build_launcher(destination)
+    report_size(destination)
 
-    if args.installer and not build_installer(DIST):
+    if args.installer and not build_installer(destination, 'ScottAIQt.exe' if args.launcher == 'qt' else 'ScottAI.exe'):
         return 1
 
-    print(f"\nГотово: {DIST}")
+    print(f"\nГотово: {destination}")
     return 0
 
 

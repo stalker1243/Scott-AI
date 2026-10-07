@@ -114,3 +114,25 @@ def test_тишина_остаётся_тишиной():
 
     assert not np.any(np.isnan(итог))
     assert float(np.max(np.abs(итог))) == 0.0
+
+
+@pytest.mark.parametrize('character', list(voice_character.CHARACTERS))
+@pytest.mark.parametrize('size', [0, 12, 120])
+def test_short_fragments_do_not_fail_or_change_length(character, size):
+    audio = np.ones(size, dtype=np.float32) * 0.1
+    output = voice_character.apply(audio, 24000, character)
+    assert len(output) == size
+    assert np.isfinite(output).all()
+
+
+def test_calm_keeps_voice_range_and_attenuates_rumble_and_harsh_top():
+    rate = 48000
+    t = np.arange(rate * 2) / rate
+    audio = sum(0.12 * np.sin(2 * np.pi * f * t) for f in (20, 180, 1400, 10000)).astype(np.float32)
+    output = voice_character.apply(audio, rate, 'calm')
+    def amplitude(signal, frequency):
+        return abs(np.sum(signal[4800:] * np.exp(-2j * np.pi * frequency * t[4800:]))) / len(signal[4800:])
+    assert amplitude(output, 180) > amplitude(audio, 180) * 0.75
+    assert amplitude(output, 1400) > amplitude(audio, 1400) * 0.75
+    assert amplitude(output, 20) < amplitude(audio, 20) * 0.15
+    assert amplitude(output, 10000) < amplitude(audio, 10000) * 0.4

@@ -1,0 +1,96 @@
+#include "BackendClient.h"
+#include "ProfileAvatar.h"
+#include <QtTest>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QTemporaryDir>
+#include <QPainter>
+#include <QFile>
+#include <memory>
+
+class ProfileTests : public QObject {
+    Q_OBJECT
+private slots:
+    void backendContract() {
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+        QJsonObject state{{"success", true}, {"name", "Before"}, {"about", "Original"}, {"style", "friendly"}, {"interests", QJsonArray{"Music"}}};
+        const QJsonArray styles{QJsonObject{{"id", "friendly"}, {"title", "Friendly"}}, QJsonObject{{"id", "brief"}, {"title", "Brief"}}};
+        bool failWrite = false, malformed = false, failRead = false; int posts = 0;
+        QJsonObject posted;
+        connect(&server, &QTcpServer::newConnection, this, [&] {
+            auto *socket = server.nextPendingConnection(); auto buffer = std::make_shared<QByteArray>();
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+            connect(socket, &QTcpSocket::readyRead, socket, [&, socket, buffer] {
+                *buffer += socket->readAll(); const int split = buffer->indexOf("\r\n\r\n"); if (split < 0) return;
+                int length = 0;
+                for (const auto &line : buffer->left(split).split('\n'))
+                    if (line.toLower().startsWith("content-length:")) length = line.mid(15).trimmed().toInt();
+                if (buffer->size() < split + 4 + length) return;
+                QJsonObject response; bool bad = false;
+                if (buffer->startsWith("GET /health ")) response = {{"status", "online"}};
+                else if (buffer->startsWith("GET /metrics ")) response = {{"metrics", QJsonObject{}}};
+                else if (buffer->startsWith("GET /listen/status ")) response = {{"listening", false}, {"available", false}};
+                else if (buffer->startsWith("GET /personality ")) {
+                    response = failRead ? QJsonObject{{"success", false}} : state;
+                    if (!failRead) response["styles"] = styles;
+                } else if (buffer->startsWith("POST /personality ")) {
+                    ++posts; posted = QJsonDocument::fromJson(buffer->mid(split + 4, length)).object();
+                    if (failWrite) { bad = true; response = {{"success", false}, {"message", "Save failed"}}; }
+                    else if (malformed) response = {{"success", true}};
+                    else { state = posted; state["success"] = true; state["name"] = posted["name"].toString().toUpper(); response = state; }
+                }
+                const auto body = QJsonDocument(response).toJson(QJsonDocument::Compact);
+                socket->write(QByteArray(bad ? "HTTP/1.1 500 Error\r\n" : "HTTP/1.1 200 OK\r\n") + "Content-Type: application/json\r\nConnection: close\r\nContent-Length: " + QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                socket->disconnectFromHost();
+            });
+        });
+        BackendClient client(QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort())));
+        QSignalSpy saved(&client, &BackendClient::profileSaved);
+        client.saveProfile("No read", "", "friendly", {}); QCOMPARE(posts, 0);
+        client.refresh(); QTRY_VERIFY(client.online()); client.refreshProfile(); QTRY_VERIFY(!client.profileBusy());
+        QVERIFY(client.profileReady()); QCOMPARE(posts, 0);
+        client.saveProfile("  alice  ", "  New bio  ", "brief", {" C++ "});
+        client.saveProfile("Double", "", "brief", {});
+        QTRY_VERIFY(!client.profileBusy()); QCOMPARE(posts, 1); QCOMPARE(saved.count(), 1);
+        QCOMPARE(posted.value("name").toString(), "alice"); QCOMPARE(posted.value("about").toString(), "New bio");
+        QCOMPARE(client.profile().value("name").toString(), "ALICE"); QVERIFY(!client.profile().value("styles").toList().isEmpty());
+        client.saveProfile("", QString(301, 'x'), "brief", {});
+        client.saveProfile("", "", "unknown", {});
+        client.saveProfile("", "", "brief", {"Same", "Same"});
+        QCOMPARE(posts, 1);
+        failWrite = true; client.saveProfile("Unsaved", "", "brief", {}); QTRY_VERIFY(!client.profileBusy());
+        QCOMPARE(client.profile().value("name").toString(), "ALICE"); QCOMPARE(saved.count(), 1); QVERIFY(!client.profileError().isEmpty());
+        failWrite = false; malformed = true; client.saveProfile("Bad", "", "brief", {}); QTRY_VERIFY(!client.profileBusy());
+        QCOMPARE(saved.count(), 1); QCOMPARE(client.profile().value("name").toString(), "ALICE");
+        malformed = false; client.saveProfile("", "", "friendly", {}); QTRY_VERIFY(!client.profileBusy());
+        QCOMPARE(client.profile().value("name").toString(), ""); QCOMPARE(saved.count(), 2); QVERIFY(client.profileError().isEmpty());
+        failRead = true; client.refreshProfile(); QTRY_VERIFY(!client.profileBusy()); QVERIFY(!client.profileReady());
+        const int previous = posts; client.saveProfile("Blocked", "", "friendly", {}); QCOMPARE(posts, previous);
+        failRead = false; client.refreshProfile(); QTRY_VERIFY(!client.profileBusy()); QVERIFY(client.profileReady());
+    }
+    void photoCropPersistenceAndFailures() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const auto picture = directory.path() + "/source.png";
+        QImage seed(400, 200, QImage::Format_RGB32); seed.fill(Qt::red);
+        { QPainter painter(&seed); painter.fillRect(200, 0, 200, 200, Qt::blue); }
+        QVERIFY(seed.save(picture));
+        const auto destination = directory.path() + "/profile";
+        ProfileAvatar avatar(destination);
+        QVERIFY(avatar.loadFile(picture)); QVERIFY(avatar.hasAvatar());
+        auto preview = avatar.preview(); QCOMPARE(preview.pixelColor(0, 0).alpha(), 0); QCOMPARE(preview.pixelColor(50, 110), QColor(Qt::red));
+        const auto source = avatar.source(); avatar.setCrop(2, 999, -999);
+        QCOMPARE(avatar.source(), source); QCOMPARE(avatar.crop().value("x").toDouble(), 110.0); QCOMPARE(avatar.crop().value("y").toDouble(), -110.0);
+        QVERIFY(avatar.save()); QVERIFY(!avatar.dirty());
+        ProfileAvatar restored(destination); QCOMPARE(restored.crop(), avatar.crop()); QCOMPARE(restored.preview(), avatar.preview());
+        restored.resetCrop(); QVERIFY(restored.dirty()); restored.revert(); QCOMPARE(restored.crop(), avatar.crop());
+        QFile bad(directory.path() + "/bad.png"); QVERIFY(bad.open(QIODevice::WriteOnly)); bad.write("invalid image"); bad.close();
+        QVERIFY(!restored.loadFile(bad.fileName())); QVERIFY(restored.hasAvatar()); QCOMPARE(restored.preview(), avatar.preview());
+        restored.remove(); QVERIFY(restored.save()); ProfileAvatar cleared(destination); QVERIFY(!cleared.hasAvatar()); QVERIFY(cleared.error().isEmpty());
+        ProfileAvatar unwritable(bad.fileName()); QVERIFY(unwritable.loadFile(picture)); QVERIFY(!unwritable.save()); QVERIFY(unwritable.dirty());
+        ProfileAvatar temporary(directory.path() + "/no-write", true); QVERIFY(temporary.loadFile(picture)); QVERIFY(temporary.save()); QVERIFY(!QFile::exists(directory.path() + "/no-write/avatar.json"));
+    }
+};
+QTEST_GUILESS_MAIN(ProfileTests)
+#include "ProfileTests.moc"

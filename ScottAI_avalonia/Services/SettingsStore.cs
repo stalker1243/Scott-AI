@@ -12,7 +12,7 @@ namespace ScottAI.Avalonia.Services;
 /// </summary>
 public sealed class LauncherSettings
 {
-    /// <summary>"classic" | "glass" | "terminal" — те же имена, что в SettingsViewModel.</summary>
+    /// <summary>"classic" | "glass" | "terminal" | "dashboard" — те же имена, что в AppearanceViewModel.</summary>
     public string Style { get; set; } = "classic";
 
     /// <summary>Значимо только для Classic: Glass и Terminal всегда тёмные.</summary>

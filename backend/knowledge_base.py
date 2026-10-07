@@ -4,10 +4,15 @@
 """
 
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 import requests
+try:
+    from .storage import atomic_write_text
+except ImportError:
+    from storage import atomic_write_text
 
 
 class KnowledgeBase:
@@ -15,6 +20,7 @@ class KnowledgeBase:
     
     def __init__(self, db_file: str = "scott_memory.json"):
         self.db_file = Path(db_file)
+        self._lock = threading.RLock()
         self._migrate_old_memory()
         self.memory = self.load_memory()
         self.conversation_history = []
@@ -42,7 +48,8 @@ class KnowledgeBase:
         try:
             if self.db_file.exists():
                 with open(self.db_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    stored = json.load(f)
+                    return {k: v for k, v in stored.items() if isinstance(v, dict)} if isinstance(stored, dict) else {}
         except Exception as e:
             print(f"⚠️ Не смог загрузить память: {e}")
         
@@ -51,27 +58,29 @@ class KnowledgeBase:
     def save_memory(self):
         """Сохранить память в файл"""
         try:
-            with open(self.db_file, 'w', encoding='utf-8') as f:
-                json.dump(self.memory, f, ensure_ascii=False, indent=2)
+            with self._lock:
+                atomic_write_text(self.db_file, json.dumps(self.memory, ensure_ascii=False, indent=2))
         except Exception as e:
             print(f"❌ Ошибка при сохранении памяти: {e}")
     
     def add_memory(self, key: str, value: str, category: str = "general"):
         """Добавить в память"""
-        self.memory[key] = {
-            "value": value,
-            "category": category,
-            "timestamp": datetime.now().isoformat(),
-            "access_count": 0
-        }
-        self.save_memory()
+        with self._lock:
+            self.memory[key] = {
+                "value": value,
+                "category": category,
+                "timestamp": datetime.now().isoformat(),
+                "access_count": 0
+            }
+            self.save_memory()
     
     def recall(self, key: str) -> Optional[str]:
         """Вспомнить из памяти"""
-        if key in self.memory:
-            self.memory[key]["access_count"] += 1
-            self.save_memory()
-            return self.memory[key]["value"]
+        with self._lock:
+            if key in self.memory:
+                self.memory[key]["access_count"] = self.memory[key].get("access_count", 0) + 1
+                self.save_memory()
+                return self.memory[key].get("value")
         return None
     
     def search_memory(self, query: str) -> Dict:
@@ -79,27 +88,29 @@ class KnowledgeBase:
         results = {}
         query_lower = query.lower()
         
-        for key, data in self.memory.items():
-            if query_lower in key.lower() or query_lower in data.get("value", "").lower():
-                results[key] = data
+        with self._lock:
+            for key, data in self.memory.items():
+                value = data.get("value", "")
+                if query_lower in key.lower() or query_lower in str(value).lower():
+                    results[key] = dict(data)
         
         return results
     
     def add_conversation(self, user_input: str, assistant_response: str):
         """Добавить в историю разговоров"""
-        self.conversation_history.append({
-            "user": user_input,
-            "assistant": assistant_response,
-            "timestamp": datetime.now().isoformat()
-        })
-        
-        # Сохранить последние 100 диалогов
-        if len(self.conversation_history) > 100:
-            self.conversation_history.pop(0)
+        with self._lock:
+            self.conversation_history.append({
+                "user": user_input,
+                "assistant": assistant_response,
+                "timestamp": datetime.now().isoformat()
+            })
+            if len(self.conversation_history) > 100:
+                self.conversation_history.pop(0)
     
     def get_conversation_context(self, last_n: int = 5) -> List[Dict]:
         """Получить контекст последних разговоров"""
-        return self.conversation_history[-last_n:]
+        with self._lock:
+            return [dict(turn) for turn in self.conversation_history[-last_n:]]
     
     def learn_from_question(self, question: str, answer: str):
         """Выучить новый факт"""

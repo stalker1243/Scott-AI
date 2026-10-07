@@ -25,12 +25,19 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from typing import Dict, List
 
+try:
+    from .storage import atomic_write_text
+except ImportError:
+    from storage import atomic_write_text
+
 CONFIG_PATH = Path(__file__).resolve().parent / "data" / "device_config.json"
 
-VALID_CHOICES = ("auto", "cuda", "mps", "cpu")
+VALID_CHOICES = ("auto", "cuda", "rocm", "mps", "cpu")
+_config_lock = threading.RLock()
 
 # Движки, умеющие считать на графике Apple.
 #
@@ -71,7 +78,7 @@ def _load_config() -> Dict[str, str]:
         if CONFIG_PATH.exists():
             data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                return {k: v for k, v in data.items() if v in VALID_CHOICES}
+                return {k: v for k, v in data.items() if k in ENV_VARS and v in VALID_CHOICES}
     except Exception:
         # Испорченный файл не повод падать при старте: вернёмся к автоматике.
         pass
@@ -79,15 +86,31 @@ def _load_config() -> Dict[str, str]:
 
 
 def _save_config(config: Dict[str, str]) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_text(CONFIG_PATH, json.dumps(config, ensure_ascii=False, indent=2))
+
+
+def rocm_build() -> bool:
+    """HIP builds reuse torch.cuda; its name alone does not identify NVIDIA."""
+    try:
+        import torch
+        return bool(getattr(getattr(torch, 'version', None), 'hip', None))
+    except Exception:
+        return False
+
+
+def rocm_available() -> bool:
+    try:
+        import torch
+        return rocm_build() and bool(torch.cuda.is_available())
+    except Exception:
+        return False
 
 
 def cuda_available() -> bool:
     try:
         import torch
 
-        return bool(torch.cuda.is_available())
+        return not rocm_build() and bool(torch.cuda.is_available())
     except Exception:
         return False
 
@@ -113,14 +136,18 @@ def mps_available() -> bool:
 def get_choice(engine: str) -> str:
     """Что выбрано для движка: auto, cuda или cpu (без учёта того, что доступно)."""
     forced = os.getenv(ENV_VARS.get(engine, ""), "").strip().lower()
-    if forced in ("cuda", "cpu"):
-        return forced
-    return _load_config().get(engine, "auto")
+    if forced in VALID_CHOICES:
+        choice = forced
+    else:
+        with _config_lock:
+            choice = _load_config().get(engine, "auto")
+    # Existing HIP users may have set the PyTorch device spelling "cuda".
+    return 'rocm' if choice == 'cuda' and rocm_build() else choice
 
 
 def is_locked_by_env(engine: str) -> bool:
     """Задано ли устройство переменной окружения — тогда кнопки в интерфейсе бессильны."""
-    return os.getenv(ENV_VARS.get(engine, ""), "").strip().lower() in ("cuda", "cpu")
+    return os.getenv(ENV_VARS.get(engine, ""), "").strip().lower() in VALID_CHOICES
 
 
 def resolve_device(engine: str) -> str:
@@ -138,10 +165,14 @@ def resolve_device(engine: str) -> str:
     if choice == "cuda":
         return "cuda" if cuda_available() else "cpu"
 
+    if choice == 'rocm':
+        # torch.device('rocm') is invalid. AMD HIP intentionally uses 'cuda'.
+        return 'cuda' if rocm_available() else 'cpu'
+
     if choice == "mps":
         return "mps" if engine in MPS_CAPABLE and mps_available() else "cpu"
 
-    # Автоматика: видеокарта NVIDIA, затем графика Apple, затем процессор.
+    # Автоматика: NVIDIA CUDA, AMD ROCm/HIP, Apple Metal, затем процессор.
     #
     # Порядок не спорный — на одной машине доступно что-то одно. Важнее другое:
     # на Mac процессор для синтеза заметно медленнее, а Metal там есть у всех
@@ -149,6 +180,8 @@ def resolve_device(engine: str) -> str:
     # человеку заведомо худшую работу без причины.
     if cuda_available():
         return "cuda"
+    if rocm_available():
+        return 'cuda'
     if engine in MPS_CAPABLE and mps_available():
         return "mps"
     return "cpu"
@@ -171,7 +204,10 @@ def set_choice(engine: str, choice: str) -> Dict:
         }
 
     if choice == "cuda" and not cuda_available():
-        return {"success": False, "message": "Видеокарта недоступна: CUDA не найдена"}
+        return {"success": False, "message": "Видеокарта NVIDIA недоступна: CUDA не найдена"}
+
+    if choice == 'rocm' and not rocm_available():
+        return {'success': False, 'message': 'AMD ROCm/HIP недоступен. Нужны совместимая видеокарта, драйвер AMD и сборка PyTorch для ROCm. Подробности: docs/amd-support.md.'}
 
     if choice == "mps":
         if engine not in MPS_CAPABLE:
@@ -183,10 +219,11 @@ def set_choice(engine: str, choice: str) -> Dict:
         if not mps_available():
             return {"success": False, "message": "Графика Apple недоступна: Metal не найден"}
 
-    config = _load_config()
-    config[engine] = choice
     try:
-        _save_config(config)
+        with _config_lock:
+            config = _load_config()
+            config[engine] = choice
+            _save_config(config)
     except OSError as e:
         return {"success": False, "message": f"Не удалось сохранить выбор: {e}"}
 
@@ -201,14 +238,35 @@ def set_choice(engine: str, choice: str) -> Dict:
     }
 
 
+def device_label(device: str) -> str:
+    return {'cpu': 'процессор', 'mps': 'графика Apple (Metal)',
+            'cuda': 'AMD (ROCm/HIP)' if rocm_build() else 'NVIDIA (CUDA)'}.get(device, device)
+
+
+def device_options(engine: str) -> List[Dict]:
+    return [
+        {'id': 'auto', 'title': 'Авто', 'available': True},
+        {'id': 'cuda', 'title': 'NVIDIA', 'available': cuda_available()},
+        {'id': 'rocm', 'title': 'AMD', 'available': rocm_available()},
+        *([{'id': 'mps', 'title': 'Apple', 'available': mps_available()}] if engine in MPS_CAPABLE else []),
+        {'id': 'cpu', 'title': 'Процессор', 'available': True},
+    ]
+
+
 def describe() -> Dict:
-    """Полная картина для интерфейса: что выбрано, что используется, что доступно."""
+    """Выбор, устройство для загрузки моделей и доступные ускорители."""
     return {
         "cuda_available": cuda_available(),
+        'rocm_available': rocm_available(),
+        'rocm_build': rocm_build(),
+        'mps_available': mps_available(),
         "engines": {
             engine: {
                 "choice": get_choice(engine),
                 "device": resolve_device(engine),
+                'device_label': device_label(resolve_device(engine)),
+                'backend': ('rocm' if rocm_build() else 'cuda') if resolve_device(engine) == 'cuda' else resolve_device(engine),
+                'options': device_options(engine),
                 "locked_by_env": is_locked_by_env(engine),
                 "env_var": ENV_VARS[engine],
             }

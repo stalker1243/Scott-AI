@@ -10,6 +10,7 @@ public enum AppStyle
     Classic,
     Glass,
     Terminal,
+    Dashboard,
 }
 
 /// <summary>
@@ -106,11 +107,39 @@ public static class ThemeService
         ["BorderColor"] = Color.FromArgb(51, 0, 255, 242),
     };
 
+    /// <summary>
+    /// Приборная панель: тёплый графит с янтарём.
+    ///
+    /// Единственный тёплый стиль из четырёх — остальные три холодные, синие
+    /// или бирюзовые, и между собой различаются в основном плотностью. Здесь
+    /// же меняется сама температура: серый уходит в коричневый, белый текст —
+    /// в цвет тёплой кости, синий акцент — в янтарь. Вид пульта, за которым
+    /// сидят, а не веб-страницы.
+    ///
+    /// Рамки нарочно ближе к фону, чем в Classic: карточки должны читаться
+    /// тонкими линиями-разделителями, а не коробками.
+    /// </summary>
+    private static readonly Dictionary<string, Color> Dashboard = new()
+    {
+        ["BgWindow"] = Color.Parse("#14120F"),
+        ["BgSidebar"] = Color.Parse("#100E0B"),
+        ["BgTopbar"] = Color.Parse("#100E0B"),
+        ["BgSurface"] = Color.Parse("#1C1915"),
+        ["BgElevated"] = Color.Parse("#262119"),
+        ["TextPrimary"] = Color.Parse("#F2E6D4"),
+        ["TextSecondary"] = Color.Parse("#C4B7A3"),
+        // Не темнее: на #1C1915 это ровно та граница, за которой подписи в
+        // 11 пунктов перестают читаться при дневном свете.
+        ["TextMuted"] = Color.Parse("#948875"),
+        ["BorderColor"] = Color.Parse("#3A332A"),
+    };
+
     private static readonly Dictionary<AppStyle, string> DefaultAccents = new()
     {
         [AppStyle.Classic] = "#3B82F6",
         [AppStyle.Glass] = "#60A5FA",
         [AppStyle.Terminal] = "#00FFF2",
+        [AppStyle.Dashboard] = "#FFB020",
     };
 
     /// <summary>Переключить стиль. dark значим только для Classic (Glass/Terminal — всегда тёмные, как в Tauri-версии).</summary>
@@ -123,6 +152,7 @@ public static class ThemeService
         {
             AppStyle.Glass => Glass,
             AppStyle.Terminal => Terminal,
+            AppStyle.Dashboard => Dashboard,
             _ => dark ? ClassicDark : ClassicLight,
         };
 
@@ -137,18 +167,22 @@ public static class ThemeService
             ApplyGlassOpacity();
         }
 
+        // Моноширинный — только у Terminal Pro. Приборной панели он не нужен:
+        // подписи там обычные, а «приборным» её делает цвет и тонкие линии.
         resources["AppFontFamily"] = style == AppStyle.Terminal
             ? new FontFamily("Consolas, Cascadia Code, Courier New, monospace")
             : new FontFamily("Segoe UI, sans-serif");
 
-        // В Classic и Terminal фон и так непрозрачный, но ресурс должен
-        // существовать всегда: мастер обращается к нему при любом стиле.
+        // Везде, кроме Glass, фон и так непрозрачный, но ресурс должен
+        // существовать всегда: мастер первого запуска обращается к нему при
+        // любом стиле.
+        //
+        // Берётся та же палитра, что уже выбрана выше. Раньше здесь стояла
+        // своя цепочка условий, и стиль, забытый в ней, получал чужой фон:
+        // мастер оказался бы синим поверх графитового окна.
         if (style != AppStyle.Glass)
         {
-            var opaque = style == AppStyle.Terminal
-                ? Terminal
-                : (dark ? ClassicDark : ClassicLight);
-            Application.Current!.Resources["BgOpaque"] = new SolidColorBrush(opaque["BgWindow"]);
+            resources["BgOpaque"] = new SolidColorBrush(palette["BgWindow"]);
         }
 
         SetAccent(Color.Parse(DefaultAccents[style]));
@@ -171,6 +205,7 @@ public static class ThemeService
         {
             "glass" => AppStyle.Glass,
             "terminal" => AppStyle.Terminal,
+            "dashboard" => AppStyle.Dashboard,
             _ => AppStyle.Classic,
         };
 

@@ -15,6 +15,7 @@ ScottAI при старте, а импортировать main.py роутер�
 
 import asyncio
 import os
+import threading
 from typing import Dict
 
 from fastapi import APIRouter, Request
@@ -30,6 +31,7 @@ except ImportError:
     from command_executor import get_command_executor
 
 router = APIRouter(tags=["ai"])
+_configuration_lock = threading.Lock()
 
 
 @router.get("/ai/status")
@@ -56,30 +58,52 @@ async def list_ai_providers():
     if not ia:
         return {"error": "ИИ-ассистент не инициализирован"}
 
+    providers = await asyncio.to_thread(ia.get_available_providers)
+    try:
+        from .model_capabilities import capabilities
+    except ImportError:
+        from model_capabilities import capabilities
     return {
-        "providers": ia.get_available_providers(),
+        "providers": providers,
         "active_provider": ia.api_provider,
         "active_model": ia.model,
+        "enabled": ia.enabled,
+        "capabilities": capabilities(ia.api_provider, ia.model),
     }
 
 @router.post("/ai/configure")
 async def configure_ai(request: Dict):
     """
     Переключить провайдера/модель ИИ, опционально со своим API-ключом.
-    Тело: {"provider": "Groq" | "OpenAI" | "DeepSeek", "model": "...", "api_key": "..." (опционально)}
+    Провайдеры: Groq, OpenAI, DeepSeek, Anthropic, OpenRouter.
+    Тело: {"provider": "...", "model": "...", "api_key": "..." (опционально)}
     """
     ia = get_intelligent_answerer()
     if not ia:
         return {"success": False, "error": "ИИ-ассистент не инициализирован"}
 
-    provider = request.get("provider", "").strip()
-    model = request.get("model", "").strip()
-    api_key = (request.get("api_key") or "").strip() or None
+    raw_key = request.get("api_key", "")
+    values = [request.get("provider", ""), request.get("model", ""), "" if raw_key is None else raw_key]
+    if any(not isinstance(value, str) for value in values):
+        return {"success": False, "error": "Провайдер, модель и API Token должны быть строками"}
+    provider, model, key_input = [value.strip() for value in values]
+    api_key = key_input or None
 
     if not provider or not model:
         return {"success": False, "error": "Провайдер и модель обязательны"}
+    if provider not in {"Groq", "OpenAI", "DeepSeek", "Anthropic", "OpenRouter"}:
+        return {"success": False, "error": "Неизвестный провайдер"}
+    if len(model) > 200 or any(char.isspace() or ord(char) < 32 for char in model):
+        return {"success": False, "error": "Укажите ID модели без пробелов, до 200 символов"}
+    if len(key_input) > 4096 or any(ord(char) < 32 for char in key_input):
+        return {"success": False, "error": "Проверьте API Token: он должен быть одной строкой"}
 
-    return ia.configure(provider, model, api_key)
+    def apply():
+        # Provider probes can take seconds. Keep health, voice and UI requests
+        # responsive, and serialize competing changes from both launchers.
+        with _configuration_lock:
+            return ia.configure(provider, model, api_key)
+    return await asyncio.to_thread(apply)
 
 @router.post("/ai/execute")
 async def ai_execute(request: Dict, http_request: Request):
@@ -164,7 +188,7 @@ async def set_ai_model(model: str):
     if model not in valid_models:
         return {"error": f"Модель {model} не поддерживается. Доступные: {valid_models}"}
     
-    ia.set_model(model)
+    await asyncio.to_thread(ia.set_model, model)
     return {"status": "success", "model": model}
 
 @router.post("/ai/temperature")
@@ -174,7 +198,7 @@ async def set_temperature(temp: float):
     if not ia or not ia.enabled:
         return {"error": "ИИ-ассистент недоступен"}
     
-    ia.set_temperature(temp)
+    await asyncio.to_thread(ia.set_temperature, temp)
     return {"status": "success", "temperature": ia.temperature}
 
 @router.post("/ai/clear-memory")
@@ -184,7 +208,29 @@ async def clear_ai_memory():
     if not ia:
         return {"error": "ИИ-ассистент не инициализирован"}
     
-    ia.clear_memory()
+    try:
+        def clear():
+            try:
+                from . import chat_endpoints
+            except ImportError:
+                import chat_endpoints
+            try:
+                from .chat_store import DEFAULT_CHAT_DIR
+            except ImportError:
+                from chat_store import DEFAULT_CHAT_DIR
+            # Avoid creating a chat database for older clients that never used it.
+            initialized = callable(getattr(chat_endpoints.store, 'cache_info', None)) and chat_endpoints.store.cache_info().currsize > 0
+            if initialized or (DEFAULT_CHAT_DIR/'chats.sqlite3').is_file():
+                with chat_endpoints._operations:
+                    if chat_endpoints._busy_chats:
+                        raise OSError('Chat action in progress')
+                    ia.clear_memory()
+                    chat_endpoints.store().delete()
+            else:
+                ia.clear_memory()
+        await asyncio.to_thread(clear)
+    except OSError:
+        return {"status": "error", "error": "Не удалось очистить файл истории на компьютере"}
     return {"status": "success", "message": "Память очищена"}
 
 @router.get("/ai/memory-stats")
@@ -197,5 +243,6 @@ async def get_memory_stats():
     return {
         "messages_count": len(ia.memory.conversations),
         "max_history": ia.memory.max_history,
+        **await asyncio.to_thread(ia.memory.stats),
         "conversations": ia.memory.conversations[-5:]  # Последние 5 сообщений
     }

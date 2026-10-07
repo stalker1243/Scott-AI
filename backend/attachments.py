@@ -160,6 +160,15 @@ def _read_image(name: str, data: bytes) -> Attachment:
     if Image is not None:
         try:
             image = Image.open(io.BytesIO(data))
+            if image.width * image.height > 32_000_000:
+                return Attachment(name=name, kind='refused', error='Слишком большое разрешение изображения')
+            media_type = Image.MIME.get(image.format, media_type)
+            if image.format not in {'PNG', 'JPEG', 'WEBP'}:
+                image.seek(0)
+                note = 'использован первый кадр' if getattr(image, 'is_animated', False) else ''
+                buffer = io.BytesIO()
+                image.convert('RGB').save(buffer, format='PNG')
+                data, media_type = buffer.getvalue(), 'image/png'
             side = max(image.size)
 
             if side > MAX_IMAGE_SIDE:
@@ -178,9 +187,7 @@ def _read_image(name: str, data: bytes) -> Attachment:
                 media_type = "image/jpeg"
                 note = f"снимок уменьшен до {new_size[0]}×{new_size[1]}"
         except Exception:
-            # Уменьшить не вышло — отправим как есть. Это хуже по весу, но
-            # лучше, чем отказать из-за неудавшейся оптимизации.
-            pass
+            return Attachment(name=name, kind='refused', error='Не удалось прочитать изображение: файл повреждён')
 
     return Attachment(
         name=name,

@@ -30,6 +30,8 @@
 from __future__ import annotations
 
 import os
+import threading
+from pathlib import Path
 from typing import Any, Optional
 
 # Какую реализацию брать: auto — быструю, если она есть, иначе обычную.
@@ -58,6 +60,46 @@ FAST_COMPUTE_CPU = "int8"
 # трудной записи. Дальше перебирать незачем — на фоне и шуме уверенности всё
 # равно не будет, а человеку лучше быстро услышать «не понял», чем ждать.
 TEMPERATURES = [0.0, 0.2]
+
+# Search several candidates instead of committing to the first token. Keep
+# the same policy in both implementations. This is not an accuracy score.
+try:
+    BEAM_SIZE = max(1, min(8, int(os.getenv('WHISPER_BEAM_SIZE', '5'))))
+except ValueError:
+    BEAM_SIZE = 5
+
+
+def prepare_audio(audio: Any) -> Any:
+    """Decode real uploads once; microphone arrays are already mono at 16 kHz."""
+    import numpy as np
+    if isinstance(audio, (str, os.PathLike)) and Path(audio).is_file():
+        try:
+            from faster_whisper.audio import decode_audio
+        except ImportError:
+            from whisper import load_audio
+            audio = load_audio(str(audio))
+        else:
+            audio = decode_audio(str(audio), sampling_rate=16000)
+    if not isinstance(audio, np.ndarray):
+        return audio
+    if audio.ndim != 1:
+        raise ValueError('Whisper expects mono audio at 16000 Hz')
+    if not np.isfinite(audio).all():
+        raise ValueError('Audio contains non-finite samples')
+    return np.ascontiguousarray(audio, dtype=np.float32)
+
+
+def normalize_quiet_audio(audio: Any) -> Any:
+    """Lift quiet recordings with bounded gain; never amplify normal speech."""
+    import numpy as np
+    if not isinstance(audio, np.ndarray) or not audio.size:
+        return audio
+    peak = float(np.max(np.abs(audio)))
+    rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2)))
+    if peak <= 1e-7 or rms >= .015:
+        return audio
+    gain = min(8.0, .03 / max(rms, 1e-10), .90 / peak)
+    return (audio * gain).astype(np.float32) if gain > 1 else audio
 
 
 # С какой длины записи проверять, есть ли в ней речь вообще.
@@ -89,7 +131,7 @@ def _подсказка() -> str:
 
         return speech_hints.prompt()
     except Exception:
-        return "Скотт, открой браузер. Скотт, закрой программу."
+        return "Скотт. Компьютер, браузер, папка, голос."
 
 
 # Что Whisper выдумывает, когда речи нет.
@@ -146,12 +188,26 @@ class Recognizer:
         self.device = device
         self.engine = ""
         self._model: Any = None
+        self._model_lock = threading.RLock()
 
     # ---- загрузка ----
 
     def load(self) -> str:
+        with self._model_lock:
+            if self._model is None:
+                self._load()
+            return self.engine
+
+    def _load(self) -> str:
         """Поднять модель. Возвращает название выбранной реализации."""
-        if ENGINE_CHOICE in ("auto", "faster") and self._try_fast():
+        try:
+            from . import device_settings
+        except ImportError:
+            import device_settings
+        hip_gpu = self.device == 'cuda' and device_settings.rocm_build()
+        if hip_gpu:
+            print('🔊 AMD ROCm/HIP: использую PyTorch Whisper вместо CUDA-сборки CTranslate2')
+        if not hip_gpu and ENGINE_CHOICE in ("auto", "faster") and self._try_fast():
             return self.engine
 
         if ENGINE_CHOICE == "faster":
@@ -191,15 +247,24 @@ class Recognizer:
 
         print(f"🔊 Загружаю Whisper «{self.model_name}» на {self.device.upper()}...")
 
+        # The comparison/downloader can keep large checkpoints beside Scott's
+        # other local models. Reuse that checkpoint instead of downloading a
+        # second copy into the user profile.
+        checkpoint = Path(__file__).resolve().parent / 'data/models/whisper' / f'{self.model_name}.pt'
+        if self.model_name == 'turbo':
+            checkpoint = checkpoint.with_name('large-v3-turbo.pt')
+        # load by model name so Whisper still validates the official SHA-256
+        # checksum (also detects an interrupted download).
+        cache_options = {'download_root': str(checkpoint.parent)} if checkpoint.is_file() else {}
         try:
-            self._model = whisper.load_model(self.model_name, device=self.device)
+            self._model = whisper.load_model(self.model_name, device=self.device, **cache_options)
         except Exception as e:
             # Не хватило видеопамяти, битый драйвер — распознавание не должно
             # отваливаться целиком, спокойно откатываемся на процессор.
             if self.device != "cpu":
                 print(f"⚠️ Не удалось загрузить модель на {self.device.upper()} "
                       f"({e}); откатываюсь на CPU")
-                self._model = whisper.load_model(self.model_name, device="cpu")
+                self._model = whisper.load_model(self.model_name, device="cpu", **cache_options)
                 self.device = "cpu"
             else:
                 raise
@@ -210,22 +275,51 @@ class Recognizer:
     # ---- распознавание ----
 
     def transcribe(self, audio: Any, language: str = "ru") -> str:
+        # Whisper's decoder and its hooks belong to this shared model. File
+        # uploads, microphone phrases and warmup must use it one at a time.
+        with self._model_lock:
+            try:
+                return self._transcribe(audio, language)
+            except RuntimeError as error:
+                message = str(error).casefold()
+                if self.device != 'cuda' or not any(word in message for word in (
+                        'cuda', 'cudnn', 'cublas', 'hip', 'hsa', 'miopen', 'rocblas',
+                        'invalid device function', 'out of memory')):
+                    raise
+                # A failed GPU must not fail every following microphone clip.
+                # Retry once on CPU and keep that working model for this run.
+                print(f'⚠️ Whisper: ошибка GPU ({str(error)[:120]}), переключаюсь на CPU')
+                self._model = None
+                self.device = 'cpu'
+                self.engine = ''
+                self._load()
+                return self._transcribe(audio, language)
+
+    def _transcribe(self, audio: Any, language: str = "ru") -> str:
         """
         Превратить звук в текст.
 
         Принимается и путь к файлу, и готовый массив: слушатель микрофона
         отдаёт массив, а загруженная запись приходит файлом.
         """
+        import numpy as np
+        audio = prepare_audio(audio)
+        # Short silence must also be rejected, before loading a large model.
+        if isinstance(audio, np.ndarray) and (not audio.size or np.max(np.abs(audio)) <= 1e-7):
+            return ''
         if self._model is None:
             self.load()
 
-        if self.engine == "faster-whisper":
-            if not self._есть_речь(audio):
-                return ""
+        if not self._есть_речь(audio):
+            return ''
 
+        audio = normalize_quiet_audio(audio)
+        options = dict(beam_size=BEAM_SIZE, best_of=5, condition_on_previous_text=False)
+
+        if self.engine == "faster-whisper":
             куски, _ = self._model.transcribe(audio, language=language,
                                               temperature=TEMPERATURES,
-                                              initial_prompt=_подсказка())
+                                              initial_prompt=_подсказка(), **options)
             текст = "".join(кусок.text for кусок in куски).strip()
 
             if looks_like_hallucination(текст):
@@ -237,8 +331,14 @@ class Recognizer:
         # fp16 имеет смысл только на видеокарте: на процессоре он не
         # поддерживается, и whisper иначе предупреждает об этом на каждую фразу.
         итог = self._model.transcribe(audio, language=language,
-                                      fp16=(self.device == "cuda"))
-        return (итог.get("text") or "").strip()
+                                      fp16=(self.device == "cuda"),
+                                      initial_prompt=_подсказка(), temperature=TEMPERATURES,
+                                      **options)
+        text = (итог.get("text") or "").strip()
+        if looks_like_hallucination(text):
+            print(f'🔇 Пропускаю выдумку модели: «{text[:60]}»')
+            return ''
+        return text
 
     def _есть_речь(self, audio: Any) -> bool:
         """

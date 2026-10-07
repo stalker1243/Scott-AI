@@ -35,6 +35,13 @@ except ImportError:  # pragma: no cover — запуск из корня реп�
     from backend import speech_to_text
 
 
+@pytest.fixture(autouse=True)
+def default_engine_for_unit_tests(monkeypatch):
+    # A developer's .env can select OpenAI or faster-whisper. Engine selection
+    # contracts must start from the same default and use their own model fakes.
+    monkeypatch.setattr(speech_to_text, 'ENGINE_CHOICE', 'auto')
+
+
 class ПоддельнаяБыстрая:
     """Подделка faster_whisper.WhisperModel."""
 
@@ -44,7 +51,9 @@ class ПоддельнаяБыстрая:
         ПоддельнаяБыстрая.последний_вызов = {
             "name": name, "device": device, "compute_type": compute_type}
 
-    def transcribe(self, audio, language=None, temperature=None, initial_prompt=None):
+    def transcribe(self, audio, language=None, temperature=None, initial_prompt=None, **options):
+        self.options = options
+        ПоддельнаяБыстрая.последние_параметры = options
         # Число попыток запоминается: пять заходов вместо двух — это полторы
         # секунды впустую на каждой записи без внятной речи.
         ПоддельнаяБыстрая.последняя_температура = temperature
@@ -65,8 +74,9 @@ class ПоддельнаяОбычная:
         self.fail_on = fail_on
         self.последний = {}
 
-    def transcribe(self, audio, language=None, fp16=None):
-        self.последний = {"language": language, "fp16": fp16}
+    def transcribe(self, audio, language=None, fp16=None, initial_prompt=None, temperature=None, **options):
+        self.последний = {"language": language, "fp16": fp16,
+                         "initial_prompt": initial_prompt, "temperature": temperature, **options}
         return {"text": "  привет мир  "}
 
 

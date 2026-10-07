@@ -315,6 +315,7 @@ class VoiceListener:
         self._threads: List[threading.Thread] = []
         self._stream = None
         self._lock = threading.Lock()
+        self._lifecycle_lock = threading.RLock()
 
         self._noise_floor = self.config.absolute_floor
 
@@ -356,10 +357,24 @@ class VoiceListener:
         return self._running
 
     def start(self) -> dict:
+        with self._lifecycle_lock:
+            return self._start()
+
+    def _start(self) -> dict:
         if self._running:
             return {"success": True, "message": "Scott уже слушает"}
+        if any(thread.is_alive() for thread in self._threads):
+            return {"success": False, "message": "Завершается предыдущий сеанс прослушивания. Попробуйте ещё раз"}
         if not HAS_SOUNDDEVICE:
             return {"success": False, "message": "Библиотека sounddevice не установлена — записывать звук нечем"}
+
+        # Old audio must not be executed after resuming from a tray pause.
+        for pending in (self._blocks, self._phrases):
+            while True:
+                try:
+                    pending.get_nowait()
+                except queue.Empty:
+                    break
 
         # Слушаем заодно и колонки — чтобы вычитать из микрофона всё, что из
         # них звучит: не только собственную речь Scott, но и видео, музыку,
@@ -414,6 +429,15 @@ class VoiceListener:
         return {"success": True, "message": "Scott слушает"}
 
     def stop(self) -> dict:
+        with self._lifecycle_lock:
+            if self.on_interrupt is not None:
+                try:
+                    self.on_interrupt("")
+                except Exception as e:
+                    self.stats.last_error = f"Не удалось прервать ответ: {e}"
+            return self._stop()
+
+    def _stop(self) -> dict:
         if not self._running:
             return {"success": True, "message": "Scott и так не слушает"}
 
@@ -431,6 +455,10 @@ class VoiceListener:
             self._blocks.put_nowait(np.zeros(BLOCK_SIZE, dtype=np.float32))
         except queue.Full:
             pass
+
+        for thread in self._threads:
+            if thread is not threading.current_thread():
+                thread.join(timeout=0.6)
 
         print("🎧 Scott перестал слушать")
         return {"success": True, "message": "Scott больше не слушает"}
@@ -1086,6 +1114,9 @@ class VoiceListener:
                 self.stats.last_error = f"Распознавание не удалось: {e}"
                 print(f"⚠️ {self.stats.last_error}")
                 continue
+
+            if not self._running:
+                break
 
             if not text:
                 continue

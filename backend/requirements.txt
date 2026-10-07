@@ -77,6 +77,12 @@ num2words==0.5.14
 numpy==2.3.4
 scipy==1.17.1
 
+# Локальный поиск памяти по смыслу: квантованная многоязычная ONNX-модель
+# выполняется на CPU. PyTorch/CUDA/ROCm для этой задачи не нужны.
+onnxruntime==1.30.0
+tokenizers==0.23.2
+huggingface-hub==1.31.0
+
 # Веб-скрейпинг
 beautifulsoup4==4.14.3
 lxml==6.1.1
@@ -95,7 +101,11 @@ GPUtil==1.4.0
 #
 # Проверить, что видеокарта реально подхватилась:
 #   python -c "import torch; print(torch.cuda.is_available())"
-# Устройство можно принудительно задать в .env через WHISPER_DEVICE=cuda|cpu.
+# AMD ROCm/HIP ставится отдельно: backend/setup_amd.py и docs/amd-support.md.
+# Обычные GPU-сборки CTranslate2 рассчитаны на NVIDIA. На AMD GPU используется
+# openai-whisper через PyTorch; faster-whisper остаётся доступен на CPU.
+# Устройство: WHISPER_DEVICE=auto|cuda|rocm|cpu,
+# SILERO_DEVICE=auto|cuda|rocm|mps|cpu.
 #
 # Версия torch намеренно без верхней границы и без +cu126 в самом файле: пин с
 # суффиксом сборки не поставится с обычного индекса PyPI, а команда выше ставит

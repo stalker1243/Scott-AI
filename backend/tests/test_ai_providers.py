@@ -156,7 +156,8 @@ def test_static_list_is_used_when_live_one_fails(отвечающий, monkeypat
 
     провайдеры = {p["id"]: p for p in отвечающий.get_available_providers()}
 
-    assert провайдеры["Anthropic"]["models"] == ia.STATIC_PROVIDER_MODELS["Anthropic"]
+    assert [m['id'] for m in провайдеры['Anthropic']['models']] == [m['id'] for m in ia.STATIC_PROVIDER_MODELS['Anthropic']]
+    assert all('capabilities' in m for m in провайдеры['Anthropic']['models'])
 
 
 def test_gateway_catalogue_is_shown_without_a_key(отвечающий, monkeypatch):
@@ -200,13 +201,10 @@ def test_free_gateway_models_come_first(monkeypatch):
     assert модели[0]["id"] == "бесплатная/модель"
 
 
-def test_gateway_offers_only_talking_models(monkeypatch):
+def test_gateway_offers_chat_and_image_models(monkeypatch):
     """
-    Из каталога шлюза берутся только разговорные модели.
-
-    Там же лежат рисование, музыка и распознавание речи. В списке выбора они
-    были бы обещанием, которое некому выполнить: Scott умеет только
-    разговаривать текстом.
+    В каталоге доступны диалог, зрение и генерация картинок.
+    Аудиогенерация пока исключается: для неё нет адаптера.
     """
     monkeypatch.setattr(ia.requests, "get", lambda *a, **k: Ответ({"data": [
         {"id": "кто-то/музыка", "architecture": {"modality": "text->audio"},
@@ -225,7 +223,7 @@ def test_gateway_offers_only_talking_models(monkeypatch):
     # Модель, которая умеет ещё и смотреть картинки, отвечает текстом и годится.
     assert "кто-то/зрение" in имена
     assert "кто-то/музыка" not in имена
-    assert "кто-то/рисование" not in имена
+    assert "кто-то/рисование" in имена
 
 
 def test_network_failure_does_not_raise(monkeypatch):

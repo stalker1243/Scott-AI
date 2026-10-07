@@ -25,7 +25,7 @@ public partial class AppearanceViewModel : ViewModelBase
     [ObservableProperty]
     private bool _isDark = SettingsStore.Current.IsDark;
 
-    /// <summary>"classic" | "glass" | "terminal".</summary>
+    /// <summary>"classic" | "glass" | "terminal" | "dashboard".</summary>
     [ObservableProperty]
     private string _currentStyle = SettingsStore.Current.Style;
 
@@ -134,6 +134,15 @@ public partial class AppearanceViewModel : ViewModelBase
     {
         CurrentStyle = "terminal";
         ThemeService.ApplyStyle(AppStyle.Terminal);
+        SyncAccentSelection();
+        PersistTheme();
+    }
+
+    [RelayCommand]
+    private void SetStyleDashboard()
+    {
+        CurrentStyle = "dashboard";
+        ThemeService.ApplyStyle(AppStyle.Dashboard);
         SyncAccentSelection();
         PersistTheme();
     }

@@ -16,6 +16,7 @@ namespace ScottAI.Avalonia.Tests;
 /// приложения, поэтому здесь проверяются две вещи, которые от него не зависят:
 /// подписи и устойчивость к системе, где значка нет вовсе.
 /// </summary>
+[Collection("avalonia")]
 public class TrayMenuTests
 {
     [Fact]

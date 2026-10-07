@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from typing import Optional
 
 import numpy as np
@@ -88,6 +89,8 @@ class EchoReference:
         self._signal = np.zeros(0, dtype=np.float32)
         self._started_at = 0.0
         self._playing = False
+        self._streaming = False
+        self._segments = deque()
 
         # Задержка в отсчётах: запоминается между ответами, пока не сменилось
         # устройство вывода. Мерить её заново на каждой реплике незачем.
@@ -105,17 +108,54 @@ class EchoReference:
         сигнал = to_mono_16k(data, rate)
 
         with self._lock:
+            if self._streaming:
+                self.delay, self.delay_known = 0, False
+            self._streaming = False
+            self._segments.clear()
             self._signal = сигнал
             self._started_at = time.monotonic()
             self._playing = True
             self._probe_recorded = []
             self._probe_samples = 0
 
+    def start_stream(self) -> None:
+        """Start a sequence; keep timing calibration between stream replies."""
+        with self._lock:
+            if not self._streaming:
+                self.delay, self.delay_known = 0, False
+            self._streaming = True
+            self._segments.clear()
+            self._signal = np.zeros(0, dtype=np.float32)
+            self._playing = True
+            self._probe_recorded = []
+            self._probe_samples = 0
+
+    def stream_block(self, data: np.ndarray, rate: int, at: float) -> None:
+        """Retain recent timestamped blocks, including real gaps between them."""
+        signal = to_mono_16k(data, rate)
+        with self._lock:
+            if not self._playing or not self._streaming or not signal.size:
+                return
+            if not self._segments:
+                self._started_at = at
+            self._segments.append((at, signal))
+            cutoff = time.monotonic() - 3.
+            while self._segments and self._segments[0][0]+len(self._segments[0][1])/SAMPLE_RATE < cutoff:
+                self._segments.popleft()
+            # Only the beginning is needed for the existing delay estimator.
+            budget = int(LEARN_SECONDS*SAMPLE_RATE)
+            if self._signal.size < budget:
+                offset = max(0, round((at-self._started_at)*SAMPLE_RATE))
+                gap = min(budget-self._signal.size, max(0, offset-self._signal.size))
+                remaining = budget-self._signal.size-gap
+                self._signal = np.concatenate((self._signal, np.zeros(gap, dtype=np.float32), signal[:remaining]))
+
     def stop(self) -> None:
         """Scott договорил."""
         with self._lock:
             self._playing = False
             self._signal = np.zeros(0, dtype=np.float32)
+            self._segments.clear()
 
     @property
     def playing(self) -> bool:
@@ -154,6 +194,21 @@ class EchoReference:
             прошло = сейчас - self._started_at
             сигнал = self._signal
             задержка = self.delay
+            streaming = self._streaming
+            segments = list(self._segments) if streaming else []
+
+        if streaming:
+            origin = сейчас - задержка/SAMPLE_RATE - length/SAMPLE_RATE
+            result = np.zeros(length, dtype=np.float32)
+            copied = False
+            for start, values in segments:
+                destination = max(0, round((start-origin)*SAMPLE_RATE))
+                source = max(0, round((origin-start)*SAMPLE_RATE))
+                count = min(length-destination, len(values)-source)
+                if count > 0:
+                    result[destination:destination+count] = values[source:source+count]
+                    copied = True
+            return result if copied else np.zeros(0, dtype=np.float32)
 
         # Блок только что записан, значит он относится к промежутку,
         # закончившемуся сейчас. Отсюда и отсчитываем назад, а потом ещё на

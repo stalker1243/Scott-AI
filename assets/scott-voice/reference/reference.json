@@ -1,0 +1,32 @@
+{
+  "profile": "firm",
+  "title": "Чуть строгий",
+  "description": "Уверенный и сдержанный, с лёгкой строгостью.",
+  "source_audio": "scott-firm.wav",
+  "reference_audio": "reference/scott-reference.wav",
+  "sha256": "78f48237579b5323bd5e738095fa17f4c30f1f76d8976e66ef128b850eea42f3",
+  "reference_text": "Здравствуйте. Всё в порядке. Я проверю детали и помогу с задачей. Яркость экрана — сорок процентов. Запущено пять процессов. Программное обеспечение обновлено. Проверьте эй пи ай токен и файл пи ди эф.",
+  "sample_rate": 24000,
+  "seconds": 16.64,
+  "model": {
+    "model": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "revision": "5ecdb67327fd37bb2e042aab12ff7391903235d3",
+    "files": [
+      ".gitattributes",
+      "README.md",
+      "config.json",
+      "generation_config.json",
+      "merges.txt",
+      "model.safetensors",
+      "preprocessor_config.json",
+      "speech_tokenizer/config.json",
+      "speech_tokenizer/configuration.json",
+      "speech_tokenizer/model.safetensors",
+      "speech_tokenizer/preprocessor_config.json",
+      "tokenizer_config.json",
+      "vocab.json"
+    ]
+  },
+  "seed": 20261006,
+  "instruct": "Native Russian male voice, around 35 to 45 years old, a resonant medium-low baritone. Very clear consonants and complete word endings, natural standard Russian pronunciation. Speak as a calm, dependable professional assistant. Slightly authoritative, restrained and courteous delivery, precise measured pacing and purposeful short pauses. Clean close-microphone studio sound."
+}

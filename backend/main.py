@@ -9,6 +9,9 @@ import os
 import sys
 import io
 import time
+from contextvars import ContextVar
+
+_protocol_depth_context = ContextVar("protocol_depth", default=0)
 
 # Своя папка — в пути поиска модулей.
 #
@@ -323,14 +326,9 @@ def _warmup_silero_in_thread(barrier: threading.Barrier) -> None:
         barrier.wait(timeout=60)
         fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="scott_warmup_")
         os.close(fd)
-        model = silero_tts.get_model()
+        silero_tts.get_model()
         for _ in range(3):
-            model.save_wav(
-                text="разогрев",
-                speaker=silero_tts.DEFAULT_SILERO_VOICE,
-                sample_rate=silero_tts.SAMPLE_RATE,
-                audio_path=tmp_path,
-            )
+            silero_tts.synthesize("разогрев", tmp_path, silero_tts.DEFAULT_SILERO_VOICE)
     except Exception as e:
         print(f"⚠️ Прогрев Silero в потоке не удался: {e}")
     finally:
@@ -438,7 +436,11 @@ async def _warmup_models() -> None:
     # установки, а при смене голоса набор озвучивается заново.
     try:
         import speech_cache
-        summary = await asyncio.to_thread(speech_cache.warm)
+        if scott_voice.get_current_voice() == 'scott-voice':
+            summary = await asyncio.to_thread(speech_cache.warm,
+                phrases=['Готово.', 'Слушаю.', 'Соединение восстановлено.'])
+        else:
+            summary = await asyncio.to_thread(speech_cache.warm)
         if summary["total"]:
             print(f"🔥 Готовые реплики озвучены: {summary['prepared']} из "
                   f"{summary['total']} за {summary['seconds']} с")
@@ -479,6 +481,12 @@ async def lifespan(app: FastAPI):
 
     if warmup_task and not warmup_task.done():
         warmup_task.cancel()
+    from scott_voice_engine import cancel as cancel_optional_voice
+    await asyncio.to_thread(cancel_optional_voice)
+    from voice_install_jobs import jobs as voice_install_jobs
+    await asyncio.to_thread(voice_install_jobs.close)
+    from voice_prepare import preparation as voice_preparation
+    await asyncio.to_thread(voice_preparation.close)
     
     # ===== SHUTDOWN =====
     print("\n" + "="*80)
@@ -641,6 +649,17 @@ try:
 except ImportError as e:
     print(f"⚠️ Endpoints настроек не подключены: {e}")
 
+try:
+    from .voice_install_endpoints import router as voice_install_router
+except ImportError:
+    from voice_install_endpoints import router as voice_install_router
+app.include_router(voice_install_router)
+try:
+    from .voice_prepare_endpoints import router as voice_prepare_router
+except ImportError:
+    from voice_prepare_endpoints import router as voice_prepare_router
+app.include_router(voice_prepare_router)
+
 # Прослушивание микрофона: старт, остановка, состояние.
 try:
     try:
@@ -700,6 +719,12 @@ try:
     app.include_router(attachment_router)
 except ImportError as e:
     print(f"⚠️ Endpoints вложений не подключены: {e}")
+
+try:
+    from .chat_endpoints import router as chat_router
+except ImportError:
+    from chat_endpoints import router as chat_router
+app.include_router(chat_router)
 
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
@@ -830,10 +855,21 @@ class ScottAI:
         и вкладка аналитики всегда показывала бы пустые данные.
         """
         start = time.time()
+        try:
+            captured = await asyncio.to_thread(memories_module.observe, text)
+        except Exception:
+            captured = [{'success': False, 'error': 'Не удалось обновить память'}]
         with timing_stage("00.команда.всего"):
             result = await self._process_command_impl(
                 text, quiet_mode=quiet_mode, user_name=user_name, by_voice=by_voice
             )
+        memory = getattr(intelligent_answerer, 'memory', None)
+        if any(not fact.get('success') for fact in captured):
+            result['memory_warning'] = 'Не удалось сохранить новые сведения в память.'
+        record_turn = getattr(memory, 'record_external_turn', None)
+        response = result.get('response', '')
+        if callable(record_turn) and isinstance(response, str) and response.strip() and 'error' not in result.get('type', ''):
+            await asyncio.to_thread(record_turn, text, response)
         if HAS_V32_FEATURES:
             try:
                 analytics_manager.record_command(
@@ -858,23 +894,6 @@ class ScottAI:
         print(f"\n👤 Пользователь ({user_name}): {text}")
 
         try:
-            # Память идёт первой: если на эту фразу уже отвечали, разбирать её
-            # заново незачем.
-            with timing_stage("память.поиск"):
-                memory_result = knowledge_base.search_memory(text)
-            if memory_result:
-                for key, data in memory_result.items():
-                    response = data.get("value")
-                    if not response or 'processing:' in response.lower():
-                        continue
-                    print(f"💾 Из памяти: {response}")
-                    return {
-                        "type": "memory",
-                        "response": response,
-                        "source": "knowledge_base",
-                        "quiet_mode": quiet_mode
-                    }
-
             with timing_stage("разбор"):
                 decision = understanding.understand(
                     text,
@@ -885,6 +904,24 @@ class ScottAI:
                                    if scott_runtime.protocols else None),
                 )
             print(f"🔎 Решение: {decision.kind} — {decision.reason}")
+
+            # Only explicit, exact facts may answer a question from this cache.
+            # A remembered acknowledgement must never replace executing an
+            # action; learned answers about time/news must be refreshed.
+            if decision.kind == 'question':
+                saved_answer = await asyncio.to_thread(memories_module.answer, text)
+                if saved_answer:
+                    return {'type': 'memory', 'response': saved_answer,
+                            'source': 'user_memory', 'quiet_mode': quiet_mode}
+                memory_result = knowledge_base.search_memory(text)
+                for key, data in memory_result.items():
+                    response = data.get("value")
+                    if (key.strip().casefold() == text.strip().casefold()
+                            and data.get("category") in {"personal", "general"}
+                            and isinstance(response, str) and response.strip()
+                            and 'processing:' not in response.lower()):
+                        return {"type": "memory", "response": response,
+                                "source": "knowledge_base", "quiet_mode": quiet_mode}
 
             # ---------------------------------------------------- отложить
             #
@@ -940,7 +977,7 @@ class ScottAI:
             # больше: у модели нет доступа к памяти Scott, а у человека
             # осталось бы впечатление, что запомнили.
             if decision.kind == 'remember':
-                итог = memories_module.add(decision.memory)
+                итог = await asyncio.to_thread(memories_module.add, decision.memory)
 
                 if not итог.get("success"):
                     response = итог.get("error", "Не понял, что запомнить")
@@ -958,13 +995,14 @@ class ScottAI:
             # ---------------------------------------------------- протокол
             if decision.kind == 'protocol':
                 result = await self.run_protocol(
-                    decision.protocol, depth=getattr(self, '_protocol_depth', 0))
+                    decision.protocol, depth=_protocol_depth_context.get())
                 response = result.summary()
                 knowledge_base.add_conversation(text, response)
                 print(f"🤖 Scott: {response}")
                 return {
                     "type": "protocol",
                     "protocol": decision.protocol.name,
+                    "success": result.ok,
                     "response": response,
                     "quiet_mode": quiet_mode,
                 }
@@ -977,10 +1015,10 @@ class ScottAI:
                             'youtube': web_integrations.search_youtube_video,
                             'github': web_integrations.search_github_repo,
                         }[decision.service]
-                        result = searcher(decision.query)
+                        result = await asyncio.to_thread(searcher, decision.query)
                     else:
                         # Искать нечего — значит человек просил открыть сам сайт.
-                        result = web_integrations.open_service_home(decision.service)
+                        result = await asyncio.to_thread(web_integrations.open_service_home, decision.service)
                 print(f"🌐 {decision.service}: {result['message']}")
                 return {
                     "type": f"{decision.service}_search",
@@ -1024,7 +1062,16 @@ class ScottAI:
                 "error": str(e)
             }
 
-    async def run_protocol(self, protocol, depth: int = 0):
+    async def run_protocol(self, protocol, depth: int = 0, progress=None):
+        protocol = protocols_module.Protocol.from_dict(protocol.to_dict())
+        if depth:
+            return await self._run_protocol_impl(protocol, depth, progress)
+        if not hasattr(self, "_protocol_lock"):
+            self._protocol_lock = asyncio.Lock()
+        async with self._protocol_lock:
+            return await self._run_protocol_impl(protocol, depth, progress)
+
+    async def _run_protocol_impl(self, protocol, depth: int = 0, progress=None):
         """
         Выполнить протокол: каждый шаг проходит тем же путём, что и фраза.
 
@@ -1037,17 +1084,18 @@ class ScottAI:
         предела это был бы бесконечный цикл.
         """
         async def выполнить(шаг: str):
-            self._protocol_depth = depth + 1
+            token = _protocol_depth_context.set(depth + 1)
             try:
                 return await self._process_command_impl(шаг, quiet_mode=True)
             finally:
-                self._protocol_depth = depth
+                _protocol_depth_context.reset(token)
 
         result = await protocols_module.run_async(
             protocol,
             execute=выполнить,
             sleep=asyncio.sleep,
             depth=depth,
+            progress=progress,
         )
 
         if result.ok and scott_runtime.protocols:
@@ -1069,7 +1117,7 @@ class ScottAI:
             # Признак «спросили голосом» нужен и здесь: отвечающий сам
             # обращается к модели, когда своих правил ему не хватает, и без
             # признака оттуда приходил ответ на полтысячи знаков со списками.
-            answer = question_answerer.answer(text, brief=by_voice)
+            answer = await asyncio.to_thread(question_answerer.answer, text, brief=by_voice)
         if answer:
             knowledge_base.add_conversation(text, answer)
             print(f"🤖 Scott: {answer}")
@@ -1084,7 +1132,7 @@ class ScottAI:
             with timing_stage("ответ.llm"):
                 # Вопрос с микрофона — просим короткий ответ: вслух он
                 # звучит вдвое дольше, чем читается глазами.
-                ai_answer = intelligent_answerer.answer_question(text, brief=by_voice)
+                ai_answer = await asyncio.to_thread(intelligent_answerer.answer_question, text, brief=by_voice)
             if ai_answer:
                 print(f"✨ Ответ от ИИ: {ai_answer[:100]}...")
                 knowledge_base.add_conversation(text, ai_answer)
@@ -1110,12 +1158,21 @@ class ScottAI:
         }
 
     async def _execute_parsed_command(self, parsed, original_text: str) -> str:
+        # Search, weather, code generation and OS calls all perform blocking IO.
+        # Keep the shared HTTP loop free for health polling and voice controls.
+        return await asyncio.to_thread(self._execute_parsed_command_sync, parsed, original_text)
+
+    def _execute_parsed_command_sync(self, parsed, original_text: str) -> str:
         """
         Выполнить распарсенную команду
         """
         cmd_type = parsed.command_type
         param = parsed.main_param
         context = parsed.context
+
+        if cmd_type == 'voice_settings':
+            import voice_commands
+            return voice_commands.execute(param, context.get('voice_value'))
 
         # Получаем профиль Scott
         scott_name = scott_profile.get_name()
@@ -1342,6 +1399,10 @@ class ScottAI:
 
         # ============= НЕИЗВЕСТНАЯ КОМАНДА - СПРАШИВАЕМ AI =============
         else:
+            if cmd_type == 'unknown' and intelligent_answerer and getattr(intelligent_answerer, 'enabled', False):
+                answer = intelligent_answerer.answer_question(original_text)
+                if answer:
+                    return answer
             response = knowledge_base.query_ai(original_text)
             knowledge_base.learn_from_question(original_text, response)
             return response
@@ -1375,6 +1436,11 @@ class ScottAI:
 
 # Инициализируем Scott AI
 scott_ai = ScottAI()
+try:
+    from . import chat_endpoints as chat_api
+except ImportError:
+    import chat_endpoints as chat_api
+chat_api.command_handler = scott_ai.process_command
 
 # Протоколы умеют хранить себя сами, но не умеют выполнять шаги: шаг — обычная
 # фраза, и разбирает её ассистент. Отдаём ему эту работу той же дорогой, что
@@ -1389,6 +1455,94 @@ scott_runtime.set_protocol_runner(scott_ai.run_protocol)
 # а роутер берёт готовый экземпляр из runtime — иначе импорты замкнулись бы.
 
 _main_loop = None
+_voice_generation = 0
+_voice_generation_lock = threading.Lock()
+_voice_output_lock = None
+_voice_output_loop = None
+
+
+def _next_voice_response() -> int:
+    global _voice_generation
+    with _voice_generation_lock:
+        _voice_generation += 1
+        return _voice_generation
+
+
+def _voice_response_current(generation) -> bool:
+    with _voice_generation_lock:
+        return generation is None or generation == _voice_generation
+
+
+async def _play_voice_response(text: str, generation=None) -> bool:
+    """Serialize microphone/echo state and discard superseded voice replies."""
+    global _voice_output_lock, _voice_output_loop
+    try:
+        from .audio_settings import is_quiet
+    except ImportError:
+        from audio_settings import is_quiet
+    loop = asyncio.get_running_loop()
+    if _voice_output_loop is not loop:
+        _voice_output_lock, _voice_output_loop = asyncio.Lock(), loop
+    async with _voice_output_lock:
+        voice = scott_runtime.scott_voice
+        if voice is None or not text or is_quiet() or not _voice_response_current(generation):
+            return False
+        listening = scott_runtime.listener
+        expecting = False
+        try:
+            from scott_voice import get_current_voice
+            optional = get_current_voice() == 'scott-voice'
+            from voice_config import get_scott_streaming
+            streaming=optional and get_scott_streaming() and callable(getattr(voice,'speak_stream',None))
+            if optional:
+                from scott_voice_engine import speech_chunks
+                chunks = speech_chunks(text,short_first=not streaming)
+            else:
+                chunks = [text]
+            # Scott Voice can prepare for several seconds: accept "stop" during
+            # generation too, before the first sample reaches the speaker.
+            if optional and listening is not None:
+                listening.expect_interruption(text)
+                expecting = True
+            stream_parts=getattr(voice,'speak_stream_parts',None)
+            if streaming and callable(stream_parts):
+                abandoned=threading.Event()
+                try:
+                    path=await asyncio.to_thread(stream_parts,chunks,
+                        cancelled=lambda:abandoned.is_set() or not _voice_response_current(generation))
+                finally:
+                    # asyncio cancellation does not stop a to_thread worker.
+                    abandoned.set()
+                return bool(path) and not is_quiet() and _voice_response_current(generation)
+            for index, chunk in enumerate(chunks):
+                if is_quiet() or not _voice_response_current(generation):
+                    return False
+                if streaming:
+                    if not await asyncio.to_thread(voice.speak_stream,chunk):
+                        return False
+                    if is_quiet() or not _voice_response_current(generation):
+                        return False
+                    continue
+                path = await asyncio.to_thread(voice.speak_to_file, chunk)
+                if not path or is_quiet() or not _voice_response_current(generation):
+                    return False
+                if listening is not None and not expecting:
+                    listening.expect_interruption(text)
+                    expecting = True
+                options = {'wait':index == len(chunks)-1} if optional else {}
+                played = await asyncio.to_thread(voice.play_audio, path, **options)
+                if played is False:
+                    return False
+            return bool(chunks)
+        except Exception as e:
+            if listening is not None:
+                listening.stats.last_error = f"Не удалось озвучить ответ: {e}"
+            logging.exception("Voice reply failed")
+            return False
+        finally:
+            if expecting:
+                await asyncio.sleep(0.4)
+                listening.stop_expecting()
 
 
 def _set_main_loop(loop) -> None:
@@ -1484,7 +1638,7 @@ THINKING_CUE_AFTER_SECONDS = 2.5
 _thinking_cue_index = 0
 
 
-async def _say_thinking() -> None:
+async def _say_thinking(generation=None) -> None:
     """
     Сказать «секунду», пока готовится настоящий ответ.
 
@@ -1493,27 +1647,13 @@ async def _say_thinking() -> None:
     """
     global _thinking_cue_index
 
-    voice = scott_runtime.scott_voice
-    if voice is None:
+    if scott_runtime.scott_voice is None or not _voice_response_current(generation):
         return
 
     cue = THINKING_CUES[_thinking_cue_index % len(THINKING_CUES)]
     _thinking_cue_index += 1
 
-    listening = scott_runtime.listener
-    if listening is not None:
-        listening.suspend()
-
-    try:
-        path = await asyncio.to_thread(voice.speak_to_file, cue)
-        if path:
-            await asyncio.to_thread(voice.play_audio, path)
-    except Exception as e:
-        print(f"⚠️ Не удалось произнести «{cue}»: {e}")
-    finally:
-        if listening is not None:
-            await asyncio.sleep(0.3)
-            listening.resume()
+    await _play_voice_response(cue, generation)
 
 
 def _listener_interrupted(text: str) -> None:
@@ -1524,6 +1664,9 @@ def _listener_interrupted(text: str) -> None:
     на части, и договаривать остальные после «хватит» — ровно то, чего просили
     не делать.
     """
+    _next_voice_response()
+    from scott_voice_engine import cancel as cancel_optional_voice
+    cancel_optional_voice()
     try:
         from speech_player import get_player, PLAYBACK_AVAILABLE
     except ImportError:
@@ -1541,7 +1684,7 @@ def _listener_handle(text: str) -> None:
     поэтому корутина передаётся в главный event loop. Ждать результат здесь
     нельзя дольше разумного: пока поток занят, следующая фраза не разбирается.
     """
-    if _main_loop is None:
+    if _main_loop is None or not _main_loop.is_running():
         # Состояние, которое снаружи ни на что не похоже: Scott слышит,
         # распознаёт, узнаёт своё имя — и молчит. Теперь об этом видно и в
         # состоянии прослушивания, а не только в логе, куда никто не смотрит.
@@ -1552,6 +1695,13 @@ def _listener_handle(text: str) -> None:
         print("⚠️ Главный цикл ещё не готов — команда пропущена")
         return
 
+    from scott_voice import get_current_voice
+    if get_current_voice() == 'scott-voice':
+        from audio_endpoints import _stop_current_speech
+        _stop_current_speech(preserve_prepared=True)
+    generation = _next_voice_response()
+    started = time.monotonic()
+
     async def run() -> None:
         # Ответ ИИ иногда идёт долго — замеры показывают до двадцати девяти
         # секунд в худших случаях. Столько молчать нельзя: человек решит, что
@@ -1560,23 +1710,14 @@ def _listener_handle(text: str) -> None:
         finished, _ = await asyncio.wait({thinking}, timeout=THINKING_CUE_AFTER_SECONDS)
 
         if not finished:
-            await _say_thinking()
+            await _say_thinking(generation)
 
         result = await thinking
         response = result.get("response", "")
-        if not response:
+        if not response or not _voice_response_current(generation):
             return
         print(f"🤖 Scott: {response}")
-        voice = scott_runtime.scott_voice
-        if voice is None:
-            return
-
-        # На время ответа прослушивание приостанавливается: микрофон слышит
-        # колонки, и собственный голос возвращается к Scott как новая фраза.
-        # На живой проверке он так распознал сам себя — «Мимо: "Попробую
-        # открыть Google Chrome"». Пока в ответе нет его имени, дело кончается
-        # лишней работой Whisper, но стоит ему произнести «Скотт» — и он начнёт
-        # разговаривать сам с собой без остановки.
+        # Echo/interruption state belongs to the serialized playback session.
         listening = scott_runtime.listener
         try:
             # Вслух — только суть. Замер: ответ ИИ на «что такое фотосинтез»
@@ -1588,28 +1729,29 @@ def _listener_handle(text: str) -> None:
             if spoken != response:
                 print(f"✂️ Вслух короче: {len(response)} знаков -> {len(spoken)}")
 
-            path = await asyncio.to_thread(voice.speak_to_file, spoken)
-            if path:
-                # Слушаем, не перебьют ли. Раньше здесь микрофон приглушался
-                # наглухо, и остановить ответ было нечем: человек ждал десять
-                # секунд, даже поняв ответ с первых слов.
-                #
-                # Начинаем слушать только перед самым звуком: между синтезом и
-                # воспроизведением ничего не звучит, и слушать там нечего.
-                if listening is not None:
-                    listening.expect_interruption(spoken)
-
-                await asyncio.to_thread(voice.play_audio, path)
+            await _play_voice_response(spoken, generation)
         except Exception as e:
             print(f"⚠️ Не удалось озвучить ответ: {e}")
         finally:
-            if listening is not None:
-                # Небольшая пауза на эхо: звук из колонок доходит до микрофона
-                # с задержкой и не обрывается ровно на последнем слове.
-                await asyncio.sleep(0.4)
-                listening.stop_expecting()
+            if listening is not None and _voice_response_current(generation):
+                listening._answered_at = time.time()
+                listening.stats.last_answer_seconds = round(time.monotonic() - started, 2)
 
-    asyncio.run_coroutine_threadsafe(run(), _main_loop)
+    future = asyncio.run_coroutine_threadsafe(run(), _main_loop)
+
+    def completed(task):
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            listening = scott_runtime.listener
+            if listening is not None and _voice_response_current(generation):
+                listening.stats.last_dispatch = "ошибка"
+                listening.stats.last_error = f"Команда не выполнена: {error}"
+            logging.error("Voice command failed", exc_info=(type(error), error, error.__traceback__))
+
+    future.add_done_callback(completed)
+    return future
 
 
 # ============= НАПОМИНАНИЯ =============
@@ -1751,23 +1893,7 @@ async def _произнести(текст: str) -> None:
     собственные слова как команду — на этом уже обжигались: в журнале
     услышанного оказывались фразы, которых человек не говорил.
     """
-    voice = scott_runtime.scott_voice
-    if voice is None or not текст:
-        return
-
-    listening = scott_runtime.listener
-    if listening is not None:
-        listening.suspend()
-    try:
-        path = await asyncio.to_thread(voice.speak_to_file, текст)
-        if path:
-            await asyncio.to_thread(voice.play_audio, path)
-    except Exception as e:
-        print(f"⚠️ Не удалось озвучить: {e}")
-    finally:
-        if listening is not None:
-            await asyncio.sleep(0.4)
-            listening.resume()
+    await _play_voice_response(текст)
 
 
 def _run_scheduled_command(item) -> None:
@@ -1827,22 +1953,7 @@ def _fire_reminder(item) -> None:
         return
 
     async def run() -> None:
-        voice = scott_runtime.scott_voice
-        if voice is None:
-            return
-        listening = scott_runtime.listener
-        if listening is not None:
-            listening.suspend()
-        try:
-            path = await asyncio.to_thread(voice.speak_to_file, text)
-            if path:
-                await asyncio.to_thread(voice.play_audio, path)
-        except Exception as e:
-            print(f"⚠️ Не удалось озвучить напоминание: {e}")
-        finally:
-            if listening is not None:
-                await asyncio.sleep(0.4)
-                listening.resume()
+        await _play_voice_response(text)
 
     asyncio.run_coroutine_threadsafe(run(), _main_loop)
 
@@ -2158,7 +2269,22 @@ async def forget_project(project_id: str):
 @app.get("/memories")
 async def list_memories():
     """Что Scott помнит о своём человеке."""
-    return {"success": True, **memories_module.describe()}
+    data = await asyncio.to_thread(memories_module.describe)
+    memory = getattr(intelligent_answerer, 'memory', None)
+    archive = getattr(memory, 'archive', None)
+    if callable(getattr(archive, 'semantic_status', None)):
+        data['semantic_search'] = await asyncio.to_thread(archive.semantic_status)
+    if callable(getattr(memory, 'stats', None)):
+        stats = await asyncio.to_thread(memory.stats)
+        data['warning'] = ' '.join(filter(None, [data.get('warning'), stats.pop('warning', '')]))
+        data.update(stats)
+    return {"success": True, **data}
+
+
+@app.post('/memories/settings')
+async def set_memory_settings(request: Dict):
+    result = await asyncio.to_thread(memories_module.set_auto_capture, request.get('auto_capture'))
+    return result if result.get('success') else JSONResponse(status_code=400, content=result)
 
 
 @app.post("/memories")
@@ -2170,7 +2296,7 @@ async def add_memory(request: Dict):
     голос ведут в одно место, иначе человек видел бы в списке не всё, что
     Scott помнит.
     """
-    return memories_module.add(
+    return await asyncio.to_thread(memories_module.add,
         (request or {}).get("text", ""),
         (request or {}).get("kind", memories_module.DEFAULT_KIND),
     )
@@ -2179,14 +2305,14 @@ async def add_memory(request: Dict):
 @app.delete("/memories/{memory_id}")
 async def forget_memory(memory_id: str):
     """Забыть одну запись. Окончательно, без корзины."""
-    return memories_module.remove(memory_id)
+    return await asyncio.to_thread(memories_module.remove, memory_id)
 
 
 @app.post("/memories/clear")
 async def forget_all(request: Dict = None):
     """Забыть всё или всё в одной категории."""
     вид = (request or {}).get("kind")
-    return memories_module.clear(вид)
+    return await asyncio.to_thread(memories_module.clear, вид)
 
 
 @app.get("/personality")
@@ -2313,6 +2439,7 @@ async def execute_command(command: Dict):
 
 _whisper_model_cache = None
 _whisper_device = None
+_whisper_load_lock = threading.RLock()
 
 
 def _resolve_whisper_device() -> str:
@@ -2333,8 +2460,9 @@ def _resolve_whisper_device() -> str:
 def _unload_whisper_model() -> None:
     """Выгрузить модель, чтобы она поднялась заново на выбранном устройстве."""
     global _whisper_model_cache, _whisper_device
-    _whisper_model_cache = None
-    _whisper_device = None
+    with _whisper_load_lock:
+        _whisper_model_cache = None
+        _whisper_device = None
     print("🔊 Модель Whisper выгружена — поднимется заново на выбранном устройстве")
 
 
@@ -2342,6 +2470,11 @@ scott_device_settings.register_reset_hook(_unload_whisper_model)
 
 
 def _get_whisper_model():
+    with _whisper_load_lock:
+        return _load_whisper_model()
+
+
+def _load_whisper_model():
     """
     Загрузить распознаватель один раз и переиспользовать между запросами.
 
@@ -2394,6 +2527,7 @@ def _transcribe_audio_file(file_path: str) -> str:
     try:
         import speech_recognition as sr
         recognizer = sr.Recognizer()
+        recognizer.operation_timeout = 10
         with sr.AudioFile(file_path) as source:
             audio = recognizer.record(source)
             text = recognizer.recognize_google(audio, language="ru-RU").strip()
@@ -2414,7 +2548,6 @@ async def speech_to_text(file: UploadFile = File(...)):
     
     Совместимый эндпоинт для Electron фронтенда
     """
-    temp_file = None
     # Быстрая проверка доступности библиотек для распознавания речи
     try:
         import importlib
@@ -2436,76 +2569,14 @@ async def speech_to_text(file: UploadFile = File(...)):
         )
 
     try:
-        # Сохранить файл временно
+        from audio_uploads import transcribe_upload
         contents = await file.read()
-        temp_file = f"temp_audio_{file.filename}"
-
-        with open(temp_file, "wb") as f:
-            f.write(contents)
-
-        # Предварительная проверка качества аудио: длительность и уровень громкости
-        try:
-            from pydub import AudioSegment
-            with timing_stage("01.распознавание.подготовка_аудио"):
-                seg = AudioSegment.from_file(temp_file)
-            duration_ms = len(seg)
-            loudness = seg.dBFS if hasattr(seg, 'dBFS') else None
-            print(f"🔎 Audio duration_ms={duration_ms}, dBFS={loudness}")
-
-            # Если аудио слишком короткое или слишком тихое — вернуть развернутое сообщение
-            if duration_ms < 400:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "success": False,
-                        "text": "",
-                        "filename": file.filename,
-                        "message": "audio_too_short: Аудио слишком короткое (меньше 400ms). Попробуйте говорить дольше."
-                    }
-                )
-            if loudness is not None and loudness < -50:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "success": False,
-                        "text": "",
-                        "filename": file.filename,
-                        "message": "audio_too_quiet: Уровень звука слишком низкий. Проверьте микрофон/громкость."
-                    }
-                )
-
-            # Усилить тихие (но не безнадёжно тихие — те уже отсеяны выше)
-            # клипы до целевой громкости перед распознаванием. На практике
-            # многие голосовые команды приходят в районе -34..-48 dBFS —
-            # Whisper на таких либо не распознаёт ничего (текст пустой,
-            # 400 Bad Request), либо галлюцинирует случайный текст. Простое
-            # усиление громкости заметно снижает долю таких промахов.
-            TARGET_DBFS = -20.0
-            MAX_GAIN_DB = 25.0
-            if loudness is not None and loudness < TARGET_DBFS:
-                gain = min(TARGET_DBFS - loudness, MAX_GAIN_DB)
-                with timing_stage("01.распознавание.усиление_звука"):
-                    seg = seg.apply_gain(gain)
-                    seg.export(temp_file, format="wav")
-                print(f"🔊 Тихое аудио ({loudness:.1f} dBFS) усилено на {gain:.1f} дБ перед распознаванием")
-        except Exception as audio_check_err:
-            print(f"⚠️ Audio pre-check failed: {audio_check_err}")
-
-        # Whisper — тяжёлая CPU-операция (секунды на клип); вызванная синхронно
-        # внутри async-хендлера она замораживает ВЕСЬ event loop, включая
-        # /health — из-за этого фронтенд (особенно в hands-free режиме, где
-        # запросы идут часто) периодически показывал "backend недоступен".
-        with timing_stage("01.распознавание.файл", meta={"байт": _размер_файла(temp_file)}):
-            text = await asyncio.to_thread(_transcribe_audio_file, temp_file)
-        return JSONResponse(
-            status_code=200 if text else 400,
-            content={
-                "success": bool(text),
-                "text": text,
-                "filename": file.filename,
-                "message": f"✅ Распознано: {text}" if text else "❌ Не удалось распознать речь",
-            }
-        )
+        # File IO, decoding, gain adjustment and inference share a worker.
+        # Concurrent uploads own distinct files; cancellation cannot delete a
+        # recording that a still-running recognition worker needs.
+        status, payload = await asyncio.to_thread(transcribe_upload, contents,
+                                                  file.filename, _transcribe_audio_file)
+        return JSONResponse(status_code=status, content=payload)
     except Exception as e:
         return JSONResponse(
             status_code=500,
@@ -2516,10 +2587,6 @@ async def speech_to_text(file: UploadFile = File(...)):
                 "message": f"❌ Ошибка: {e}"
             }
         )
-    finally:
-        import os
-        if temp_file and os.path.exists(temp_file):
-            os.remove(temp_file)
 
 
 @app.post("/ask")
@@ -2551,23 +2618,11 @@ async def ask_question(request: Dict):
                 "command": result.get("command")
             }
         }
+        if result.get('memory_warning'):
+            response_payload['data']['memory_warning'] = result['memory_warning']
         
-        try:
-            memory_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'memory.jsonl')
-            os.makedirs(os.path.dirname(memory_path), exist_ok=True)
-            
-            with open(memory_path, 'a', encoding='utf-8') as f:
-                history_entry = {
-                    "question": question,
-                    "answer": response_text,
-                    "timestamp": __import__('datetime').datetime.now().isoformat(),
-                    "context": context,
-                    "type": result.get("type", "command")
-                }
-                f.write(json.dumps(history_entry, ensure_ascii=False) + '\n')
-        except Exception as e:
-            print(f"⚠️ Ошибка сохранения истории: {e}")
-        
+        # process_command records the completed turn for both chat and voice.
+        # The old root-level JSONL is imported once by ConversationMemory.
         return response_payload
         
     except Exception as e:
@@ -2600,8 +2655,16 @@ async def speak_text(text: str = Form(""), force: bool = Form(False)):
             # "offline" каждый раз, когда Scott что-то озвучивал. Тот же приём, что уже
             # применён для Whisper в /speech_to_text и для psutil в /metrics.
             with timing_stage("02.синтез_речи.speak"):
-                await asyncio.to_thread(scott_voice.speak, text, None, force)
+                audio_file = await asyncio.to_thread(scott_voice.speak, text, None, force)
+            if not audio_file:
+                return {"success": False, "message": "Озвучка выключена, прервана или звук недоступен"}
             print(f"🔊 Озвучено: {text[:50]}...")
+            from scott_voice import get_current_voice
+            if get_current_voice() == 'scott-voice':
+                from scott_voice_engine import get_engine
+                info = await asyncio.to_thread(get_engine().describe)
+                if info['state'] in ('fallback', 'unavailable'):
+                    return {"success": True, "fallback": True, "message": info['reason'] or "Воспроизведён резервный голос."}
             return {"success": True, "message": "✅ Текст озвучен"}
         else:
             print(f"⚠️ Scott Voice недоступен")
@@ -2808,48 +2871,53 @@ async def list_available_voices(gender: str = ""):
     Список доступных голосов для выбора в Настройках — и локальных (Silero),
     и облачных (Edge TTS).
 
-    ?gender=male|female фильтрует список: лаунчер показывает только мужские,
-    не зашивая в интерфейс знание о конкретных именах голосов.
+    ?gender=male|female фильтрует список; без фильтра доступны все голоса.
     """
-    from scott_voice import AVAILABLE_VOICES, VOICE_GENDERS, get_current_voice
-    import silero_tts as _silero
-
-    wanted = gender.strip().lower()
-    voices = []
-    for vid, label in AVAILABLE_VOICES.items():
-        voice_gender = VOICE_GENDERS.get(vid, "unknown")
-        if wanted and voice_gender != wanted:
-            continue
-        voices.append({
-            "id": vid,
-            "label": label,
-            "gender": voice_gender,
-            # Локальный движок работает офлайн и заметно быстрее — это стоит
-            # показать в интерфейсе, чтобы выбор был осознанным.
-            "engine": "silero" if vid in _silero.SILERO_VOICES else "edge",
-            "local": vid in _silero.SILERO_VOICES,
-        })
-
-    return {
-        "voices": voices,
-        "default": get_current_voice(),
-        "current": get_current_voice(),
-    }
+    from scott_voice import describe_voices
+    return await asyncio.to_thread(describe_voices, gender.strip().lower())
 
 
 @app.post("/voice/select")
 async def select_voice(request: Dict):
     """
     Переключить голос Scott на лету — без правки .env и перезапуска backend.
-    Действует до перезапуска процесса.
+    Выбор сохраняется и восстанавливается после перезапуска.
     """
     from scott_voice import set_current_voice, get_current_voice, AVAILABLE_VOICES
+    from scott_voice_engine import VOICE_ID, PROFILES, get_engine
 
-    voice = (request.get("voice") or "").strip()
+    voice = request.get("voice")
+    voice = voice.strip() if isinstance(voice, str) else ""
     if not voice:
         return JSONResponse(status_code=400, content={"success": False, "message": "Голос не указан"})
+    profile = request.get('profile')
+    streaming=request.get('streaming')
+    if 'streaming' in request and (voice!=VOICE_ID or not isinstance(streaming,bool)):
+        return JSONResponse(status_code=400,content={'success':False,'message':'Потоковый режим должен быть true или false для Scott Voice'})
+    acceleration=request.get('acceleration')
+    if 'acceleration' in request and (voice!=VOICE_ID or not isinstance(acceleration,bool)):
+        return JSONResponse(status_code=400,content={'success':False,'message':'Ускорение должно быть true или false для Scott Voice'})
+    buffer_mode=request.get('buffer')
+    from speech_buffer import BUFFER_MODES
+    if 'buffer' in request and (voice!=VOICE_ID or not isinstance(buffer_mode,str) or buffer_mode not in BUFFER_MODES):
+        return JSONResponse(status_code=400,content={'success':False,'message':'Неизвестный запас звука Scott Voice'})
+    if profile is not None and (voice != VOICE_ID or not isinstance(profile, str) or profile not in PROFILES):
+        return JSONResponse(status_code=400, content={"success": False, "message": "Неизвестный характер Scott Voice"})
+    if voice == VOICE_ID:
+        info = await asyncio.to_thread(get_engine().describe)
+        if not info['available']:
+            return JSONResponse(status_code=503, content={"success": False, "message": info['reason']})
+        if streaming is True and not info.get('streaming_available'):
+            return JSONResponse(status_code=503,content={'success':False,'message':'Потоковый режим недоступен в этом окружении'})
+        if acceleration is True and not info.get('acceleration_available'):
+            return JSONResponse(status_code=503,content={'success':False,'message':'Ускоренный синтез недоступен в этом окружении'})
 
-    if not set_current_voice(voice):
+    try:
+        selected = await asyncio.to_thread(set_current_voice, voice, profile, streaming, acceleration, buffer_mode)
+    except OSError:
+        return JSONResponse(status_code=503, content={"success": False,
+            "message": "Не удалось сохранить выбор голоса"})
+    if not selected:
         return JSONResponse(
             status_code=400,
             content={
@@ -2859,6 +2927,8 @@ async def select_voice(request: Dict):
             },
         )
 
+    from audio_endpoints import _stop_current_speech
+    await asyncio.to_thread(_stop_current_speech)
     return {
         "success": True,
         "voice": get_current_voice(),
@@ -2872,6 +2942,8 @@ async def text_to_speech(request: Dict):
     """Преобразование текста в речь"""
     text = request.get("text", "")
     voice_name = request.get("voice")  # опционально: 'ru-RU-DmitryNeural' / 'ru-RU-SvetlanaNeural'
+    from scott_voice import get_current_voice
+    synthesis_timeout = 90 if (voice_name or get_current_voice()) == 'scott-voice' else 45
 
     if not text:
         return JSONResponse(
@@ -2891,7 +2963,7 @@ async def text_to_speech(request: Dict):
         with timing_stage("02.синтез_речи.в_файл"):
             audio_file = await asyncio.wait_for(
                 loop.run_in_executor(tts_executor, lambda: voice.speak_to_file(text, voice=voice_name)),
-                timeout=45
+                timeout=synthesis_timeout
             )
         logging.debug(f"/text_to_speech generated file: {audio_file}")
 
@@ -2918,6 +2990,8 @@ async def text_to_speech(request: Dict):
         )
     except asyncio.TimeoutError:
         logging.warning("/text_to_speech timed out while generating audio")
+        from scott_voice_engine import cancel as cancel_optional_voice
+        await asyncio.to_thread(cancel_optional_voice)
         return JSONResponse(
             status_code=504,
             content={"error": "Таймаут генерации аудио"}
@@ -2978,14 +3052,14 @@ async def websocket_endpoint(websocket: WebSocket):
 async def youtube_search(data: Dict):
     """Найти видео на YouTube (через YouTube Data API v3) и открыть его в браузере"""
     query = data.get('query', '').strip()
-    return web_integrations.search_youtube_video(query)
+    return await asyncio.to_thread(web_integrations.search_youtube_video, query)
 
 
 @app.post("/web/github/search")
 async def github_search(data: Dict):
     """Найти репозиторий на GitHub (через GitHub Search API) и открыть его в браузере"""
     query = data.get('query', '').strip()
-    return web_integrations.search_github_repo(query)
+    return await asyncio.to_thread(web_integrations.search_github_repo, query)
 
 
 # ============= МАКРОСЫ (v3.3) =============

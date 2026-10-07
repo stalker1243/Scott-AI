@@ -21,6 +21,7 @@ namespace ScottAI.Avalonia.Tests;
 /// уходит вовсе. Так и надо — проверки не должны зависеть от того, поднят ли
 /// сейчас backend на этой машине.
 /// </summary>
+[Collection("avalonia")]
 public class AiModelTests
 {
     /// <summary>

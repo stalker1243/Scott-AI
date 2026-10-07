@@ -21,6 +21,7 @@ namespace ScottAI.Avalonia.Tests;
 /// Поэтому проверяются все три исхода: обновление есть, обновления нет, и
 /// спросить не удалось.
 /// </summary>
+[Collection("avalonia")]
 public class AboutTests
 {
     private const string Адрес = "http://127.0.0.1:8000";

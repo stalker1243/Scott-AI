@@ -147,14 +147,23 @@ def collect_gpu_info() -> Dict:
     медленную работу: `pip install torch` ставит сборку для процессора и молча
     игнорирует видеокарту — так Whisper молотил 6.6 секунды вместо долей секунды.
     """
-    result: Dict = {"cuda_доступна": False}
+    result: Dict = {"cuda_доступна": False, 'rocm_доступен': False}
     try:
         import torch
+        try:
+            from . import device_settings, gpu_hardware
+        except ImportError:
+            import device_settings, gpu_hardware
 
         result["torch"] = torch.__version__
-        result["сборка_с_cuda"] = "+cu" in torch.__version__
-        result["cuda_доступна"] = bool(torch.cuda.is_available())
-        if result["cuda_доступна"]:
+        result["сборка_с_cuda"] = bool(getattr(getattr(torch, 'version', None), 'cuda', None))
+        result['сборка_с_rocm'] = device_settings.rocm_build()
+        result['версия_rocm'] = getattr(getattr(torch, 'version', None), 'hip', None)
+        result['адаптеры_amd'] = gpu_hardware.amd_adapters()
+        result["cuda_доступна"] = device_settings.cuda_available()
+        result['rocm_доступен'] = device_settings.rocm_available()
+        if result["cuda_доступна"] or result['rocm_доступен']:
+            result['ускоритель'] = 'AMD ROCm/HIP' if result['rocm_доступен'] else 'NVIDIA CUDA'
             result["устройство"] = torch.cuda.get_device_name(0)
             props = torch.cuda.get_device_properties(0)
             result["память_гб"] = round(props.total_memory / 1024 ** 3, 1)
@@ -170,6 +179,9 @@ def collect_gpu_info() -> Dict:
                     "Считает графика Apple (Metal). Синтез речи ею пользуется, "
                     "распознавание — нет: его библиотека поддерживает только процессор."
                 )
+            elif result['сборка_с_rocm'] or result['адаптеры_amd']:
+                result['подсказка'] = ('AMD обнаружен, но ROCm/HIP недоступен. Проверьте совместимость карты, '
+                    'драйвера AMD и сборки PyTorch по docs/amd-support.md. Пока используется процессор.')
             elif not result["сборка_с_cuda"]:
                 result["подсказка"] = (
                     "Установлена сборка torch для процессора. Видеокарта задействована не будет: "

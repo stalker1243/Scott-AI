@@ -35,6 +35,20 @@ from typing import Callable, List, Optional
 CUDA_INDEX = "https://download.pytorch.org/whl/cu126"
 TORCH_CUDA = "torch==2.9.1+cu126"
 TORCH_CPU = "torch"
+CPU_INDEX = 'https://download.pytorch.org/whl/cpu'
+TORCH_CPU_PIN = 'torch==2.9.1+cpu'
+ROCM_INDEX = 'https://stable.repo.amd.com/rocm/whl-next/'
+TORCH_ROCM_VERSION = '2.13.0+rocm10.0.0'
+ROCM_ARCHITECTURES = ('all', 'gfx908', 'gfx90a', 'gfx942', 'gfx950', 'gfx1030',
+    'gfx1100', 'gfx1101', 'gfx1102', 'gfx1103', 'gfx1150', 'gfx1151', 'gfx1152',
+    'gfx1153', 'gfx1200', 'gfx1201')
+
+
+def rocm_requirement(gfx: str = 'all') -> List[str]:
+    """Official AMD profile; driver/GPU compatibility is checked separately."""
+    if gfx not in ROCM_ARCHITECTURES:
+        raise ValueError('Укажите архитектуру вроде gfx1100 или all')
+    return ['--index-url', ROCM_INDEX, f'torch[device-{gfx}]=={TORCH_ROCM_VERSION}']
 
 Progress = Callable[[str, float], None]
 
@@ -264,6 +278,8 @@ def torch_requirement() -> tuple[List[str], str]:
     видеть, почему установка займёт четыре гигабайта или, наоборот, почему
     Scott будет работать медленнее.
     """
+    if os.getenv('SCOTT_TORCH_BACKEND', '').strip().lower() == 'cpu':
+        return ['--index-url', CPU_INDEX, TORCH_CPU_PIN], 'По настройке SCOTT_TORCH_BACKEND=cpu ставлю сборку для процессора.'
     if has_nvidia_gpu():
         name = gpu_name() or "видеокарта NVIDIA"
         return (
@@ -283,6 +299,17 @@ def torch_requirement() -> tuple[List[str], str]:
             "распознавание — на процессоре: библиотека, которая его считает, "
             "графику Apple не поддерживает.",
         )
+
+    try:
+        from .gpu_hardware import amd_adapters
+    except ImportError:
+        from gpu_hardware import amd_adapters
+    adapters = amd_adapters()
+    if adapters:
+        if sys.version_info[:2] < (3, 11) or sys.version_info[:2] > (3, 14):
+            return ([TORCH_CPU], 'Найдена AMD, но профиль ROCm требует Python 3.11–3.14. Пока ставлю сборку для процессора; см. docs/amd-support.md.')
+        return (rocm_requirement(), f"Найдена {adapters[0]['name']} — ставлю PyTorch для AMD ROCm/HIP. "
+                'Для ускорения нужны поддерживаемая карта и совместимый драйвер; см. docs/amd-support.md.')
 
     return (
         [TORCH_CPU],
@@ -386,13 +413,29 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
         return step
 
     try:
+        # Keep a manually configured ROCm wheel even when preparing missing
+        # dependencies/models, or running from another Python interpreter.
+        probe = subprocess.run([executable, '-c', 'import torch; print(bool(torch.version.hip))'],
+            capture_output=True, text=True, timeout=30)
+        preserve_rocm = (probe.returncode == 0 and probe.stdout.strip() == 'True'
+                         and os.getenv('SCOTT_TORCH_BACKEND', '').strip().lower() != 'cpu')
+    except (OSError, subprocess.TimeoutExpired):
+        preserve_rocm = False
+
+    try:
         # Доли шкалы поделены по весу: torch — почти четыре гигабайта, всё
         # остальное вместе — меньше сотни мегабайт.
-        ok, tail = _run_pip(
+        ok, tail = (True, '') if preserve_rocm else _run_pip(
             executable, torch_args, progress,
             "Скачиваю torch — самая долгая часть, несколько минут…",
             start=0.10, span=0.45,
         )
+        if not ok:
+            if ROCM_INDEX in torch_args:
+                _report(progress, 'Не удалось установить профиль AMD. Ставлю CPU, чтобы Scott мог работать; см. docs/amd-support.md.', 0.45)
+                ok, tail = _run_pip(executable,
+                    ['--index-url', CPU_INDEX, TORCH_CPU_PIN],
+                    progress, 'Ставлю запасную сборку torch для процессора…', start=0.45, span=0.10)
         if not ok:
             step.error = f"не удалось поставить torch: {tail[-400:]}"
             return step

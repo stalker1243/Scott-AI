@@ -10,6 +10,7 @@
 """
 
 from typing import Dict
+import asyncio
 
 from fastapi import APIRouter, File, Form, UploadFile
 
@@ -48,10 +49,11 @@ async def ask_about_file(
     Без вопроса тоже можно: тогда Scott расскажет, что видит, — обычно этого и
     хотят, перетаскивая снимок экрана.
     """
-    data = await file.read()
+    data = await file.read(attachments_module.MAX_BYTES + 1)
+    await file.close()
     name = file.filename or "файл"
 
-    attachment = attachments_module.read(name, data=data)
+    attachment = await asyncio.to_thread(attachments_module.read, name, data=data)
 
     if not attachment.ok:
         return {
@@ -62,15 +64,14 @@ async def ask_about_file(
 
     answerer = _answerer()
 
-    if attachment.kind == "image":
-        answer, ok = answerer.answer_about_image(
-            question, attachment.image_base64, attachment.media_type)
-    else:
-        # Документ — это обычный вопрос с материалом внутри. Отвечать на
-        # него умеет любая модель, и отдельная дорога здесь была бы лишней.
-        answer = answerer.answer_question(
-            attachments_module.as_question(attachment, question))
-        ok = bool(answer)
+    if not answerer:
+        return {'success': False, 'error': 'ИИ не настроен', 'name': name}
+    def work():
+        if attachment.kind == 'image':
+            return answerer.answer_about_image(question, attachment.image_base64, attachment.media_type)
+        answer = answerer.answer_question(attachments_module.as_question(attachment, question))
+        return answer, bool(answer)
+    answer, ok = await asyncio.to_thread(work)
 
     return {
         "success": ok,
@@ -91,10 +92,13 @@ async def vision_ability() -> Dict:
     """
     answerer = _answerer()
 
+    if not answerer:
+        return {'success': False, 'sees_images': False, 'reads_documents': False}
+    sees_images = await asyncio.to_thread(answerer.sees_images)
     return {
         "success": True,
         "provider": answerer.api_provider,
         "model": answerer.model,
-        "sees_images": answerer.sees_images(),
+        "sees_images": sees_images,
         "reads_documents": bool(answerer.enabled),
     }

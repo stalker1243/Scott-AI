@@ -21,6 +21,7 @@ namespace ScottAI.Avalonia.Tests;
 /// навсегда. Лаунчер ждал бы по четыре секунды на каждом и объявил, что Python
 /// не найден, — хотя тот стоит на месте.
 /// </summary>
+[Collection("avalonia")]
 public class BackendLauncherTests
 {
     // ==================== Проба ====================

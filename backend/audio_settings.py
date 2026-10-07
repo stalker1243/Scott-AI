@@ -21,8 +21,16 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
+
+try:
+    from .storage import atomic_write_text
+except ImportError:
+    from storage import atomic_write_text
+
+_LOCK = threading.RLock()
 
 try:
     import sounddevice as sd
@@ -105,11 +113,11 @@ def _sanitize(settings: Dict) -> Dict:
 
     try:
         volume = int(round(float(settings.get("volume", 100))))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         volume = 100
     clean["volume"] = max(0, min(MAX_VOLUME, volume))
 
-    clean["quiet"] = bool(settings.get("quiet", False))
+    clean["quiet"] = settings.get("quiet") is True
 
     # Неизвестный характер — не повод остаться без голоса: берём обычный.
     характер = settings.get("character", "natural")
@@ -128,10 +136,7 @@ def _sanitize(settings: Dict) -> Dict:
 
 
 def _save(settings: Dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    atomic_write_text(CONFIG_PATH, json.dumps(settings, ensure_ascii=False, indent=2))
 
 
 # ---------------------------------------------------------------- чтение
@@ -210,19 +215,26 @@ def update(**changes) -> Dict:
     Возвращает полный набор настроек — вызывающему коду не приходится читать
     их отдельным запросом, чтобы показать результат.
     """
-    settings = _load()
-    for key, value in changes.items():
-        if key in DEFAULTS and value is not None:
-            settings[key] = value
-
-    settings = _sanitize(settings)
-    _save(settings)
-    return settings
+    with _LOCK:
+        settings = _load()
+        for key, value in changes.items():
+            if key in DEFAULTS and value is not None:
+                settings[key] = value
+        settings = _sanitize(settings)
+        _save(settings)
+        return settings
 
 
 def set_quiet(quiet: bool) -> Dict:
     """Включить или выключить тихий режим."""
     return update(quiet=bool(quiet))
+
+
+def adjust_volume(delta: int) -> Dict:
+    """Apply a relative change without losing another command's update."""
+    with _LOCK:
+        volume = max(0, min(MAX_VOLUME, _load()['volume'] + delta))
+        return update(volume=volume)
 
 
 # ---------------------------------------------------------------- список

@@ -94,7 +94,7 @@ def _голос() -> Dict:
         return {"state": WARN,
                 "detail": "Silero недоступен — Scott говорит запасным облачным голосом"}
 
-    return {"state": OK, "detail": f"Silero, считает {_словами(устройство)}"}
+    return {"state": OK, "detail": f"Silero, считает {device_settings.device_label(устройство)}"}
 
 
 def _распознавание() -> Dict:
@@ -112,7 +112,8 @@ def _распознавание() -> Dict:
     except Exception:
         быстрый = False
 
-    имя = "faster-whisper" if быстрый and движок != "openai" else "openai-whisper"
+    hip_gpu = устройство == 'cuda' and device_settings.rocm_build()
+    имя = "faster-whisper" if быстрый and движок != "openai" and not hip_gpu else "openai-whisper"
 
     if устройство == "cpu":
         # Не поломка: так Scott слышит, просто медленнее — около шести секунд на
@@ -120,7 +121,7 @@ def _распознавание() -> Dict:
         return {"state": WARN,
                 "detail": f"{имя}, считает процессор — фраза распознаётся дольше"}
 
-    return {"state": OK, "detail": f"{имя}, считает {_словами(устройство)}"}
+    return {"state": OK, "detail": f"{имя}, считает {device_settings.device_label(устройство)}"}
 
 
 def _видеокарта() -> Dict:
@@ -131,6 +132,16 @@ def _видеокарта() -> Dict:
 
     if device_settings.cuda_available():
         return {"state": OK, "detail": "CUDA доступна"}
+
+    if device_settings.rocm_available():
+        return {'state': OK, 'detail': 'AMD ROCm/HIP доступен'}
+
+    try:
+        from .gpu_hardware import amd_adapters
+    except ImportError:
+        from gpu_hardware import amd_adapters
+    if device_settings.rocm_build() or amd_adapters():
+        return {'state': WARN, 'detail': 'AMD: ROCm/HIP недоступен — работает процессор. Проверьте драйвер и PyTorch: docs/amd-support.md.'}
 
     if device_settings.mps_available():
         return {"state": OK, "detail": "графика Apple (Metal) доступна"}
