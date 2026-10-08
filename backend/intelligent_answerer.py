@@ -14,6 +14,10 @@ import importlib
 import tempfile
 import copy
 import threading
+try:
+    from .model_requests import openai_options, anthropic_options, deepseek_options
+except ImportError:
+    from model_requests import openai_options, anthropic_options, deepseek_options
 from collections import deque
 try:
     from .storage import atomic_write_text
@@ -81,22 +85,24 @@ RETRY_PAUSE_SECONDS = 1.5
 
 STATIC_PROVIDER_MODELS = {
     "OpenAI": [
+        {"id": "gpt-6.1-sol", "note": "GPT-6.1 Sol — сложные задачи и код"},
+        {"id": "gpt-6-astra", "note": "GPT-6 Astra — флагманская модель"},
+        {"id": "gpt-6-luna", "note": "GPT-6 Luna — быстрые повседневные ответы"},
         {"id": "gpt-4o", "note": "Лучшее качество и мультимодальность, дороже"},
         {"id": "gpt-4o-mini", "note": "Быстрее и дешевле gpt-4o, качество чуть ниже"},
-        {"id": "gpt-4-turbo", "note": "Предыдущее поколение, тоже сильное"},
-        {"id": "gpt-3.5-turbo", "note": "Самый дешёвый и быстрый, попроще"},
     ],
     "DeepSeek": [
-        {"id": "deepseek-chat", "note": "Основная модель — быстрая, недорогая"},
-        {"id": "deepseek-reasoner", "note": "С цепочкой рассуждений — сильнее в логике/математике, медленнее"},
+        {"id": "deepseek-flash", "note": "V4.1 Flash — текст и изображения"},
+        {"id": "deepseek-v4-pro", "note": "V4 Pro — сложные задачи и код"},
     ],
     # Здесь только то, в чём есть уверенность. Живой список Anthropic отдаёт
     # сам, и он всегда точнее: модели появляются и снимаются чаще, чем выходят
     # версии Scott.
     "Anthropic": [
-        {"id": "claude-sonnet-5", "note": "Обычный выбор: сильная и не самая дорогая"},
-        {"id": "claude-opus-5", "note": "Самая способная, дороже и медленнее"},
-        {"id": "claude-haiku-4-5-20251001", "note": "Быстрая и дешёвая, для простого"},
+        {"id": "claude-sonnet-5-5", "note": "Sonnet 5.5 — универсальная модель"},
+        {"id": "claude-opus-5-5", "note": "Opus 5.5 — сложные задачи"},
+        {"id": "claude-haiku-5-5", "note": "Haiku 5.5 — быстрые ответы"},
+        {"id": "claude-fable-5-1", "note": "Fable 5.1 — глубокие рассуждения"},
     ],
     # У шлюза каталог живой по определению — здесь пусто не случайно: любой
     # статический список устареет раньше, чем человек дочитает его до конца.
@@ -664,18 +670,18 @@ class IntelligentAnswerer:
             connected = self._connect_provider("Groq", "openai/gpt-oss-120b", self.env_keys["Groq"])
 
         if not connected and self.env_keys["DeepSeek"] and REQUESTS_AVAILABLE:
-            connected = self._connect_provider("DeepSeek", "deepseek-chat", self.env_keys["DeepSeek"])
+            connected = self._connect_provider("DeepSeek", "deepseek-flash", self.env_keys["DeepSeek"])
 
         if not connected and self.env_keys["Anthropic"] and REQUESTS_AVAILABLE:
             connected = self._connect_provider(
-                "Anthropic", "claude-sonnet-5", self.env_keys["Anthropic"])
+                "Anthropic", "claude-sonnet-5-5", self.env_keys["Anthropic"])
 
         if not connected and self.env_keys["OpenRouter"] and REQUESTS_AVAILABLE:
             connected = self._connect_provider(
                 "OpenRouter", "anthropic/claude-sonnet-5", self.env_keys["OpenRouter"])
 
         if not connected and self.env_keys["OpenAI"] and OPENAI_AVAILABLE:
-            connected = self._connect_provider("OpenAI", "gpt-3.5-turbo", self.env_keys["OpenAI"])
+            connected = self._connect_provider("OpenAI", "gpt-6-luna", self.env_keys["OpenAI"])
 
         # Если ничего не работает
         if not self.enabled:
@@ -1097,7 +1103,7 @@ class IntelligentAnswerer:
                 provider['models'] = list(provider['models']) + [
                     {'id': 'gpt-image-2.5-sunburst', 'note': 'Генерация изображений'},
                     {'id': 'gpt-image-2.5-flare', 'note': 'Генерация изображений'},
-                    {'id': 'gpt-image-1', 'note': 'Генерация изображений'},
+                    {'id': 'gpt-image-2', 'note': 'Генерация изображений'},
                 ]
             provider['models'] = [dict(row, capabilities=row.get('capabilities') or capabilities(provider['id'], row['id'])) for row in provider['models']]
         return providers
@@ -1187,8 +1193,7 @@ class IntelligentAnswerer:
                     json={
                         "model": self.model,
                         "messages": messages,
-                        "temperature": self.temperature,
-                        "max_tokens": max_tokens,
+                        **deepseek_options(self.model, max_tokens, self.temperature),
                     },
                     timeout=30,
                 )
@@ -1216,8 +1221,7 @@ class IntelligentAnswerer:
                         "model": self.model,
                         "system": instructions,
                         "messages": беседа,
-                        "max_tokens": max_tokens,
-                        "temperature": self.temperature,
+                        **anthropic_options(self.model, max_tokens, self.temperature),
                     },
                     timeout=REQUEST_TIMEOUT_SECONDS,
                 )
@@ -1263,11 +1267,7 @@ class IntelligentAnswerer:
                     lambda: self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
-                        temperature=self.temperature,
-                        max_tokens=max_tokens,
-                        top_p=0.95,
-                        presence_penalty=0.0,
-                        frequency_penalty=0.0,
+                        **openai_options(self.model, max_tokens, self.temperature),
                         timeout=REQUEST_TIMEOUT_SECONDS,
                     ),
                     provider="OpenAI",
@@ -1407,7 +1407,7 @@ class IntelligentAnswerer:
                     json={
                         "model": self.model,
                         "system": self.instructions(),
-                        "max_tokens": self.max_tokens,
+                        **anthropic_options(self.model, self.max_tokens),
                         "messages": [{
                             "role": "user",
                             "content": [
@@ -1456,13 +1456,24 @@ class IntelligentAnswerer:
                 })
                 return answer, bool(answer)
 
+            if self.api_provider == "DeepSeek":
+                response = requests.post(
+                    self.client['base_url'] + '/chat/completions',
+                    headers={'Authorization': 'Bearer ' + self.client['api_key']},
+                    json=dict(model=self.model, messages=messages,
+                              **deepseek_options(self.model, self.max_tokens)),
+                    timeout=REQUEST_TIMEOUT_SECONDS * 2)
+                raise_with_body(response)
+                answer = first_message(response.json())
+                return answer, bool(answer)
+
             # Дальше — OpenAI через собственную библиотеку.
 
             # OpenAI через собственную библиотеку.
             result = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=self.max_tokens,
+                **(openai_options(self.model, self.max_tokens) if self.api_provider == "OpenAI" else dict(max_tokens=self.max_tokens)),
                 timeout=REQUEST_TIMEOUT_SECONDS * 2,
             )
             answer = (result.choices[0].message.content or "").strip()

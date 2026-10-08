@@ -8,7 +8,9 @@ QtObject {
         property double progress: 0
         property string message: "Подготовим библиотеки и модели речи для вашего компьютера."
         property string error: ""
+        property bool compact: false
         function prepare() {}
+        function cancel() { busy = false }
     }
     property bool online: true
     property bool busy: false

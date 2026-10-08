@@ -46,4 +46,6 @@ done
 export DISPLAY=:99
 "$scott_prefix/run.sh" --smoke-chat
 "$scott_prefix/run.sh" --smoke-voice
+"$scott_prefix/run.sh" --smoke-setup
+"$scott_prefix/run.sh" --smoke-profile
 echo "Distribution package check passed: $PRETTY_NAME"

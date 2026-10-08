@@ -64,10 +64,35 @@ void ProfileAvatar::remove() {
 void ProfileAvatar::setCrop(double zoom, double x, double y) {
     if (!std::isfinite(zoom) || !std::isfinite(x) || !std::isfinite(y)) return;
     zoom = qBound(1.0, zoom, 4.0);
-    const double slack = 220 * (zoom - 1) / 2;
-    x = qBound(-slack, x, slack); y = qBound(-slack, y, slack);
+    const double scale = m_image.isNull() ? 0 : qMax(220.0 / m_image.width(), 220.0 / m_image.height()) * zoom;
+    const double slackX = qMax(0.0, (m_image.width() * scale - 220) / 2);
+    const double slackY = qMax(0.0, (m_image.height() * scale - 220) / 2);
+    x = qBound(-slackX, x, slackX); y = qBound(-slackY, y, slackY);
     if (m_zoom == zoom && m_x == x && m_y == y) return;
     m_zoom = zoom; m_x = x; m_y = y; m_dirty = true; ++m_revision; emit changed();
+}
+QVariantMap ProfileAvatar::cropSize() const {
+    if (m_image.isNull()) return {{"width", 220}, {"height", 220}};
+    const double scale = qMax(220.0 / m_image.width(), 220.0 / m_image.height()) * m_zoom;
+    return {{"width", m_image.width() * scale}, {"height", m_image.height() * scale}};
+}
+void ProfileAvatar::zoomAt(double zoom, double x, double y) {
+    if (!std::isfinite(zoom) || !std::isfinite(x) || !std::isfinite(y)) return;
+    const double ratio = qBound(1.0, zoom, 4.0) / m_zoom;
+    setCrop(zoom, x + (m_x - x) * ratio, y + (m_y - y) * ratio);
+}
+void ProfileAvatar::beginCrop() {
+    if (m_editing) return;
+    m_editing = true; m_editImage = m_image; m_editZoom = m_zoom; m_editX = m_x; m_editY = m_y; m_editDirty = m_dirty;
+}
+void ProfileAvatar::finishCrop(bool accept) {
+    if (!m_editing) return;
+    m_editing = false;
+    if (!accept) {
+        m_image = m_editImage; m_zoom = m_editZoom; m_x = m_editX; m_y = m_editY; m_dirty = m_editDirty;
+        ++m_revision; ++m_sourceRevision; emit changed();
+    }
+    m_editImage = {};
 }
 QImage ProfileAvatar::preview() const {
     if (m_image.isNull()) return {};

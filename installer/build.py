@@ -156,12 +156,39 @@ def build_qt_launcher(dest: Path, qt_root: Path, compiler_root: Path) -> None:
     environment['PATH'] = str(compiler_root / 'bin') + os.pathsep + str(qt_root / 'bin') + os.pathsep + environment.get('PATH', '')
     subprocess.run([str(tool), '--release', '--no-translations', '--compiler-runtime', '--qmldir', str(project),
                     '--dir', str(output), str(executable)], check=True, env=environment, cwd=ROOT)
+    prune_qt_styles(output)
+    copy_licenses(dest, qt_root)
+    log(f'Qt-лаунчер и библиотеки подготовлены: {output}')
+
+
+def copy_licenses(dest: Path, qt_root: Path) -> None:
+    """Retain every SDK SBOM byte, compressed to reduce installed disk usage."""
     licenses = dest/'licenses'
     shutil.copytree(INSTALLER/'licenses',licenses,dirs_exist_ok=True)
     sbom = qt_root/'sbom'
     if sbom.is_dir():
-        shutil.copytree(sbom,licenses/'qt-sbom',dirs_exist_ok=True)
-    log(f'Qt-лаунчер и библиотеки подготовлены: {output}')
+        with zipfile.ZipFile(licenses/'qt-sbom.zip', 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            for path in sorted(sbom.rglob('*')):
+                if path.is_file():
+                    archive.write(path, str(path.relative_to(sbom)).replace('\\', '/'))
+
+
+def prune_qt_styles(output: Path) -> None:
+    """The app explicitly selects Basic. Remove only other deployed Control styles."""
+    output = output.resolve()
+    if not output.is_relative_to(ROOT.resolve()) or output == ROOT.resolve():
+        raise ValueError('Qt deployment must be inside the project')
+    source = ROOT/'ScottAI_qt/src/main.cpp'
+    if not source.is_file() or 'QQuickStyle::setStyle("Basic")' not in source.read_text(encoding='utf-8'):
+        return
+    for style in ('Fusion', 'Imagine', 'Material', 'Universal', 'FluentWinUI3', 'Windows', 'iOS', 'macOS'):
+        directory = output/'qml/QtQuick/Controls'/style
+        if directory.is_dir():
+            if not directory.resolve().is_relative_to(output):
+                raise ValueError('Qt style resolves outside the deployment')
+            shutil.rmtree(directory)
+        for name in (f'Qt6QuickControls2{style}.dll', f'Qt6QuickControls2{style}StyleImpl.dll'):
+            (output/name).unlink(missing_ok=True)
 
 
 def copy_extras(dest: Path) -> None:
@@ -176,6 +203,11 @@ def copy_extras(dest: Path) -> None:
     notes = ROOT/'docs'/f'release-notes-{read_version()}.md'
     if notes.is_file():
         shutil.copy2(notes,dest/'RELEASE-NOTES.md')
+    for name in ('installation.md', 'models.md'):
+        document = ROOT/'docs'/name
+        if document.is_file():
+            (dest/'docs').mkdir(exist_ok=True)
+            shutil.copy2(document, dest/'docs'/name)
     brand = dest / 'assets' / 'brand'
     brand.mkdir(parents=True, exist_ok=True)
     for name in ('scott-logo.png', 'scott-logo-light.png'):
@@ -187,7 +219,7 @@ def copy_extras(dest: Path) -> None:
 def report_size(dest: Path) -> None:
     total = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file())
     log(f"размер дистрибутива: {total / 1024 ** 2:.0f} МБ")
-    log("(torch и модели — ещё около 4.5 ГБ — ставятся при первом запуске)")
+    log("(torch и модели ставятся при первом запуске; объём зависит от CPU/GPU)")
 
 
 def read_version() -> str:

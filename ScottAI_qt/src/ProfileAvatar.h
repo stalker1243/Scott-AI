@@ -12,6 +12,7 @@ class ProfileAvatar final : public QObject {
     Q_PROPERTY(QString source READ source NOTIFY changed)
     Q_PROPERTY(QString previewSource READ previewSource NOTIFY changed)
     Q_PROPERTY(QVariantMap crop READ crop NOTIFY changed)
+    Q_PROPERTY(QVariantMap cropSize READ cropSize NOTIFY changed)
 public:
     explicit ProfileAvatar(QString directory, bool temporary = false, QString legacyDirectory = {});
     bool hasAvatar() const { return !m_image.isNull(); }
@@ -20,6 +21,7 @@ public:
     QString source() const { return hasAvatar() ? QString("image://avatar/source?v=%1").arg(m_sourceRevision) : QString(); }
     QString previewSource() const { return hasAvatar() ? QString("image://avatar/preview?v=%1").arg(m_revision) : QString(); }
     QVariantMap crop() const { return {{"zoom", m_zoom}, {"x", m_x}, {"y", m_y}}; }
+    QVariantMap cropSize() const;
     QImage image() const { return m_image; }
     QImage preview() const;
     Q_INVOKABLE bool choose();
@@ -27,6 +29,9 @@ public:
     Q_INVOKABLE void remove();
     Q_INVOKABLE void setCrop(double zoom, double x, double y);
     Q_INVOKABLE void resetCrop() { setCrop(1, 0, 0); }
+    Q_INVOKABLE void zoomAt(double zoom, double x, double y);
+    Q_INVOKABLE void beginCrop();
+    Q_INVOKABLE void finishCrop(bool accept);
     Q_INVOKABLE bool save();
     Q_INVOKABLE void revert();
 signals:
@@ -40,6 +45,9 @@ private:
     double m_zoom = 1, m_x = 0, m_y = 0;
     QImage m_savedImage;
     double m_savedZoom = 1, m_savedX = 0, m_savedY = 0;
+    QImage m_editImage;
+    double m_editZoom = 1, m_editX = 0, m_editY = 0;
+    bool m_editing = false, m_editDirty = false;
 };
 
 class AvatarProvider final : public QQuickImageProvider {

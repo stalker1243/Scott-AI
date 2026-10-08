@@ -95,8 +95,8 @@ ColumnLayout {
                             onTextEdited: { page.dirty = true; page.localNotice = "" }
                         }
                         RowLayout {
-                            UiButton { theme: page.theme; text: "Фото"; implicitHeight: 32; enabled: !client.profileBusy; onClicked: if (page.avatar.choose()) cropDialog.open() }
-                            UiButton { theme: page.theme; text: "Кадр"; implicitHeight: 32; visible: page.avatar.hasAvatar; enabled: !client.profileBusy; onClicked: cropDialog.open() }
+                            UiButton { theme: page.theme; text: "Фото"; implicitHeight: 32; enabled: !client.profileBusy; onClicked: { page.avatar.beginCrop(); if (page.avatar.choose()) cropDialog.open(); else page.avatar.finishCrop(false) } }
+                            UiButton { theme: page.theme; text: "Кадр"; implicitHeight: 32; visible: page.avatar.hasAvatar; enabled: !client.profileBusy; onClicked: { page.avatar.beginCrop(); cropDialog.open() } }
                             UiButton { theme: page.theme; text: "Удалить"; implicitHeight: 32; destructive: true; visible: page.avatar.hasAvatar; enabled: !client.profileBusy; onClicked: page.avatar.remove() }
                         }
                     }
@@ -172,35 +172,65 @@ ColumnLayout {
     Dialog {
         id: cropDialog; objectName: "avatarCropDialog"
         parent: Overlay.overlay; anchors.centerIn: parent; modal: true; padding: 18
-        width: Math.min(420, parent.width - 32); title: "Кадрирование"; closePolicy: Popup.CloseOnEscape
+        width: Math.min(480, parent.width - 32); title: "Фото профиля"; closePolicy: Popup.CloseOnEscape
         background: SurfacePanel { theme: page.theme; color: page.theme.popup }
         header: Text { text: cropDialog.title; color: page.theme.ink; font.family: page.theme.fontFamily; font.pixelSize: 15; font.weight: Font.DemiBold; leftPadding: 18; topPadding: 16; bottomPadding: 6 }
-        onRejected: page.avatar.revert()
+        onOpened: page.avatar.beginCrop()
+        onAccepted: page.avatar.finishCrop(true)
+        onClosed: page.avatar.finishCrop(false)
         contentItem: ColumnLayout {
             spacing: 12
             Item {
-                Layout.alignment: Qt.AlignHCenter; implicitWidth: 220; implicitHeight: 220
-                Image { anchors.fill: parent; source: page.avatar.previewSource; cache: false }
+                id: cropStage; objectName: "avatarCropStage"
+                Layout.alignment: Qt.AlignHCenter; implicitWidth: 320; implicitHeight: 320
+                clip: true; focus: true
+                readonly property real factor: width / 220
+                Image {
+                    source: page.avatar.source; cache: false
+                    width: page.avatar.cropSize.width * cropStage.factor
+                    height: page.avatar.cropSize.height * cropStage.factor
+                    x: (cropStage.width - width) / 2 + page.avatar.crop.x * cropStage.factor
+                    y: (cropStage.height - height) / 2 + page.avatar.crop.y * cropStage.factor
+                }
+                Canvas {
+                    anchors.fill: parent
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.reset(); ctx.beginPath()
+                        ctx.rect(0, 0, width, height)
+                        ctx.arc(width / 2, height / 2, width / 2 - 1, 0, Math.PI * 2, true)
+                        ctx.fillStyle = "#b3000000"; ctx.fill()
+                    }
+                }
+                Rectangle { anchors.fill: parent; radius: width / 2; color: "transparent"; border.width: 2; border.color: page.theme.accent }
                 DragHandler {
                     id: cropDrag; target: null
                     property real startX: 0; property real startY: 0
                     onActiveChanged: if (active) { startX = page.avatar.crop.x; startY = page.avatar.crop.y }
-                    onActiveTranslationChanged: if (active) page.avatar.setCrop(page.avatar.crop.zoom, startX + activeTranslation.x, startY + activeTranslation.y)
+                    onActiveTranslationChanged: if (active) page.avatar.setCrop(page.avatar.crop.zoom, startX + activeTranslation.x / cropStage.factor, startY + activeTranslation.y / cropStage.factor)
                 }
                 HoverHandler { cursorShape: Qt.SizeAllCursor }
                 WheelHandler {
-                    acceptedModifiers: Qt.ControlModifier
-                    onWheel: function(event) { page.avatar.setCrop(page.avatar.crop.zoom + event.angleDelta.y / 120 * 0.1, page.avatar.crop.x, page.avatar.crop.y) }
+                    onWheel: function(event) {
+                        page.avatar.zoomAt(page.avatar.crop.zoom + event.angleDelta.y / 120 * 0.15,
+                                           event.x / cropStage.factor - 110, event.y / cropStage.factor - 110)
+                    }
                 }
+                Keys.onLeftPressed: page.avatar.setCrop(page.avatar.crop.zoom, page.avatar.crop.x - 5, page.avatar.crop.y)
+                Keys.onRightPressed: page.avatar.setCrop(page.avatar.crop.zoom, page.avatar.crop.x + 5, page.avatar.crop.y)
+                Keys.onUpPressed: page.avatar.setCrop(page.avatar.crop.zoom, page.avatar.crop.x, page.avatar.crop.y - 5)
+                Keys.onDownPressed: page.avatar.setCrop(page.avatar.crop.zoom, page.avatar.crop.x, page.avatar.crop.y + 5)
             }
+            Text { text: "Перетащите фото · колесо мыши — масштаб"; color: page.theme.muted; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter }
             RowLayout {
-                UiSlider { theme: page.theme; Layout.fillWidth: true; from: 1; to: 4; stepSize: 0.05; value: page.avatar.crop.zoom; Accessible.name: "Приближение фото"; onMoved: page.avatar.setCrop(value, page.avatar.crop.x, page.avatar.crop.y) }
-                Text { text: page.avatar.crop.zoom.toFixed(1) + "×"; color: page.theme.ink; font.pixelSize: 12 }
+                UiSlider { theme: page.theme; Layout.fillWidth: true; from: 1; to: 4; stepSize: 0.05; value: page.avatar.crop.zoom; Accessible.name: "Приближение фото"; onMoved: page.avatar.zoomAt(value, 0, 0) }
+                Text { text: Math.round(page.avatar.crop.zoom * 100) + "%"; color: page.theme.ink; font.pixelSize: 12 }
             }
             RowLayout {
                 UiButton { theme: page.theme; text: "Сбросить"; onClicked: page.avatar.resetCrop() }
                 Item { Layout.fillWidth: true }
-                UiButton { theme: page.theme; text: "Готово"; primary: true; onClicked: cropDialog.close() }
+                UiButton { theme: page.theme; text: "Отмена"; onClicked: cropDialog.reject() }
+                UiButton { theme: page.theme; text: "Готово"; primary: true; onClicked: cropDialog.accept() }
             }
         }
     }

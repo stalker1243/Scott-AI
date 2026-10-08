@@ -63,6 +63,8 @@ jobs:
           trap 'mv "$scott_sdk_backup" "$QT_ROOT_DIR"' EXIT
           env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-chat
           env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-voice
+          env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-setup
+          env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-profile
       - name: Библиотеки backend для CPU
         run: |
           source installer/dist-linux-qt/python-environment.sh
@@ -71,6 +73,17 @@ jobs:
           "$scott_python" -I -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
       - name: Изолированные тесты backend
         run: '"$RUNNER_TEMP/Scott AI package/runtime/bin/python" backend/run_tests.py'
+      - name: Полная подготовка моделей в новом CPU-кеше
+        env:
+          SCOTT_TORCH_BACKEND: cpu
+          WHISPER_MODEL: small
+        run: |
+          source installer/dist-linux-qt/python-environment.sh
+          export XDG_CACHE_HOME="$RUNNER_TEMP/scott-first-setup"
+          export TORCH_HOME="$XDG_CACHE_HOME/torch"
+          scott_python="$RUNNER_TEMP/Scott AI package/runtime/bin/python"
+          "$scott_python" -u "$RUNNER_TEMP/Scott AI package/backend/bootstrap.py" --json
+          "$scott_python" -u "$RUNNER_TEMP/Scott AI package/backend/bootstrap.py" --check --json
       - uses: actions/upload-artifact@v4
         with:
           name: ScottAI-Qt-Linux-x86_64

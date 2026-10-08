@@ -7,6 +7,11 @@
 Debian 12/13, Fedora 44 и Arch. GNOME/KDE, голос на настоящем устройстве и
 Wayland ещё предстоит проверить. Scott Voice остаётся экспериментом Windows/NVIDIA.
 
+В 2.0.1 улучшены загрузка моделей и выбор компактной CPU-установки:
+[первая подготовка и размер](installation.md).
+Пакет включает X11-плагин XCB. Для сеанса Wayland нужен XWayland;
+нативный Wayland пока не включён.
+
 ## Установка
 
 Сначала установите системные библиотеки для своего дистрибутива.
@@ -28,6 +33,12 @@ sudo dnf install ca-certificates dejavu-sans-fonts mesa-libEGL mesa-libGL \
   pulseaudio-libs portaudio ffmpeg-free
 ```
 
+Для сеанса Wayland, если XWayland ещё не установлен:
+
+```bash
+sudo dnf install xorg-x11-server-Xwayland
+```
+
 ### Arch Linux
 
 ```bash
@@ -37,16 +48,22 @@ sudo pacman -Syu --needed ca-certificates ttf-dejavu mesa libglvnd \
   libxrandr libxi libxrender libpulse portaudio ffmpeg
 ```
 
-### Установка приложения
-
-Скачайте архив и файл `.sha256` среди артефактов успешного запуска
-[сборки Linux](https://github.com/stalker1243/Scott-AI/actions/workflows/linux-qt.yml).
-GitHub может запросить вход для скачивания артефактов.
+Для сеанса Wayland, если XWayland ещё не установлен:
 
 ```bash
-sha256sum -c ScottAI-2.0.0-Qt-linux-x86_64.tar.gz.sha256
-tar -xzf ScottAI-2.0.0-Qt-linux-x86_64.tar.gz
-cd ScottAI-2.0.0-Qt-linux-x86_64
+sudo pacman -S --needed xorg-xwayland
+```
+
+### Установка приложения
+
+Скачайте [архив Linux x86-64](https://github.com/stalker1243/Scott-AI/releases/download/v2.0.1/ScottAI-2.0.1-Qt-linux-x86_64.tar.gz)
+и [файл SHA256](https://github.com/stalker1243/Scott-AI/releases/download/v2.0.1/ScottAI-2.0.1-Qt-linux-x86_64.tar.gz.sha256).
+Вход в GitHub для скачивания выпуска не нужен.
+
+```bash
+sha256sum -c ScottAI-2.0.1-Qt-linux-x86_64.tar.gz.sha256
+tar -xzf ScottAI-2.0.1-Qt-linux-x86_64.tar.gz
+cd ScottAI-2.0.1-Qt-linux-x86_64
 ./install.sh
 ~/.local/share/ScottAI/run.sh
 ```

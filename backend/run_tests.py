@@ -38,7 +38,7 @@ def main():
                      'installer/linux/install.sh', 'installer/linux/uninstall.sh',
                      'installer/linux/run.sh',
                      'installer/linux/python-environment.sh',
-                     'VERSION.json', 'README.md', '.env.example',
+                     'VERSION.json', 'README.md', '.env.example', 'docs/installation.md', 'docs/models.md',
                      'assets/brand/scott-logo.png',
                      'assets/brand/scott-logo-light.png',
                      'experiments/voice_design/stream_voice.py',

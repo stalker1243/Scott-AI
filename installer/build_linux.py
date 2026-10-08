@@ -39,9 +39,7 @@ def build(output: Path, qt_root: Path, jobs: int) -> Path:
     shared.copy_voice_assets(output)
     shared.copy_extras(output)
     shutil.copytree(ROOT/'assets/brand', output/'assets/brand', dirs_exist_ok=True)
-    shutil.copytree(ROOT/'installer/licenses', output/'licenses', dirs_exist_ok=True)
-    if (qt_root/'sbom').is_dir():
-        shutil.copytree(qt_root/'sbom', output/'licenses/qt-sbom', dirs_exist_ok=True)
+    shared.copy_licenses(output, qt_root)
     for name in ('install.py', 'install.sh', 'uninstall.sh', 'run.sh', 'python-environment.sh'):
         target = output/name
         shutil.copy2(ROOT/'installer/linux'/name, target)

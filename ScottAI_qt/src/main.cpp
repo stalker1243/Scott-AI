@@ -203,6 +203,8 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty("trayAvailable", windowOnly || statesOnly || (!smoke && !integration && QSystemTrayIcon::isSystemTrayAvailable()));
     engine.rootContext()->setContextProperty("qtVersion", qVersion());
     engine.rootContext()->setContextProperty("smokeMode", smoke);
+    // Start the check before QML so the main window cannot flash behind setup.
+    if (installed) setup.check(pythonExecutable, backendDirectory);
     engine.loadFromModule("Scott.Prototype", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
@@ -224,13 +226,22 @@ int main(int argc, char **argv) {
         auto *fixture = previewData->property("setupPreview").value<QObject *>();
         auto phase = std::make_shared<int>(0); auto *timer = new QTimer(&app); timer->setInterval(350);
         QObject::connect(timer, &QTimer::timeout, &app, [&, fixture, timer, phase] {
-            if (window->opacity() != 1) return;
+            auto *setupWindow = window->findChild<QQuickWindow *>("setupDialog");
+            if (!setupWindow || !setupWindow->isVisible()) { app.exit(43); return; }
             auto *button = window->findChild<QObject *>("prepareScottButton");
-            if (!fixture || !button || qmlErrors) { qWarning("Setup UI warning or missing controls"); app.exit(43); return; }
-            QDir().mkpath("screenshots"); window->grabWindow().save(QString("screenshots/setup-%1.png").arg(*phase));
+            if (!fixture || !button || qmlErrors || window->isVisible()) { qWarning("Setup UI warning, missing controls or visible main window"); app.exit(43); return; }
+            trayController.restoreWindow();
+            if (window->isVisible()) { app.exit(43); return; }
+            QDir().mkpath("screenshots"); setupWindow->grabWindow().save(QString("screenshots/setup-%1.png").arg(*phase));
             if (*phase == 0) { fixture->setProperty("busy", true); fixture->setProperty("progress", 0.65); fixture->setProperty("message", QStringLiteral("Загружаем модели речи…")); }
             else if (*phase == 1) { if (button->property("enabled").toBool()) { app.exit(43); return; } fixture->setProperty("busy", false); fixture->setProperty("error", QStringLiteral("Нет подключения к интернету. Проверьте сеть и повторите попытку.")); }
-            else { if (!button->property("enabled").toBool()) { app.exit(43); return; } timer->stop(); qInfo("Setup UI: initial state, progress and retry passed"); app.exit(0); return; }
+            else { if (!button->property("enabled").toBool()) { app.exit(43); return; }
+                timer->stop(); fixture->setProperty("visible", false);
+                QTimer::singleShot(500, &app, [&] {
+                    auto *setupWindow = window->findChild<QQuickWindow *>("setupDialog");
+                    if (!window->isVisible() || !setupWindow || setupWindow->isVisible() || qmlErrors) { app.exit(43); return; }
+                    qInfo("Setup UI: standalone initial state, progress, retry, tray guard and main reveal passed"); app.exit(0);
+                }); return; }
             ++*phase;
         });
         timer->start();
@@ -239,8 +250,7 @@ int main(int argc, char **argv) {
     if (!smoke) {
         if (!integration) tray.show();
         client.beginPolling();
-        if (installed) setup.check(pythonExecutable, backendDirectory);
-        else if (parser.isSet("start-backend")) client.startBackend();
+        if (!installed && parser.isSet("start-backend")) client.startBackend();
     }
     qInfo("Qt window created in %lld ms (backend readiness measured separately)", startup.elapsed());
     bool windowChecksPassed = false;

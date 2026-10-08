@@ -111,6 +111,7 @@ void TrayController::persist() { invokeIfPresent(m_window, "persistWorkspace"); 
 void TrayController::restoreWindow() { showWindow(); }
 void TrayController::showWindow(int tab) {
     if (m_window->property("pendingQuit").toBool()) return;
+    if (m_window->property("setupActive").toBool()) { invokeIfPresent(m_window, "raiseSetup"); return; }
     if (tab >= 0) m_window->setProperty("selectedTab", tab);
     // QQuickWindow::show() can retain its previous Minimized visibility even
     // after setWindowState(). Restore through the explicit show methods.
@@ -143,7 +144,7 @@ void TrayController::sync() {
     m_pause->setChecked(m_client->listeningReady() && !m_client->listening());
     m_top->setChecked(m_window->property("alwaysOnTop").toBool());
     m_notifications->setChecked(m_window->property("trayNotifications").toBool());
-    m_start->setEnabled(!m_client->online() && !m_client->starting() && !m_client->ownsBackend());
+    m_start->setEnabled(!m_window->property("setupActive").toBool() && !m_client->online() && !m_client->starting() && !m_client->ownsBackend());
     m_stop->setEnabled(m_client->ownsBackend() && !m_client->busy() && !m_client->settingsBusy() && !m_client->listeningBusy());
     QString tooltip = QStringLiteral("ScottAI · ") + m_client->status();
     if (m_client->online()) {

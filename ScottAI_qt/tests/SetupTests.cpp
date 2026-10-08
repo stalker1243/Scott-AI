@@ -19,6 +19,10 @@ private slots:
         qunsetenv("SCOTT_SETUP_PROBE_FAIL"); setup.prepare(); QTRY_COMPARE(ready.count(), 1); QVERIFY(!setup.visible()); QCOMPARE(setup.progress(), 1.0);
         qputenv("SCOTT_SETUP_PROBE_WAIT", "1"); setup.prepare(); QTRY_COMPARE(setup.progress(), 0.5); QVERIFY(setup.busy());
         setup.cancel(); QTRY_VERIFY(!setup.busy()); QCOMPARE(ready.count(), 1); qunsetenv("SCOTT_SETUP_PROBE_WAIT");
+        QVERIFY(setup.error().isEmpty()); QVERIFY(setup.visible());
+        setup.setCompact(true); QVERIFY(setup.compact());
+        qputenv("SCOTT_SETUP_PROBE_EXPECT_CPU", "1"); setup.prepare(); QTRY_COMPARE(ready.count(), 2);
+        qunsetenv("SCOTT_SETUP_PROBE_EXPECT_CPU");
     }
 };
 QTEST_GUILESS_MAIN(SetupTests)

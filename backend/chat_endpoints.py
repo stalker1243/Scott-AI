@@ -168,6 +168,10 @@ async def clear_chat(chat_id: str):
 
 
 def complete(ia, messages, instructions):
+    try:
+        from .model_requests import openai_options, anthropic_options, deepseek_options
+    except ImportError:
+        from model_requests import openai_options, anthropic_options, deepseek_options
     if ia.api_provider == 'OpenRouter':
         return ia._ask_openrouter(dict(model=ia.model, messages=[dict(role='system', content=instructions)] + messages,
                                       max_tokens=ia.max_tokens))
@@ -187,17 +191,20 @@ def complete(ia, messages, instructions):
             converted.append(dict(role=message['role'], content=content))
         response = requests.post(ia.client['base_url'] + '/messages',
                                  headers={'x-api-key': ia.client['api_key'], 'anthropic-version': '2023-06-01'},
-                                 json=dict(model=ia.model, system=instructions, messages=converted, max_tokens=ia.max_tokens), timeout=90)
+                                 json=dict(model=ia.model, system=instructions, messages=converted,
+                                           **anthropic_options(ia.model, ia.max_tokens)), timeout=90)
         raise_with_body(response)
         return ''.join(p.get('text', '') for p in response.json().get('content', []) if p.get('type') == 'text').strip()
     messages = [dict(role='system', content=instructions)] + messages
     if ia.api_provider == 'DeepSeek':
         response = requests.post(ia.client['base_url'] + '/chat/completions',
                                  headers={'Authorization': 'Bearer ' + ia.client['api_key']},
-                                 json=dict(model=ia.model, messages=messages, max_tokens=ia.max_tokens), timeout=90)
+                                 json=dict(model=ia.model, messages=messages,
+                                           **deepseek_options(ia.model, ia.max_tokens)), timeout=90)
         raise_with_body(response)
         return response.json()['choices'][0]['message']['content'].strip()
-    response = ia.client.chat.completions.create(model=ia.model, messages=messages, max_tokens=ia.max_tokens, timeout=90)
+    options = openai_options(ia.model, ia.max_tokens) if ia.api_provider == 'OpenAI' else dict(max_tokens=ia.max_tokens)
+    response = ia.client.chat.completions.create(model=ia.model, messages=messages, timeout=90, **options)
     return (response.choices[0].message.content or '').strip()
 
 

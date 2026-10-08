@@ -30,6 +30,19 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: python backend/run_tests.py
+      - name: Полная подготовка моделей в новом CPU-кеше
+        env:
+          PYTHONIOENCODING: utf-8
+          SCOTT_TORCH_BACKEND: cpu
+          WHISPER_MODEL: small
+        shell: pwsh
+        run: |
+          $env:XDG_CACHE_HOME = Join-Path $env:RUNNER_TEMP 'scott-first-setup'
+          $env:TORCH_HOME = Join-Path $env:XDG_CACHE_HOME 'torch'
+          python -u backend/bootstrap.py --json
+          if ($LASTEXITCODE) { throw 'Model preparation failed' }
+          python -u backend/bootstrap.py --check --json
+          if ($LASTEXITCODE) { throw 'Prepared models failed readiness check' }
 
   qt:
     name: Qt на чистой Windows

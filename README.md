@@ -12,8 +12,9 @@
 Интерфейс на C++ и Qt Quick. Распознавание Whisper и локальные голоса работают
 на вашем компьютере; ответы ИИ — через выбранную модель и ваш API Token.
 
-[Скачать для Windows](https://github.com/stalker1243/Scott-AI/releases/download/v2.0.0/ScottAI-2.0.0-Qt-setup.exe)
-· [Выпуск 2.0.0](https://github.com/stalker1243/Scott-AI/releases/tag/v2.0.0)
+[Скачать для Windows](https://github.com/stalker1243/Scott-AI/releases/download/v2.0.1/ScottAI-2.0.1-Qt-setup.exe)
+· [Скачать для Linux x86-64](https://github.com/stalker1243/Scott-AI/releases/download/v2.0.1/ScottAI-2.0.1-Qt-linux-x86_64.tar.gz)
+· [Выпуск 2.0.1](https://github.com/stalker1243/Scott-AI/releases/tag/v2.0.1)
 · [Сообщить об ошибке](https://github.com/stalker1243/Scott-AI/issues)
 
 </div>
@@ -37,17 +38,28 @@
 
 Подробности: [чат и вложения](docs/chat.md), [память](docs/memory.md),
 [голос](docs/voice.md), [распознавание](docs/recognition.md),
-[изменения 2.0](docs/release-notes-2.0.0.md).
+[каталог моделей](docs/models.md),
+[изменения 2.0.1](docs/release-notes-2.0.1.md).
 
 ## Windows
 
-Скачайте [установщик 2.0.0](https://github.com/stalker1243/Scott-AI/releases/download/v2.0.0/ScottAI-2.0.0-Qt-setup.exe)
+Скачайте [установщик 2.0.1](https://github.com/stalker1243/Scott-AI/releases/download/v2.0.1/ScottAI-2.0.1-Qt-setup.exe)
 и запустите его. Права администратора не нужны. Qt и Python входят в пакет;
 библиотеки и модели речи готовятся при первом запуске. Есть отмена и повтор.
-Контрольная сумма находится на [странице выпуска](https://github.com/stalker1243/Scott-AI/releases/tag/v2.0.0).
+Контрольная сумма находится на [странице выпуска](https://github.com/stalker1243/Scott-AI/releases/tag/v2.0.1).
 
-Нужны Windows 10/11 x64, интернет для установки и ответов модели, около
-5 ГБ свободного места. Микрофон нужен для голосовых команд.
+В 2.0.1 улучшена первая подготовка: загрузка моделей показывает
+объём, сохраняет недокачанную часть и проверяет целостность перед использованием.
+Есть компактная CPU-установка с чатом и голосом, без GPU-ускорения.
+Мастер подготовки открывается отдельно; основной интерфейс скрыт до её завершения.
+В профиле есть увеличенный редактор фото с перетаскиванием и масштабом.
+При ошибке SHA256 не отключайте проверку: воспользуйтесь повтором подготовки.
+Подробности — [установка и размер приложения](docs/installation.md).
+
+Нужны Windows 10/11 x64 и интернет для установки и ответов модели.
+Микрофон нужен для голосовых команд. Для компактной CPU-подготовки установщик
+резервирует 2,5 ГиБ сверх базового пакета; расчёт базовой установки с голосом —
+около 1,8 ГиБ. GPU и Scott Voice требуют больше.
 NVIDIA/CUDA ускоряет обработку; доступен CPU. Поддержка AMD/ROCm экспериментальная:
 [настройка и ограничения](docs/amd-support.md).
 
@@ -58,16 +70,17 @@ NVIDIA/CUDA ускоряет обработку; доступен CPU. Подд�
 Fedora 44 и Arch. Инструкции, зависимости и границы этих проверок — [Linux](docs/linux.md).
 
 ```bash
-tar -xzf ScottAI-2.0.0-Qt-linux-x86_64.tar.gz
-cd ScottAI-2.0.0-Qt-linux-x86_64
+sha256sum -c ScottAI-2.0.1-Qt-linux-x86_64.tar.gz.sha256
+tar -xzf ScottAI-2.0.1-Qt-linux-x86_64.tar.gz
+cd ScottAI-2.0.1-Qt-linux-x86_64
 ./install.sh
 ~/.local/share/ScottAI/run.sh
 ```
 
 Сборка и проверка пакета выполняются в
 [GitHub Actions](https://github.com/stalker1243/Scott-AI/actions/workflows/linux-qt.yml).
-Архив и SHA256 доступны среди артефактов успешного запуска; для их скачивания
-через GitHub может потребоваться вход в аккаунт.
+Архив и [SHA256](https://github.com/stalker1243/Scott-AI/releases/download/v2.0.1/ScottAI-2.0.1-Qt-linux-x86_64.tar.gz.sha256)
+доступны на странице выпуска без входа в аккаунт.
 Проверка на реальном Linux-компьютере с микрофоном ещё предстоит.
 Размытие рабочего стола Glass реализовано для Windows; на Linux используется
 обычное оформление. Qt-выпуска для macOS пока нет.

@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -51,6 +53,42 @@ def rocm_requirement(gfx: str = 'all') -> List[str]:
     return ['--index-url', ROCM_INDEX, f'torch[device-{gfx}]=={TORCH_ROCM_VERSION}']
 
 Progress = Callable[[str, float], None]
+
+
+def _stream_process(command, on_line, timeout, **kwargs) -> int:
+    """Enforce a wall-clock deadline even when a child stops producing output."""
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               text=True, encoding='utf-8', errors='replace', bufsize=1, **kwargs)
+    lines = queue.Queue()
+
+    def read():
+        try:
+            for line in process.stdout:
+                lines.put(line)
+        finally:
+            lines.put(None)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                line = lines.get(timeout=min(.2, remaining))
+            except queue.Empty:
+                continue
+            if line is None:
+                return process.wait(timeout=max(.01, deadline - time.monotonic()))
+            on_line(line.strip())
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=10)
+        reader.join(timeout=2)
+        process.stdout.close()
 
 
 @dataclass
@@ -178,7 +216,8 @@ def _run_pip(
     ошибке: без него человек видит «не удалось поставить torch» и ничего
     больше.
     """
-    command = [executable, "-m", "pip", "install", "--no-warn-script-location", *args]
+    command = [executable, "-m", "pip", "install", "--no-warn-script-location", "--no-cache-dir",
+               "--timeout", "30", "--retries", "3", *args]
 
     with tempfile.TemporaryDirectory(prefix="scott_pip_") as tmp:
         folder = Path(tmp)
@@ -186,26 +225,14 @@ def _run_pip(
         # наблюдать: в общем %TEMP% лежит чужое, и размер там ничего не значит.
         env = dict(os.environ, PYTHONUNBUFFERED="1", TMP=tmp, TEMP=tmp, TMPDIR=tmp)
 
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-            env=env,
-        )
-
         tail: List[str] = []
         _report(progress, message, start)
 
         with _DownloadWatcher(folder, progress, message, start, span) as watcher:
             try:
-                for line in process.stdout or []:
-                    line = line.strip()
+                def consume(line):
                     if not line:
-                        continue
+                        return
 
                     tail.append(line)
                     del tail[:-40]
@@ -214,26 +241,19 @@ def _run_pip(
                     if size:
                         watcher.expected = size
 
-                process.wait(timeout=timeout)
+                code = _stream_process(command, consume, timeout, env=env)
             except subprocess.TimeoutExpired:
-                process.kill()
                 return False, "установка затянулась — вероятно, оборвалась сеть"
 
-        return process.returncode == 0, "\n".join(tail[-12:])
+        return code == 0, "\n".join(tail[-12:])
 
 
 def models_ready() -> bool:
-    """
-    Скачаны ли модели речи.
-
-    Проверяются файлы в кэше torch, а не импорт: библиотеки могут стоять, а
-    веса — нет, и тогда первая же голосовая команда уходит качать 700 МБ,
-    заставляя человека ждать молча.
-    """
-    cache = Path(os.path.expanduser("~")) / ".cache"
-    whisper_model = cache / "whisper" / "small.pt"
-    silero = cache / "torch" / "hub" / "snakers4_silero-models_master"
-    return whisper_model.exists() and silero.exists()
+    try:
+        from .model_setup import models_ready as verified
+    except ImportError:
+        from model_setup import models_ready as verified
+    return verified()
 
 
 def has_nvidia_gpu() -> bool:
@@ -285,7 +305,7 @@ def torch_requirement() -> tuple[List[str], str]:
         return (
             ["--index-url", CUDA_INDEX, TORCH_CUDA],
             f"Нашлась {name} — ставлю сборку с поддержкой видеокарты (около 4 ГБ). "
-            "На ней распознавание речи занимает доли секунды вместо шести.",
+            "Ускорение речи зависит от карты и драйвера.",
         )
 
     if sys.platform == "darwin":
@@ -307,26 +327,32 @@ def torch_requirement() -> tuple[List[str], str]:
     adapters = amd_adapters()
     if adapters:
         if sys.version_info[:2] < (3, 11) or sys.version_info[:2] > (3, 14):
-            return ([TORCH_CPU], 'Найдена AMD, но профиль ROCm требует Python 3.11–3.14. Пока ставлю сборку для процессора; см. docs/amd-support.md.')
+            return (['--index-url', CPU_INDEX, TORCH_CPU_PIN], 'Найдена AMD, но профиль ROCm требует Python 3.11–3.14. Пока ставлю сборку для процессора; см. docs/amd-support.md.')
         return (rocm_requirement(), f"Найдена {adapters[0]['name']} — ставлю PyTorch для AMD ROCm/HIP. "
                 'Для ускорения нужны поддерживаемая карта и совместимый драйвер; см. docs/amd-support.md.')
 
     return (
-        [TORCH_CPU],
-        "Видеокарта NVIDIA не найдена — ставлю сборку для процессора. "
-        "Scott будет работать, но распознавание речи займёт около шести секунд на фразу.",
+        ['--index-url', CPU_INDEX, TORCH_CPU_PIN],
+        "Ставлю сборку для процессора без CUDA-зависимостей. "
+        "Распознавание речи будет медленнее, чем на поддерживаемой видеокарте.",
     )
 
 
-def is_ready(python: Optional[str] = None) -> bool:
-    """Всё ли уже установлено — чтобы не запускать подготовку повторно."""
+def dependencies_ready(python: Optional[str] = None) -> bool:
+    """Check the installed requirements separately from downloadable weights."""
     executable = python or sys.executable
     try:
         result = subprocess.run(
             # omegaconf проверяется наравне с остальными: без него падает не
             # импорт backend, а загрузка модели Silero — то есть уже после
             # того, как мастер отчитается об успехе.
-            [executable, "-c", "import torch, whisper, fastapi, omegaconf; print('ok')"],
+            [executable, "-c", "import torch, whisper, fastapi, omegaconf; "
+             "from importlib.metadata import version; from packaging.requirements import Requirement; "
+             "from pathlib import Path; import os; "
+             f"lines = Path({str(Path(__file__).with_name('requirements.txt'))!r}).read_text(encoding='utf-8').splitlines(); "
+             "reqs = [Requirement(line) for line in lines if line.strip() and not line.lstrip().startswith('#')]; "
+             "assert all(r.specifier.contains(version(r.name), prereleases=True) for r in reqs if r.marker is None or r.marker.evaluate()); "
+             "assert os.getenv('SCOTT_TORCH_BACKEND', '').lower() != 'cpu' or (torch.version.cuda is None and torch.version.hip is None); print('ok')"],
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0 or "ok" not in result.stdout:
@@ -334,9 +360,20 @@ def is_ready(python: Optional[str] = None) -> bool:
     except Exception:
         return False
 
-    # Библиотеки без моделей — ещё не готовность: первая же команда уйдёт
-    # качать 700 МБ, и человек будет ждать молча.
-    return models_ready()
+    return True
+
+
+def is_ready(python: Optional[str] = None) -> bool:
+    if not dependencies_ready(python):
+        return False
+    if python is None or Path(python).absolute() == Path(sys.executable).absolute():
+        return models_ready()
+    try:
+        result = subprocess.run([python, str(Path(__file__).resolve()), '--models-check'],
+                                capture_output=True, text=True, timeout=120)
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def has_pip(executable: str) -> bool:
@@ -374,7 +411,7 @@ def ensure_pip(executable: str, progress: Optional[Progress] = None) -> Optional
 
     try:
         result = subprocess.run(
-            [executable, str(get_pip), "--no-warn-script-location"],
+            [executable, str(get_pip), "--no-warn-script-location", "--no-cache-dir"],
             capture_output=True, text=True, timeout=900,
             encoding="utf-8", errors="replace",
         )
@@ -459,31 +496,28 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
 
 
 def download_models(python: Optional[str] = None, progress: Optional[Progress] = None) -> Step:
-    """
-    Скачать модели распознавания и синтеза заранее.
-
-    Иначе они подтянутся при первой же голосовой команде, и человек прождёт
-    минуты, не понимая, что происходит: Whisper «small» весит около 700 МБ,
-    Silero — 40 МБ.
-    """
+    """Relay live byte progress from the selected Python's model worker."""
     executable = python or sys.executable
     step = Step(title="Загрузка моделей")
 
-    code = (
-        "import whisper, torch;"
-        "whisper.load_model('small');"
-        "torch.hub.load(repo_or_dir='snakers4/silero-models', model='silero_tts',"
-        " language='ru', speaker='v4_ru', trust_repo=True)"
-    )
-
     try:
-        _report(progress, "Скачиваю модели распознавания и синтеза речи (около 700 МБ)…", 0.8)
-        result = subprocess.run(
-            [executable, "-c", code],
-            capture_output=True, text=True, timeout=3600,
-        )
-        if result.returncode != 0:
-            step.error = f"не удалось скачать модели: {result.stderr[-400:]}"
+        _report(progress, "Готовлю распознавание и локальный голос…", .76)
+
+        def consume(line):
+            try:
+                event = json.loads(line)
+            except ValueError:
+                return
+            if event.get('type') == 'progress':
+                _report(progress, event['message'], event['fraction'])
+            elif event.get('type') == 'error':
+                step.error = event['message']
+
+        code = _stream_process([executable, '-u', str(Path(__file__).resolve()), '--models', '--json'],
+                               consume, 3600, env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+        if code != 0:
+            if not step.error:
+                step.error = 'Не удалось подготовить модели. Проверьте интернет и нажмите «Повторить».'
             return step
     except subprocess.TimeoutExpired:
         step.error = "загрузка моделей затянулась — вероятно, оборвалась сеть"
@@ -503,9 +537,12 @@ def prepare(python: Optional[str] = None, progress: Optional[Progress] = None) -
         _report(progress, "Всё уже установлено", 1.0)
         return Step(title="Готово", done=True)
 
-    step = install_dependencies(python, progress)
-    if not step.done:
-        return step
+    if dependencies_ready(python):
+        _report(progress, 'Библиотеки уже установлены. Продолжаю подготовку моделей…', .75)
+    else:
+        step = install_dependencies(python, progress)
+        if not step.done:
+            return step
 
     step = download_models(python, progress)
     if not step.done:
@@ -531,6 +568,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     as_json = "--json" in argv
 
+    try:
+        from .model_setup import load_environment, prepare_models, DownloadError
+    except ImportError:
+        from model_setup import load_environment, prepare_models, DownloadError
+    load_environment()
+
+    if '--models-check' in argv:
+        return 0 if models_ready() else 2
+
+    if os.name != 'nt' and os.getenv('SCOTT_SETUP_GROUP') == '1' and '--models' not in argv:
+        # QProcess owns this child. Give cancellation its entire process group.
+        if os.getpgrp() != os.getpid():
+            os.setsid()
+
     if "--check" in argv:
         # Быстрая проверка без установки: лаунчер спрашивает, нужен ли мастер.
         ready = is_ready()
@@ -546,7 +597,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             print(f"[{fraction * 100:3.0f}%] {message}", flush=True)
 
-    outcome = prepare(progress=report)
+    if '--models' in argv:
+        try:
+            prepare_models(report)
+            outcome = Step(title='Модели', done=True)
+        except (DownloadError, ValueError, OSError) as error:
+            outcome = Step(title='Модели', error=str(error))
+    else:
+        outcome = prepare(progress=report)
 
     if not outcome.done:
         if as_json:

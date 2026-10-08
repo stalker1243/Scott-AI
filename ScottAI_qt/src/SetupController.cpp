@@ -2,6 +2,10 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFileInfo>
+#ifndef Q_OS_WIN
+#include <signal.h>
+#include <unistd.h>
+#endif
 
 SetupController::SetupController(QObject *parent) : QObject(parent) {
     connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] {
@@ -20,6 +24,7 @@ SetupController::SetupController(QObject *parent) : QObject(parent) {
     });
     connect(&m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         m_busy = false;
+        if (m_cancelled) { m_message = QStringLiteral("Подготовка остановлена. Нажмите «Продолжить» — скачанная часть модели сохранена."); m_error.clear(); emit changed(); return; }
         if (code == 0 && status == QProcess::NormalExit) { m_visible = false; m_progress = 1; emit changed(); emit ready(); return; }
         if (m_check && code == 2) { m_message = QStringLiteral("Подготовим библиотеки и модели речи для вашего компьютера."); m_error.clear(); }
         else if (m_error.isEmpty()) m_error = QStringLiteral("Подготовка не завершена. Проверьте подключение к интернету и повторите попытку.");
@@ -30,9 +35,11 @@ SetupController::~SetupController() { cancel(); }
 void SetupController::check(const QString &python, const QString &backend) { m_python = python; m_backend = backend; run(true); }
 void SetupController::run(bool check) {
     if (m_process.state() != QProcess::NotRunning) return;
-    m_check = check; m_visible = true; m_busy = true; m_progress = 0; m_error.clear(); m_buffer.clear();
+    m_check = check; m_cancelled = false; m_visible = true; m_busy = true; m_progress = 0; m_error.clear(); m_buffer.clear();
     m_message = check ? QStringLiteral("Проверяем готовность…") : QStringLiteral("Начинаем подготовку…"); emit changed();
-    auto env = QProcessEnvironment::systemEnvironment(); env.insert("PYTHONIOENCODING", "utf-8"); m_process.setProcessEnvironment(env);
+    auto env = QProcessEnvironment::systemEnvironment(); env.insert("PYTHONIOENCODING", "utf-8");
+    if (m_compact) env.insert("SCOTT_TORCH_BACKEND", "cpu");
+    env.insert("SCOTT_SETUP_GROUP", "1"); m_process.setProcessEnvironment(env);
     m_process.setWorkingDirectory(m_backend);
     QStringList arguments{"-u", m_backend + "/bootstrap.py", "--json"}; if (check) arguments.append("--check");
     m_process.start(m_python, arguments);
@@ -40,11 +47,14 @@ void SetupController::run(bool check) {
 void SetupController::prepare() { if (!m_python.isEmpty()) run(false); }
 void SetupController::cancel() {
     if (m_process.state() == QProcess::NotRunning) return;
+    m_cancelled = true;
     // Only the process tree started by this controller belongs to preparation.
 #ifdef Q_OS_WIN
     QProcess stop; stop.start("taskkill", {"/PID", QString::number(m_process.processId()), "/T", "/F"}); stop.waitForFinished(3000);
 #else
-    m_process.kill();
+    const auto pid = static_cast<pid_t>(m_process.processId());
+    if (pid > 0 && getpgid(pid) == pid) ::kill(-pid, SIGKILL);
+    else m_process.kill();
 #endif
     m_process.waitForFinished(1500);
 }

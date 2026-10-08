@@ -12,6 +12,9 @@ ApplicationWindow {
     minimumWidth: 800; minimumHeight: 560
     // Prepare the selected page and native material before the first reveal.
     visible: false
+    readonly property bool setupActive: setupController.visible
+    onSetupActiveChanged: if (!setupActive) Qt.callLater(restoreFromTray)
+    function raiseSetup() { setupDialog.show(); setupDialog.raise(); setupDialog.requestActivate() }
     opacity: revealProgress
     title: "ScottAI"
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint | (alwaysOnTop ? Qt.WindowStaysOnTopHint : 0)
@@ -129,6 +132,7 @@ ApplicationWindow {
     function persist() { preferences.save(darkMode, accentOverride, lightIcon, hideToTray, animationsEnabled, styleDefinition.id, transparencyByStyle, glassFrost) }
     function persistWorkspace() { preferences.saveWorkspace(navigationExpanded, alwaysOnTop, trayNotifications) }
     function restoreFromTray() {
+        if (setupActive) { raiseSetup(); return }
         if (pendingQuit) return
         dismissAction = ""; hideAnimation.stop(); revealAnimation.stop()
         if (!visible || visibility === Window.Minimized) revealProgress = animationsEnabled ? 0 : 1
@@ -145,6 +149,7 @@ ApplicationWindow {
         dismissWindow("hide")
     }
     function requestQuit() {
+        if (setupActive) { setupController.cancel(); Qt.quit(); return }
         dismissWindow("quit")
     }
     function minimizeAnimated() {
@@ -246,7 +251,7 @@ ApplicationWindow {
         pageIn.stop()
         pageOut.start()
     }
-    SetupDialog { controller: setupController; theme: visual }
+    SetupDialog { id: setupDialog; controller: setupController; theme: visual }
     property bool chatRequested: false
     function syncMessages() {
         const items = backend.messages

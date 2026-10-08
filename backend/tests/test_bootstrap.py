@@ -52,8 +52,7 @@ def test_cpu_machine_gets_plain_build(boot, monkeypatch):
 
     args, explanation = boot.torch_requirement()
 
-    assert "--index-url" not in args
-    assert args == [boot.TORCH_CPU]
+    assert args == ['--index-url', boot.CPU_INDEX, boot.TORCH_CPU_PIN]
     assert "процессор" in explanation.lower()
 
 
@@ -76,7 +75,7 @@ def test_explanation_is_honest_about_speed(boot, monkeypatch):
     _, cpu_text = boot.torch_requirement()
 
     assert "гб" in gpu_text.lower(), "не сказано, сколько весит загрузка"
-    assert "секунд" in cpu_text.lower(), "не сказано, чем обернётся работа на процессоре"
+    assert "медленнее" in cpu_text.lower(), "не сказано, чем обернётся работа на процессоре"
 
 
 def test_mac_is_told_about_metal_not_about_missing_nvidia(boot, monkeypatch):
@@ -153,6 +152,7 @@ def test_failure_is_reported_not_swallowed(boot, monkeypatch):
     непонятную ошибку вместо «не удалось скачать torch, проверьте интернет».
     """
     monkeypatch.setattr(boot, "is_ready", lambda python=None: False)
+    monkeypatch.setattr(boot, "dependencies_ready", lambda python=None: False)
     # pip на месте — иначе установка остановится раньше, на нём.
     monkeypatch.setattr(boot, "ensure_pip", lambda *a, **kw: None)
     monkeypatch.setattr(
@@ -218,14 +218,27 @@ def test_models_counted_as_readiness(boot, monkeypatch, tmp_path):
     Иначе мастер отчитается «всё готово», а первая же голосовая команда уйдёт
     качать 700 МБ, и человек будет ждать молча, не понимая, что происходит.
     """
-    monkeypatch.setattr(boot.os.path, "expanduser", lambda _: str(tmp_path))
+    import model_setup
+    import hashlib
+    import zipfile
+    target = tmp_path / 'whisper/small.pt'
+    repo = tmp_path / 'silero'
+    monkeypatch.setattr(model_setup, 'whisper_spec', lambda: (target, 'url', hashlib.sha256(b'valid').hexdigest()))
+    monkeypatch.setattr(model_setup, 'silero_repo', lambda: repo)
     assert boot.models_ready() is False
 
-    (tmp_path / ".cache" / "whisper").mkdir(parents=True)
-    (tmp_path / ".cache" / "whisper" / "small.pt").write_bytes(b"x")
+    target.parent.mkdir()
+    target.write_bytes(b'corrupt')
     assert boot.models_ready() is False, "одной модели мало"
 
-    (tmp_path / ".cache" / "torch" / "hub" / "snakers4_silero-models_master").mkdir(parents=True)
+    voice = repo / 'src/silero/model/v4_ru.pt'
+    voice.parent.mkdir(parents=True)
+    voice.write_bytes(b'partial')
+    assert boot.models_ready() is False, 'частичные модели не означают готовность'
+    with zipfile.ZipFile(voice, 'w') as archive:
+        archive.writestr('archive/tts_models/model', b'weights')
+    assert boot.models_ready() is False, 'наличие small.pt не заменяет проверку SHA256'
+    target.write_bytes(b'valid')
     assert boot.models_ready() is True
 
 
@@ -320,6 +333,7 @@ def test_pip_installed_from_bundled_script(boot, monkeypatch, tmp_path):
     )
 
     assert boot.ensure_pip(str(python)) is None
+    assert "--no-cache-dir" in calls[0]
     assert any("get-pip.py" in str(part) for part in calls[0]), "get-pip.py не запускался"
 
 
@@ -350,6 +364,23 @@ def test_existing_pip_left_alone(boot, monkeypatch, tmp_path):
     assert boot.ensure_pip("python") is None
 
 
+def test_install_does_not_keep_a_second_wheel_in_global_cache(boot, monkeypatch, tmp_path):
+    cache = tmp_path / 'existing-cache'
+    cache.mkdir()
+    wheel = cache / 'keep.whl'
+    wheel.write_bytes(b'previous unrelated package')
+    monkeypatch.setenv('PIP_CACHE_DIR', str(cache))
+    calls = []
+    def run(command, consume, timeout, env):
+        calls.append(command)
+        assert env['PIP_CACHE_DIR'] == str(cache)
+        return 0
+    monkeypatch.setattr(boot, '_stream_process', run)
+    assert boot._run_pip('python', ['torch'], None, 'install', 0, 1)[0]
+    assert '--no-cache-dir' in calls[0]
+    assert wheel.read_bytes() == b'previous unrelated package'
+
+
 def test_install_stops_without_pip(boot, monkeypatch):
     """
     Установка зависимостей не начинается, пока нет pip.
@@ -378,7 +409,7 @@ def test_readiness_checks_silero_dependency(boot, monkeypatch):
     «ModuleNotFoundError: No module named omegaconf». На машине разработчика
     пакет оказался установлен заранее, поэтому пропажа и не всплывала.
     """
-    checked = {}
+    checked = []
 
     class FakeResult:
         returncode = 0
@@ -386,14 +417,14 @@ def test_readiness_checks_silero_dependency(boot, monkeypatch):
         stderr = ""
 
     def fake_run(cmd, **kwargs):
-        checked["code"] = cmd[-1] if cmd else ""
+        checked.append(cmd[-1] if cmd else "")
         return FakeResult()
 
     monkeypatch.setattr(boot.subprocess, "run", fake_run)
     monkeypatch.setattr(boot, "models_ready", lambda: True)
 
     assert boot.is_ready("python") is True
-    assert "omegaconf" in checked["code"], "проверка готовности не смотрит на omegaconf"
+    assert any('omegaconf' in code for code in checked), "проверка готовности не смотрит на omegaconf"
 
 
 def test_silero_dependency_pinned_in_requirements():

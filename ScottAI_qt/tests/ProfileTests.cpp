@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QFile>
 #include <memory>
+#include <cmath>
 
 class ProfileTests : public QObject {
     Q_OBJECT
@@ -81,7 +82,7 @@ private slots:
         QVERIFY(avatar.loadFile(picture)); QVERIFY(avatar.hasAvatar());
         auto preview = avatar.preview(); QCOMPARE(preview.pixelColor(0, 0).alpha(), 0); QCOMPARE(preview.pixelColor(50, 110), QColor(Qt::red));
         const auto source = avatar.source(); avatar.setCrop(2, 999, -999);
-        QCOMPARE(avatar.source(), source); QCOMPARE(avatar.crop().value("x").toDouble(), 110.0); QCOMPARE(avatar.crop().value("y").toDouble(), -110.0);
+        QCOMPARE(avatar.source(), source); QCOMPARE(avatar.crop().value("x").toDouble(), 330.0); QCOMPARE(avatar.crop().value("y").toDouble(), -110.0);
         QVERIFY(avatar.save()); QVERIFY(!avatar.dirty());
         ProfileAvatar restored(destination); QCOMPARE(restored.crop(), avatar.crop()); QCOMPARE(restored.preview(), avatar.preview());
         restored.resetCrop(); QVERIFY(restored.dirty()); restored.revert(); QCOMPARE(restored.crop(), avatar.crop());
@@ -90,6 +91,37 @@ private slots:
         restored.remove(); QVERIFY(restored.save()); ProfileAvatar cleared(destination); QVERIFY(!cleared.hasAvatar()); QVERIFY(cleared.error().isEmpty());
         ProfileAvatar unwritable(bad.fileName()); QVERIFY(unwritable.loadFile(picture)); QVERIFY(!unwritable.save()); QVERIFY(unwritable.dirty());
         ProfileAvatar temporary(directory.path() + "/no-write", true); QVERIFY(temporary.loadFile(picture)); QVERIFY(temporary.save()); QVERIFY(!QFile::exists(directory.path() + "/no-write/avatar.json"));
+    }
+    void rectangularCropAndDraftCancellation() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const auto photo = directory.path() + "/wide.png";
+        QImage wide(600, 200, QImage::Format_RGB32); wide.fill(Qt::red);
+        { QPainter p(&wide); p.fillRect(400, 0, 200, 200, Qt::blue); }
+        QVERIFY(wide.save(photo));
+        ProfileAvatar avatar(directory.path() + "/profile");
+        QVERIFY(avatar.loadFile(photo)); avatar.setCrop(1, -999, 999);
+        QCOMPARE(avatar.crop().value("x").toDouble(), -220.0);
+        QCOMPARE(avatar.crop().value("y").toDouble(), 0.0);
+        QCOMPARE(avatar.preview().pixelColor(110, 110), QColor(Qt::blue));
+        QVERIFY(avatar.save());
+        avatar.setCrop(1, 80, 0); const auto draft = avatar.crop();
+        avatar.beginCrop(); avatar.setCrop(3, 999, 999); avatar.finishCrop(false);
+        QCOMPARE(avatar.crop(), draft); QVERIFY(avatar.dirty());
+        avatar.beginCrop(); avatar.remove(); avatar.finishCrop(false);
+        QVERIFY(avatar.hasAvatar()); QCOMPARE(avatar.crop(), draft);
+        avatar.resetCrop(); avatar.zoomAt(2, 40, 0);
+        QCOMPARE(avatar.crop().value("x").toDouble(), -40.0);
+        avatar.beginCrop(); avatar.resetCrop(); avatar.finishCrop(true);
+        QCOMPARE(avatar.crop().value("zoom").toDouble(), 1.0);
+        QVERIFY(avatar.dirty());
+        QImage tall(200, 600, QImage::Format_RGB32); tall.fill(Qt::green);
+        QVERIFY(tall.save(photo)); QVERIFY(avatar.loadFile(photo)); avatar.setCrop(1, 999, -999);
+        QCOMPARE(avatar.crop().value("x").toDouble(), 0.0);
+        QCOMPARE(avatar.crop().value("y").toDouble(), -220.0);
+        // Every interior pixel stays covered even at the extreme offset.
+        const auto preview = avatar.preview();
+        for (int y = 5; y < 215; ++y) for (int x = 5; x < 215; ++x)
+            if (std::hypot(x - 110.0, y - 110.0) < 100) QCOMPARE(preview.pixelColor(x, y).alpha(), 255);
     }
 };
 QTEST_GUILESS_MAIN(ProfileTests)
