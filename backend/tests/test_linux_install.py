@@ -108,3 +108,14 @@ def test_retry_repairs_partial_environment(tmp_path, package, monkeypatch):
     installer.install(target, package, shortcut=False)
     assert len(calls) == 2
     assert (target/'runtime/bin/python').is_file()
+
+
+@pytest.mark.parametrize('version', [(3, 10, 0), (3, 14, 0)])
+def test_rejects_unsupported_python_before_install(version, monkeypatch):
+    monkeypatch.setattr(installer.sys, 'platform', 'linux')
+    monkeypatch.setattr(installer.sys, 'version_info', version)
+    monkeypatch.setattr(installer.sys, 'argv', ['install.py'])
+    monkeypatch.setattr(installer, 'install', lambda *args, **kwargs: pytest.fail('Installation must not start'))
+    with pytest.raises(SystemExit) as error:
+        installer.main()
+    assert error.value.code == 2

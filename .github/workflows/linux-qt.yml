@@ -26,11 +26,6 @@ jobs:
       QSG_RHI_BACKEND: software
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
       - name: Системные библиотеки
         run: |
           sudo apt-get update
@@ -41,6 +36,14 @@ jobs:
           arch: linux_gcc_64
           aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7'
           cache: true
+      # install-qt-action selects its own Python for aqt. Select backend Python last.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Проверить Python backend
+        run: python -c "import sys; print(sys.version); assert sys.version_info[:2] == (3, 13)"
       - name: Собрать пакет Qt
         run: python installer/build_linux.py --qt-root "$QT_ROOT_DIR"
       - name: Проверить Qt
@@ -49,7 +52,9 @@ jobs:
         run: python installer/linux/check_package.py --package installer/dist-linux-qt
       - name: Запустить пакет без SDK
         run: |
-          mv "$QT_ROOT_DIR" "$QT_ROOT_DIR.hidden-for-package-test"
+          scott_sdk_backup="$QT_ROOT_DIR.hidden-for-package-test"
+          mv "$QT_ROOT_DIR" "$scott_sdk_backup"
+          trap 'mv "$scott_sdk_backup" "$QT_ROOT_DIR"' EXIT
           env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-chat
           env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-voice
       - name: Библиотеки backend для CPU

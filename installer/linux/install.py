@@ -150,6 +150,8 @@ def main() -> int:
     args = parser.parse_args()
     if sys.platform != 'linux' or sys.version_info < (3, 11):
         parser.error('Нужен Linux и Python 3.11 или новее.')
+    if not args.uninstall and sys.version_info >= (3, 14):
+        parser.error('Для backend нужен Python 3.11–3.13. Запустите установщик через python3.13 install.py.')
     if args.delete_data and not args.uninstall:
         parser.error('--delete-data используется только вместе с --uninstall.')
     if any(c in str(args.prefix) for c in '\n\r\t'):
