@@ -9,7 +9,7 @@ case "$ID" in
     ubuntu|debian)
         export DEBIAN_FRONTEND=noninteractive
         apt-get update
-        apt-get install -y ca-certificates tar gzip xvfb fonts-dejavu-core libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libpulse0 libportaudio2 ffmpeg
+        apt-get install -y ca-certificates tar gzip xvfb fonts-dejavu-core libegl1 libgl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libpulse0 libportaudio2 ffmpeg
         ;;
     fedora)
         dnf install -y ca-certificates tar gzip xorg-x11-server-Xvfb dejavu-sans-fonts mesa-libEGL mesa-libGL libxkbcommon-x11 xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil libXcursor libXrandr libXi libXrender pulseaudio-libs portaudio ffmpeg-free
