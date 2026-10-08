@@ -119,10 +119,11 @@ python3 backend/run_tests.py
 и запуск упакованного интерфейса без доступа к Qt SDK. Тесты поведения
 настоящего Windows-композитора в Linux-набор не входят.
 
-8 октября 2026 года [сборка на Ubuntu 24.04](https://github.com/stalker1243/Scott-AI/actions/runs/37767800122/job/113279603485)
-прошла 13 проверок Qt и 1752 теста backend на Python из пакета. Пропущены 11
+Выпуск 2.0.1: 8 октября 2026 года [сборка на Ubuntu 24.04](https://github.com/stalker1243/Scott-AI/actions/runs/37800830112)
+прошла 13 проверок Qt и 1790 тестов backend на Python из пакета. Пропущены 11
 проверок установки необязательного Scott Voice для Windows; 7 integration/slow
-исключены. [Тот же архив прошёл матрицу дистрибутивов](https://github.com/stalker1243/Scott-AI/actions/runs/37770049454):
+исключены. Полная загрузка Whisper small и Silero в новом CPU-кеше и проверка
+готовности прошли. [Тот же архив прошёл матрицу дистрибутивов](https://github.com/stalker1243/Scott-AI/actions/runs/37800830112):
 
 | Система | Окружение проверки | Результат |
 | --- | --- | --- |
