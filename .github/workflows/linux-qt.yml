@@ -51,7 +51,9 @@ jobs:
       - name: Проверить Qt
         run: xvfb-run -a ctest --test-dir ScottAI_qt/build-linux --output-on-failure -E 'window_lifecycle|window_states|qml_screens'
       - name: Проверить установку, обновление и удаление
-        run: python installer/linux/check_package.py --package installer/dist-linux-qt
+        run: |
+          source installer/dist-linux-qt/python-environment.sh
+          python installer/linux/check_package.py --package installer/dist-linux-qt
       - name: Запустить пакет без SDK
         run: |
           scott_sdk_backup="$QT_ROOT_DIR.hidden-for-package-test"
@@ -61,10 +63,12 @@ jobs:
           env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-voice
       - name: Библиотеки backend для CPU
         run: |
-          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1+cpu
-          python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+          source installer/dist-linux-qt/python-environment.sh
+          scott_python="$RUNNER_TEMP/Scott AI package/runtime/bin/python"
+          "$scott_python" -I -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1+cpu
+          "$scott_python" -I -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
       - name: Изолированные тесты backend
-        run: python backend/run_tests.py
+        run: '"$RUNNER_TEMP/Scott AI package/runtime/bin/python" backend/run_tests.py'
       - uses: actions/upload-artifact@v4
         with:
           name: ScottAI-Qt-Linux-x86_64
@@ -73,3 +77,25 @@ jobs:
             installer/release/ScottAI-*-Qt-linux-x86_64.tar.gz.sha256
           if-no-files-found: error
           retention-days: 14
+  distributions:
+    name: Пакет в ${{ matrix.image }}
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'debian:12', 'debian:13', 'registry.fedoraproject.org/fedora:44', 'archlinux:base']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ScottAI-Qt-Linux-x86_64
+          path: ${{ runner.temp }}/linux-artifact
+      - name: Проверить тот же пакет в чистом дистрибутиве
+        env:
+          SCOTT_IMAGE: ${{ matrix.image }}
+        run: |
+          docker pull "$SCOTT_IMAGE"
+          docker image inspect "$SCOTT_IMAGE" --format '{{json .RepoDigests}}'
+          docker run --rm -e SCOTT_CONTAINER_TEST=1 -v "$RUNNER_TEMP/linux-artifact:/artifact:ro" -v "$GITHUB_WORKSPACE/installer/linux:/checks:ro" "$SCOTT_IMAGE" bash /checks/check_distribution.sh

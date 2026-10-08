@@ -13,6 +13,7 @@ import sys
 import tarfile
 
 import build as shared
+from linux_python import copy_python
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,6 +34,7 @@ def build(output: Path, qt_root: Path, jobs: int) -> Path:
                     f'-DCMAKE_PREFIX_PATH={qt_root}', f'-DCMAKE_INSTALL_PREFIX={output}'], check=True)
     subprocess.run(['cmake', '--build', str(build_dir), '--parallel', str(jobs)], check=True)
     subprocess.run(['cmake', '--install', str(build_dir)], check=True)
+    copy_python(output)
     shared.copy_backend(output)
     shared.copy_voice_assets(output)
     shared.copy_extras(output)
@@ -40,7 +42,7 @@ def build(output: Path, qt_root: Path, jobs: int) -> Path:
     shutil.copytree(ROOT/'installer/licenses', output/'licenses', dirs_exist_ok=True)
     if (qt_root/'sbom').is_dir():
         shutil.copytree(qt_root/'sbom', output/'licenses/qt-sbom', dirs_exist_ok=True)
-    for name in ('install.py', 'install.sh', 'uninstall.sh', 'run.sh'):
+    for name in ('install.py', 'install.sh', 'uninstall.sh', 'run.sh', 'python-environment.sh'):
         target = output/name
         shutil.copy2(ROOT/'installer/linux'/name, target)
         target.chmod(0o755)

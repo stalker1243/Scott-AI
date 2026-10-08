@@ -1,8 +1,8 @@
 # Scott AI на Linux
 
 Экспериментальный Qt-пакет для Ubuntu 24.04 x86-64. Он включает приложение,
-библиотеки Qt, QML-модули и backend. Системный Python используется для создания
-отдельного окружения; зависимости и модели речи устанавливаются при первом
+библиотеки Qt, QML-модули, backend и отдельный Python 3.13.16. Системный Python
+для установки не нужен; зависимости и модели речи устанавливаются при первом
 запуске. Голос на настоящем устройстве, Wayland и другие дистрибутивы пока
 не проверены. Scott Voice остаётся экспериментом Windows/NVIDIA.
 
@@ -11,7 +11,7 @@
 Для Ubuntu 24.04:
 
 ```bash
-sudo apt-get install python3 python3-venv libportaudio2 libpulse0 ffmpeg \
+sudo apt-get install ca-certificates libportaudio2 libpulse0 ffmpeg \
   libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
   libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1
 ```
@@ -30,9 +30,11 @@ cd ScottAI-2.0.0-Qt-linux-x86_64
 
 Сама установка выполняется без sudo и создаёт ярлык в меню приложений.
 Папку можно выбрать через `./install.sh --prefix /путь/к/ScottAI`.
-Нужны Python 3.11–3.13, интернет и место под зависимости и модели.
-Если системный Python новее, установите Python 3.13 с модулем venv и запустите
-`python3.13 install.py` из распакованного архива.
+Нужны интернет и место под зависимости и модели. Python включён в пакет;
+его архив закреплён по SHA256. Установка не меняет системный Python.
+При обновлении прежней установки окружение backend пересоздаётся на встроенном
+Python; библиотеки потребуется подготовить заново. История и настройки остаются
+на месте. Если создание окружения не удалось, прежнее окружение восстанавливается.
 При обновлении используйте тот же путь установки: `.env`, история, вложения
 и настройки моделей сохраняются. Установщик откажется писать в чужую непустую
 папку или через символическую ссылку.
@@ -53,12 +55,13 @@ cd ScottAI-2.0.0-Qt-linux-x86_64
 
 ## Сборка из исходников
 
-Нужны Linux x86-64, CMake 3.24+, Ninja, GCC, Python и Qt 6.8+ с Qt Quick,
+Нужны Linux x86-64, CMake 3.24+, Ninja, GCC, Python 3.11+ и Qt 6.8+ с Qt Quick,
 QuickControls2, Network, Widgets и Test. CI использует Qt 6.11.2.
 
 ```bash
-python3 -m pip install psutil==7.2.2
-python3 installer/build_linux.py --qt-root /путь/к/Qt/6.11.2/gcc_64
+python3 -m venv installer/.cache/build-python
+installer/.cache/build-python/bin/python -m pip install psutil==7.2.2
+installer/.cache/build-python/bin/python installer/build_linux.py --qt-root /путь/к/Qt/6.11.2/gcc_64
 xvfb-run -a ctest --test-dir ScottAI_qt/build-linux --output-on-failure \
   -E 'window_lifecycle|window_states|qml_screens'
 python3 backend/run_tests.py
@@ -74,5 +77,10 @@ python3 backend/run_tests.py
 установка, обновление, сохранение синтетических данных, удаление, переустановка
 и запуск упакованного интерфейса без доступа к Qt SDK. Тесты поведения
 настоящего Windows-композитора в Linux-набор не входят.
+
+В CI добавлена проверка того же архива в контейнерах Ubuntu 22.04, Debian 12/13,
+Fedora 44 и Arch. Проверяются встроенный Python, системные сертификаты,
+установка и сохранение данных, зависимости backend, API чатов и интерфейс X11.
+Результаты контейнеров не заменяют проверку GNOME/KDE, Wayland и реального звука.
 
 Qt deployment API: [развёртывание Qt Quick](https://doc.qt.io/qt-6/cmake-deployment.html).

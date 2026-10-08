@@ -1,5 +1,6 @@
 """Linux installer path safety and preservation, using disposable synthetic files."""
 import importlib.util
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -19,6 +20,14 @@ def package(tmp_path):
     (source/'backend').mkdir()
     (source/'backend/main.py').write_text('# synthetic backend\n')
     (source/'VERSION.json').write_text('{"version":"2.0.0"}')
+    core = {}
+    for name in ('bin/python3.13', 'lib/python3.13/os.py', 'lib/python3.13/venv/__init__.py'):
+        file = source/'python-runtime'/name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(b'synthetic bundled python')
+        core[name] = hashlib.sha256(file.read_bytes()).hexdigest()
+    (source/'python-runtime/.scott-python.json').write_text(json.dumps(
+        {'version':'3.13.16', 'sha256':'synthetic-archive', 'core':core}))
     return source
 
 
@@ -110,7 +119,7 @@ def test_retry_repairs_partial_environment(tmp_path, package, monkeypatch):
     assert (target/'runtime/bin/python').is_file()
 
 
-@pytest.mark.parametrize('version', [(3, 10, 0), (3, 14, 0)])
+@pytest.mark.parametrize('version', [(3, 10, 0)])
 def test_rejects_unsupported_python_before_install(version, monkeypatch):
     monkeypatch.setattr(installer.sys, 'platform', 'linux')
     monkeypatch.setattr(installer.sys, 'version_info', version)
@@ -119,3 +128,57 @@ def test_rejects_unsupported_python_before_install(version, monkeypatch):
     with pytest.raises(SystemExit) as error:
         installer.main()
     assert error.value.code == 2
+
+
+def test_newer_host_python_does_not_restrict_bundled_backend(monkeypatch):
+    monkeypatch.setattr(installer.sys, 'platform', 'linux')
+    monkeypatch.setattr(installer.sys, 'version_info', (3, 14, 0))
+    monkeypatch.setattr(installer.sys, 'argv', ['install.py'])
+    calls = []
+    monkeypatch.setattr(installer, 'install', lambda *a, **kw: calls.append(True))
+    assert installer.main() == 0
+    assert calls == [True]
+
+
+def test_corrupt_python_rejected_before_copy(tmp_path, package):
+    (package/'python-runtime/bin/python3.13').write_bytes(b'corrupt')
+    with pytest.raises(ValueError, match='повреждены'):
+        installer.install(tmp_path/'installed', package, shortcut=False)
+    assert not (tmp_path/'installed').exists()
+
+
+def test_foreign_runtime_is_not_claimed(tmp_path, package):
+    target = tmp_path/'installed'
+    (target/'runtime').mkdir(parents=True)
+    (target/'runtime/pyvenv.cfg').write_text('foreign environment')
+    metadata = {'files':[], 'runtime_owned':False}
+    (target/installer.MARKER).write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match='не принадлежит'):
+        installer.install(target, package, shortcut=False)
+    assert json.loads((target/installer.MARKER).read_text()) == metadata
+    assert (target/'runtime/pyvenv.cfg').read_text() == 'foreign environment'
+
+
+def test_failed_legacy_upgrade_restores_environment(tmp_path, package, monkeypatch):
+    target = tmp_path/'installed'
+    (target/'runtime/bin').mkdir(parents=True)
+    (target/'runtime/bin/python').write_bytes(b'old interpreter')
+    (target/'runtime/pyvenv.cfg').write_text('old environment')
+    (target/installer.MARKER).write_text(json.dumps({'files':[], 'runtime_owned':True}))
+    def fail(*args, **kwargs):
+        (target/'runtime').mkdir()
+        (target/'runtime/partial').write_bytes(b'partial')
+        raise subprocess.CalledProcessError(1, ['synthetic-venv'])
+    monkeypatch.setattr(installer.subprocess, 'run', fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        installer.install(target, package, shortcut=False)
+    assert (target/'runtime/bin/python').read_bytes() == b'old interpreter'
+    assert not (target/'runtime/partial').exists()
+    assert not list(target.glob('.runtime-before-*'))
+
+
+def test_python_resource_data_is_allowed(package):
+    file = package/'python-runtime/lib/python3.13/vendor/data/resource.txt'
+    file.parent.mkdir(parents=True)
+    file.write_text('synthetic library resource')
+    assert file in installer.payload_files(package)

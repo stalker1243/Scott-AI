@@ -34,9 +34,10 @@ def main():
         # Distribution tests inspect the actual builders and public resources.
         # Copy only these known source files; release/cache/data stay excluded.
         for name in ('installer/build.py',
-                     'installer/build_linux.py', 'installer/linux/install.py',
+                     'installer/build_linux.py', 'installer/linux_python.py', 'installer/linux/install.py',
                      'installer/linux/install.sh', 'installer/linux/uninstall.sh',
                      'installer/linux/run.sh',
+                     'installer/linux/python-environment.sh',
                      'VERSION.json', 'README.md', '.env.example',
                      'assets/brand/scott-logo.png',
                      'assets/brand/scott-logo-light.png',

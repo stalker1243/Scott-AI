@@ -2,18 +2,20 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import uuid
 
 SOURCE = Path(__file__).resolve().parent
 MARKER = '.scott-linux-install.json'
 DIRECTORIES = ('launcher', 'lib', 'plugins', 'qml', 'libexec', 'translations',
-               'backend', 'voice-assets', 'assets', 'licenses')
+               'backend', 'voice-assets', 'assets', 'licenses', 'python-runtime')
 FILES = ('VERSION.json', '.env.example', 'README.md', 'RELEASE-NOTES.md',
-         'install.py', 'install.sh', 'uninstall.sh', 'run.sh')
+         'install.py', 'install.sh', 'uninstall.sh', 'run.sh', 'python-environment.sh')
 
 
 def safe_prefix(path: Path, source: Path = SOURCE, uninstall: bool = False) -> Path:
@@ -40,9 +42,56 @@ def payload_files(source: Path) -> list[Path]:
         if not file.resolve().is_relative_to(source.resolve()):
             raise ValueError('Пакет содержит ссылку за пределы своей папки.')
         relative = file.relative_to(source)
-        if 'data' in relative.parts or file.name == '.env':
+        if is_user_data(relative):
             raise ValueError('Пакет содержит пользовательские данные.')
     return result
+
+
+def is_user_data(path: Path) -> bool:
+    return path.parts[:1] == ('data',) or path.parts[:2] == ('backend', 'data') or path.name == '.env'
+
+
+def python_receipt(source: Path) -> dict:
+    base = source/'python-runtime'
+    receipt = json.loads((base/'.scott-python.json').read_text(encoding='utf-8'))
+    required = {'bin/python3.13', 'lib/python3.13/os.py', 'lib/python3.13/venv/__init__.py'}
+    if not str(receipt.get('version', '')).startswith('3.13.') or set(receipt.get('core', {})) != required:
+        raise ValueError('В пакете отсутствует проверенный Python 3.13.')
+    for name, sha in receipt['core'].items():
+        file = base/name
+        if not file.resolve().is_relative_to(base.resolve()) or hashlib.sha256(file.read_bytes()).hexdigest() != sha:
+            raise ValueError('Файлы встроенного Python повреждены.')
+    return receipt
+
+
+def validate_environment(prefix: Path, previous: dict) -> None:
+    runtime = prefix/'runtime'
+    if runtime.is_symlink() or not runtime.resolve().is_relative_to(prefix):
+        raise ValueError('Runtime не должен быть ссылкой за пределы установки.')
+    if runtime.exists() and not previous.get('runtime_owned'):
+        raise ValueError('Существующая runtime не принадлежит установщику Scott AI.')
+    if runtime.exists() and not runtime.is_dir():
+        raise ValueError('Runtime должна быть отдельной папкой Python-окружения.')
+
+
+def prepare_environment(prefix: Path, previous: dict, receipt: dict) -> None:
+    validate_environment(prefix, previous)
+    runtime = prefix/'runtime'
+    replace = runtime.exists() and (previous.get('runtime_sha256') != receipt['sha256']
+                                  or not (runtime/'pyvenv.cfg').is_file())
+    backup = prefix/('.runtime-before-'+uuid.uuid4().hex) if replace else None
+    if backup:
+        runtime.rename(backup)
+    try:
+        subprocess.run([str(prefix/'python-runtime/bin/python3.13'), '-I', '-m', 'venv', str(runtime)], check=True)
+    except (OSError, subprocess.CalledProcessError):
+        if backup:
+            if runtime.exists():
+                shutil.rmtree(runtime)
+            backup.rename(runtime)
+        raise
+    if backup:
+        shutil.rmtree(backup)
 
 
 def target_file(prefix: Path, name: str) -> Path:
@@ -69,12 +118,14 @@ def desktop_entry(prefix: Path) -> Path:
 
 def install(prefix: Path, source: Path = SOURCE, shortcut: bool = True) -> None:
     prefix = safe_prefix(prefix, source)
+    receipt = python_receipt(source)
     payload = payload_files(source)
     if not (source/'launcher/ScottAIQt').is_file():
         raise ValueError('В пакете отсутствует Qt-лаунчер.')
     prefix.mkdir(parents=True, exist_ok=True)
     marker = prefix/MARKER
     previous = json.loads(marker.read_text(encoding='utf-8')) if marker.exists() else {}
+    validate_environment(prefix, previous)
     owned = set(previous.get('files', []))
     for file in payload:
         name = file.relative_to(source).as_posix()
@@ -88,18 +139,15 @@ def install(prefix: Path, source: Path = SOURCE, shortcut: bool = True) -> None:
         else:
             shutil.copy2(file, target)
         owned.add(name)
-    runtime = prefix/'runtime'
-    if runtime.is_symlink():
-        raise ValueError('Runtime не должен быть ссылкой.')
-    if runtime.exists() and not (runtime/'pyvenv.cfg').is_file() and not previous.get('runtime_owned'):
-        raise ValueError('Существующая runtime не является Python-окружением.')
     # Record ownership before a venv failure so installation can be retried safely.
     metadata = {'version': json.loads((source/'VERSION.json').read_text())['version'],
                 'files': sorted(owned), 'runtime_owned': True,
-                'shortcut': previous.get('shortcut', '')}
+                'shortcut': previous.get('shortcut', ''),
+                'runtime_sha256': previous.get('runtime_sha256')}
     marker.write_text(json.dumps(metadata, indent=2), encoding='utf-8')
-    # Re-running venv also repairs a previous failure during ensurepip.
-    subprocess.run([sys.executable, '-m', 'venv', str(runtime)], check=True)
+    prepare_environment(prefix, previous, receipt)
+    metadata['runtime_sha256'] = receipt['sha256']
+    marker.write_text(json.dumps(metadata, indent=2), encoding='utf-8')
     if shortcut:
         metadata['shortcut'] = str(desktop_entry(prefix))
         marker.write_text(json.dumps(metadata, indent=2), encoding='utf-8')
@@ -120,7 +168,7 @@ def uninstall(prefix: Path, delete_data: bool = False) -> None:
             shortcut.unlink()
     for name in metadata['files']:
         file = target_file(prefix, name)
-        if 'data' in file.relative_to(prefix).parts or file.name == '.env':
+        if is_user_data(file.relative_to(prefix)):
             raise ValueError('Перечень удаления затрагивает рабочие данные.')
         file.unlink(missing_ok=True)
     runtime = prefix/'runtime'
@@ -150,8 +198,6 @@ def main() -> int:
     args = parser.parse_args()
     if sys.platform != 'linux' or sys.version_info < (3, 11):
         parser.error('Нужен Linux и Python 3.11 или новее.')
-    if not args.uninstall and sys.version_info >= (3, 14):
-        parser.error('Для backend нужен Python 3.11–3.13. Запустите установщик через python3.13 install.py.')
     if args.delete_data and not args.uninstall:
         parser.error('--delete-data используется только вместе с --uninstall.')
     if any(c in str(args.prefix) for c in '\n\r\t'):
