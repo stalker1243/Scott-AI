@@ -55,6 +55,10 @@ pyttsx3==2.99
 # ===== РАСПОЗНАВАНИЕ РЕЧИ =====
 # main.py проверяет наличие SpeechRecognition, прежде чем принимать аудио.
 SpeechRecognition==3.10.0
+# Python 3.13 удалил эти модули из стандартной библиотеки. Они нужны
+# SpeechRecognition, а audioop также используется при обработке звука pydub.
+standard-aifc==3.13.0; python_version >= "3.13"
+audioop-lts==0.2.2; python_version >= "3.13"
 
 # Захват микрофона для постоянного прослушивания (listener.py). Работает через
 # PortAudio, поэтому одинаково на Windows и Linux.
@@ -122,5 +126,8 @@ GPUtil==1.4.0
 # пара минут при первом запуске). Если её нет, Scott продолжает слышать
 # обычной. Выбор — через WHISPER_ENGINE в .env.
 faster-whisper==1.1.0
+# PyAV 19 удалил metadata_errors в av.open; faster-whisper 1.1 использует его.
+# Закрепляем версию, проверенную на загруженных WAV и встроенном Python.
+av==18.1.0
 openai-whisper==20250625
 torch>=2.9.1
