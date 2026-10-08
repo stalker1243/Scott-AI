@@ -33,12 +33,13 @@ def main():
         shutil.copytree(backend, isolated, ignore=ignore)
         # Distribution tests inspect the actual builders and public resources.
         # Copy only these known source files; release/cache/data stay excluded.
-        for name in ('installer/build.py', 'installer/build_macos.py',
+        for name in ('installer/build.py',
+                     'installer/build_linux.py', 'installer/linux/install.py',
+                     'installer/linux/install.sh', 'installer/linux/uninstall.sh',
+                     'installer/linux/run.sh',
                      'VERSION.json', 'README.md', '.env.example',
-                     'ScottAI_avalonia/Assets/icon-128.png',
-                     'ScottAI_avalonia/Assets/icon-256.png',
-                     'ScottAI_avalonia/Assets/icon-512.png',
-                     'ScottAI_avalonia/Assets/icon-1024.png',
+                     'assets/brand/scott-logo.png',
+                     'assets/brand/scott-logo-light.png',
                      'experiments/voice_design/stream_voice.py',
                      'experiments/voice_design/create_scott_voice.py',
                      'experiments/voice_design/trial_utils.py',

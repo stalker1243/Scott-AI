@@ -1,0 +1,68 @@
+name: Сборка Qt для Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [new-launcher]
+    paths:
+      - 'ScottAI_qt/**'
+      - 'backend/**'
+      - 'installer/**'
+      - 'assets/**'
+      - 'VERSION.json'
+      - '.github/workflows/linux-qt.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Ubuntu 24.04 x86-64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      PYTHONIOENCODING: utf-8
+      QT_QUICK_BACKEND: software
+      QSG_RHI_BACKEND: software
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Системные библиотеки
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build xvfb patchelf libgl1-mesa-dev libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libpulse0 libportaudio2 ffmpeg
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.2'
+          arch: linux_gcc_64
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7'
+          cache: true
+      - name: Собрать пакет Qt
+        run: python installer/build_linux.py --qt-root "$QT_ROOT_DIR"
+      - name: Проверить Qt
+        run: xvfb-run -a ctest --test-dir ScottAI_qt/build-linux --output-on-failure -E 'window_lifecycle|window_states|qml_screens'
+      - name: Проверить установку, обновление и удаление
+        run: python installer/linux/check_package.py --package installer/dist-linux-qt
+      - name: Запустить пакет без SDK
+        run: |
+          mv "$QT_ROOT_DIR" "$QT_ROOT_DIR.hidden-for-package-test"
+          env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-chat
+          env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-voice
+      - name: Библиотеки backend для CPU
+        run: |
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1+cpu
+          python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+      - name: Изолированные тесты backend
+        run: python backend/run_tests.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScottAI-Qt-Linux-x86_64
+          path: |
+            installer/release/ScottAI-*-Qt-linux-x86_64.tar.gz
+            installer/release/ScottAI-*-Qt-linux-x86_64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14

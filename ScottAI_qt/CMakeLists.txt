@@ -29,12 +29,19 @@ qt_add_qml_module(ScottAIQt URI Scott.Prototype VERSION 1.0
     QML_FILES Main.qml MemoryPage.qml NavIcon.qml UiButton.qml FieldSurface.qml UiNotice.qml UiScrollBar.qml
               StyleCatalog.js StyleBackdrop.qml SurfacePanel.qml UiSlider.qml UiComboBox.qml UiSwitch.qml UiSegmentedControl.qml SettingsPage.qml
               WindowTitleBar.qml WindowResizeHandles.qml AppNavigation.qml ProfilePage.qml ActionsPage.qml ProtocolsPage.qml ModelsPage.qml CapabilityBadges.qml CapabilityInfo.js SetupDialog.qml)
-qt_add_resources(ScottAIQt branding PREFIX /brand BASE ../ScottAI_avalonia/Assets
-    FILES ../ScottAI_avalonia/Assets/scott.ico
-          ../ScottAI_avalonia/Assets/scott-light.ico
-          ../ScottAI_avalonia/Assets/scott-logo.png
-          ../ScottAI_avalonia/Assets/scott-logo-light.png)
+qt_add_resources(ScottAIQt branding PREFIX /brand BASE ../assets/brand
+    FILES ../assets/brand/scott.ico
+          ../assets/brand/scott-light.ico
+          ../assets/brand/scott-logo.png
+          ../assets/brand/scott-logo-light.png)
 qt_add_resources(ScottAIQt preview_fixture PREFIX /test FILES tests/PreviewData.qml tests/GlassFixture.qml)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(CMAKE_INSTALL_BINDIR launcher)
+    set(CMAKE_INSTALL_LIBDIR lib)
+    install(TARGETS ScottAIQt RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    qt_generate_deploy_qml_app_script(TARGET ScottAIQt OUTPUT_SCRIPT scott_deploy_script NO_TRANSLATIONS)
+    install(SCRIPT ${scott_deploy_script})
+endif()
 include(CTest)
 if(BUILD_TESTING)
     qt_add_executable(client_tests tests/ClientTests.cpp)

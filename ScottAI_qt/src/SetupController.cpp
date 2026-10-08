@@ -16,7 +16,7 @@ SetupController::SetupController(QObject *parent) : QObject(parent) {
     });
     connect(&m_process, &QProcess::readyReadStandardError, this, [this] { m_process.readAllStandardError(); });
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) { m_busy = false; m_error = QStringLiteral("Не удалось запустить подготовку. Проверьте runtime/python.exe."); emit changed(); }
+        if (error == QProcess::FailedToStart) { m_busy = false; m_error = QStringLiteral("Не удалось запустить Python для подготовки. Повторите установку приложения."); emit changed(); }
     });
     connect(&m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         m_busy = false;

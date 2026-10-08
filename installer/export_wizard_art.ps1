@@ -15,7 +15,7 @@ function Export-WizardImage([bool]$Small) {
     $graphics.FillRectangle($gradient, $bounds)
     $pen = New-Object Drawing.Pen([Drawing.ColorTranslator]::FromHtml('#293d5c'), 1)
     for ($y = 16; $y -lt $height; $y += 32) { $graphics.DrawLine($pen, 0, $y, $width, $y) }
-    $icon = [Drawing.Image]::FromFile((Join-Path $PSScriptRoot '../ScottAI_avalonia/Assets/icon-256.png'))
+    $icon = [Drawing.Image]::FromFile((Join-Path $PSScriptRoot '../assets/brand/icon-256.png'))
     if ($Small) {
         $graphics.DrawImage($icon, (New-Object Drawing.Rectangle(15, 15, 80, 80)))
     } else {

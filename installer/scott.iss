@@ -1,19 +1,19 @@
 ; Установщик Scott AI.
 ;
-; Собирается из installer/dist-qt или dist, которые готовит build.py:
-; встроенный Python, backend и лаунчер с необходимыми Qt/.NET библиотеками.
+; Собирается из installer/dist-qt, который готовит build.py:
+; встроенный Python, backend и лаунчер с необходимыми Qt-библиотеками.
 ; Тяжёлого здесь нет: torch и модели речи ставятся при первом запуске, когда
 ; уже известно, есть ли в машине видеокарта NVIDIA.
 ;
 ; Версия и путь к dist передаются снаружи, из build.py:
-;   ISCC.exe /DAppVersion=1.0.0 /DDistDir=...\dist installer\scott.iss
+;   ISCC.exe /DAppVersion=2.0.0 /DDistDir=...\dist-qt installer\scott.iss
 
 #ifndef AppVersion
   #define AppVersion "1.0.0"
 #endif
 
 #ifndef DistDir
-  #define DistDir "dist"
+  #define DistDir "dist-qt"
 #endif
 
 #ifndef OutputDir
@@ -23,7 +23,7 @@
 #define AppName "Scott AI"
 #define AppPublisher "Scott AI"
 #ifndef AppExe
-  #define AppExe "ScottAI.exe"
+  #define AppExe "ScottAIQt.exe"
 #endif
 
 [Setup]
@@ -42,12 +42,8 @@ DefaultDirName={autopf}\ScottAI
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir={#OutputDir}
-#if AppExe == "ScottAIQt.exe"
 OutputBaseFilename=ScottAI-{#AppVersion}-Qt-setup
-#else
-OutputBaseFilename=ScottAI-{#AppVersion}-setup
-#endif
-SetupIconFile=..\ScottAI_avalonia\Assets\scott.ico
+SetupIconFile=..\assets\brand\scott.ico
 UninstallDisplayIcon={app}\launcher\{#AppExe}
 UninstallDisplayName={#AppName}
 #if Ver >= EncodeVer(6, 6, 0)
@@ -83,11 +79,11 @@ PrivilegesRequired=lowest
 CloseApplications=force
 RestartApplications=no
 
-; Встроенный Python и .NET-сборка лаунчера — 64-битные.
+; Встроенный Python и Qt-лаунчер — 64-битные.
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
-; Windows 10 и новее: Avalonia и встроенный Python 3.13 старее не поддерживают.
+; Windows 10 и новее: Qt и встроенный Python 3.13 старее не поддерживают.
 MinVersion=10.0
 
 [Languages]

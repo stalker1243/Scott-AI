@@ -3,7 +3,8 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$assets = Join-Path $projectRoot 'ScottAI_avalonia/Assets'
+$assets = Join-Path $projectRoot 'assets/brand'
+$null = New-Item -ItemType Directory -Force -Path $assets
 $brand = Join-Path $projectRoot 'docs/brand'
 $sizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256, 512, 1024)
 
@@ -68,7 +69,4 @@ foreach ($variant in @('', '-light')) {
     Export-Ico (Join-Path $assets "scott$variant.ico") "icon$variant"
 }
 
-Copy-Item (Join-Path $assets 'scott.ico') (Join-Path $projectRoot 'ScottAI_mobile/ScottAI.Mobile/Assets/scott.ico')
-Copy-Item (Join-Path $assets 'icon-512.png') (Join-Path $projectRoot 'ScottAI_mobile/ScottAI.Mobile/Assets/Icon.png')
-Copy-Item (Join-Path $assets 'icon-512.png') (Join-Path $projectRoot 'ScottAI_mobile/ScottAI.Mobile.Android/Icon.png')
-Write-Output 'Exported both icon variants, launcher logos and mobile icons.'
+Write-Output 'Exported both icon variants and launcher logos.'

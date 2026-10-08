@@ -92,7 +92,6 @@ python installer/build.py --installer
 Результат: `installer/release/ScottAI-<версия>-Qt-setup.exe`. Включены
 Python, backend, Qt и библиотеки компилятора. Для сборки нужны Qt/MinGW,
 CMake, Ninja и Inno Setup; параметры путей перечислены в `--help`.
-Для Avalonia используйте `--launcher avalonia`.
 
 Установщик использует тёмный мастер с логотипом. Первый запуск показывает
 подготовку библиотек и моделей речи: нужны интернет и около 5 ГБ места.

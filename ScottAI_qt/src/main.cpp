@@ -154,9 +154,14 @@ int main(int argc, char **argv) {
     const bool integration = parser.isSet("check-backend");
     BackendClient client;
     const auto installedRoot = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
-    const bool installed = !smoke && !integration && QFileInfo::exists(installedRoot + "/runtime/python.exe") && QFileInfo::exists(installedRoot + "/backend/main.py");
+#ifdef Q_OS_WIN
+    const auto installedPython = installedRoot + "/runtime/python.exe";
+#else
+    const auto installedPython = installedRoot + "/runtime/bin/python";
+#endif
+    const bool installed = !smoke && !integration && QFileInfo::exists(installedPython) && QFileInfo::exists(installedRoot + "/backend/main.py");
     const auto backendDirectory = installed && !parser.isSet("backend-dir") ? installedRoot + "/backend" : parser.value("backend-dir");
-    const auto pythonExecutable = installed && !parser.isSet("python") ? installedRoot + "/runtime/python.exe" : parser.value("python");
+    const auto pythonExecutable = installed && !parser.isSet("python") ? installedPython : parser.value("python");
     client.configureProcess(backendDirectory, pythonExecutable);
     SetupController setup;
     QObject::connect(&setup, &SetupController::ready, &client, &BackendClient::startBackend);

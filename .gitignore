@@ -45,7 +45,7 @@ experiments/voice_design/models/
 target/
 
 
-# .NET (лаунчер Avalonia) — промежуточные и собранные артефакты
+# .NET (мобильное приложение) — промежуточные и собранные артефакты
 [Bb]in/
 [Oo]bj/
 
@@ -73,6 +73,7 @@ reports/
 installer/dist/
 installer/dist-qt/
 installer/dist-linux/
+installer/dist-linux-qt/
 installer/dist-macos/
 installer/.cache/
 # Собранный установщик — артефакт выпуска: его место в GitHub Releases, а не
@@ -102,6 +103,9 @@ CLAUDE.md
 DEV_NOTES.md
 AGENTS.md
 docs/internal/
+.claude/
+.agents/
+.codex/
 
 # План развития: замысел, приоритеты и цифры, по которым они выбраны. Тоже
 # записи для себя, а не для тех, кто пользуется программой.

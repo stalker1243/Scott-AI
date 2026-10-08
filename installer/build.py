@@ -18,7 +18,6 @@ torch зависит от того, есть ли в компьютере вид
     python installer/build.py                # Qt: installer/dist-qt
     python installer/build.py --clean        # предварительно очистив
     python installer/build.py --installer    # и упаковать в установочный .exe
-    python installer/build.py --launcher avalonia --installer  # прежний интерфейс
 """
 
 from __future__ import annotations
@@ -36,7 +35,7 @@ from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = ROOT / "installer"
-DIST = INSTALLER / "dist"
+DIST = INSTALLER / "dist-qt"
 CACHE = INSTALLER / ".cache"
 
 PYTHON_VERSION = "3.13.7"
@@ -165,36 +164,6 @@ def build_qt_launcher(dest: Path, qt_root: Path, compiler_root: Path) -> None:
     log(f'Qt-лаунчер и библиотеки подготовлены: {output}')
 
 
-def build_launcher(dest: Path) -> None:
-    """
-    Собрать лаунчер так, чтобы он не требовал установленного .NET.
-
-    self-contained добавляет к размеру около семидесяти мегабайт, но избавляет
-    пользователя от отдельной установки среды — ровно то, ради чего затевался
-    установщик.
-    """
-    project = ROOT / "ScottAI_avalonia"
-    output = dest / "launcher"
-
-    log("собираю лаунчер (self-contained, это займёт минуту)…")
-    result = subprocess.run(
-        [
-            "dotnet", "publish", str(project),
-            "-c", "Release",
-            "-r", "win-x64",
-            "--self-contained", "true",
-            "-p:PublishSingleFile=true",
-            "-o", str(output),
-        ],
-        capture_output=True, text=True, timeout=900,
-    )
-
-    if result.returncode != 0:
-        raise RuntimeError(f"не удалось собрать лаунчер:\n{result.stdout[-2000:]}")
-
-    log(f"лаунчер собран: {output}")
-
-
 def copy_extras(dest: Path) -> None:
     """Файлы, которые пользователь должен увидеть рядом с программой."""
     # VERSION.json обязателен: по нему программа понимает, какая версия
@@ -207,6 +176,10 @@ def copy_extras(dest: Path) -> None:
     notes = ROOT/'docs'/f'release-notes-{read_version()}.md'
     if notes.is_file():
         shutil.copy2(notes,dest/'RELEASE-NOTES.md')
+    brand = dest / 'assets' / 'brand'
+    brand.mkdir(parents=True, exist_ok=True)
+    for name in ('scott-logo.png', 'scott-logo-light.png'):
+        shutil.copy2(ROOT / 'assets' / 'brand' / name, brand / name)
 
     log("сопроводительные файлы скопированы")
 
@@ -256,7 +229,7 @@ def find_iscc() -> Optional[Path]:
     return Path(found) if found else None
 
 
-def build_installer(dest: Path, app_exe: str = 'ScottAI.exe') -> bool:
+def build_installer(dest: Path, app_exe: str = 'ScottAIQt.exe') -> bool:
     """Упаковать готовый дистрибутив в один установочный .exe."""
     iscc = find_iscc()
     if iscc is None:
@@ -291,7 +264,7 @@ def build_installer(dest: Path, app_exe: str = 'ScottAI.exe') -> bool:
         print(result.stderr[-1000:])
         return False
 
-    package = release / f"ScottAI-{version}{'-Qt' if app_exe == 'ScottAIQt.exe' else ''}-setup.exe"
+    package = release / f"ScottAI-{version}-Qt-setup.exe"
     if package.exists():
         log(f"установщик готов: {package} ({package.stat().st_size / 1024 ** 2:.0f} МБ)")
     return True
@@ -302,12 +275,12 @@ def main() -> int:
     parser.add_argument("--clean", action="store_true", help="очистить папку сборки перед началом")
     parser.add_argument("--skip-launcher", action="store_true", help="не собирать лаунчер (быстрее для проверки)")
     parser.add_argument("--installer", action="store_true", help="упаковать результат в установочный .exe")
-    parser.add_argument('--launcher', choices=['qt', 'avalonia'], default='qt', help='лаунчер для Windows (по умолчанию Qt)')
+    parser.add_argument('--launcher', choices=['qt'], default='qt', help='лаунчер Qt для Windows')
     parser.add_argument('--qt-root', type=Path, default=Path(r'C:\Qt\6.11.2\mingw_64'))
     parser.add_argument('--compiler-root', type=Path, default=Path(r'C:\Qt\Tools\mingw1310_64'))
     parser.add_argument('--output', type=Path, help='новая папка дистрибутива внутри проекта; не перезаписывает существующую')
     args = parser.parse_args()
-    destination = INSTALLER / 'dist-qt' if args.launcher == 'qt' else DIST
+    destination = DIST
     if args.output is not None:
         destination = args.output.resolve()
         if not destination.is_relative_to(ROOT.resolve()) or destination==ROOT.resolve():
@@ -331,13 +304,10 @@ def main() -> int:
     copy_voice_assets(destination)
     copy_extras(destination)
     if not args.skip_launcher:
-        if args.launcher == 'qt':
-            build_qt_launcher(destination, args.qt_root, args.compiler_root)
-        else:
-            build_launcher(destination)
+        build_qt_launcher(destination, args.qt_root, args.compiler_root)
     report_size(destination)
 
-    if args.installer and not build_installer(destination, 'ScottAIQt.exe' if args.launcher == 'qt' else 'ScottAI.exe'):
+    if args.installer and not build_installer(destination):
         return 1
 
     print(f"\nГотово: {destination}")

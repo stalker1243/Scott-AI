@@ -1,4 +1,4 @@
-IDI_ICON1 ICON "../ScottAI_avalonia/Assets/scott.ico"
+IDI_ICON1 ICON "../assets/brand/scott.ico"
 
 #include <windows.h>
 #include "ScottVersion.h"

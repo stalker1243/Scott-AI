@@ -1,191 +1,94 @@
-"""
-Сборка дистрибутива Scott AI для Linux.
-
-Отличия от Windows-сборки принципиальные, поэтому это отдельный скрипт:
-
-  * встроенного Python для Linux не существует (embeddable-сборка бывает только
-    под Windows), поэтому используется системный, а зависимости ставятся в
-    виртуальное окружение — его создаёт install.sh при установке;
-
-  * вместо установщика — обычный архив со скриптом: он работает в любом
-    дистрибутиве, тогда как .deb годился бы только для Debian и Ubuntu;
-
-  * лаунчер собирается кросс-компиляцией (`-r linux-x64`), прямо отсюда,
-    с Windows — .NET это умеет.
-
-Запуск:
-
-    python installer/build_linux.py            # собрать в installer/dist-linux
-    python installer/build_linux.py --clean    # предварительно очистив
-"""
-
+"""Build a native Qt Linux package. Run on Linux x86-64 with Qt 6.8+."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
 import tarfile
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-INSTALLER = ROOT / "installer"
-DIST = INSTALLER / "dist-linux"
-RELEASE = INSTALLER / "release"
+import build as shared
 
-# Что из backend попадает в дистрибутив. Перечислено явно, а не «всё подряд»:
-# рядом лежат логи, кэш и данные конкретной машины, которым на чужом
-# компьютере делать нечего.
-BACKEND_FILES = ["*.py", "requirements.txt", "pytest.ini"]
-BACKEND_SKIP = {"__pycache__", "tests", "logs", "data"}
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def log(message: str) -> None:
-    print(f"  {message}")
+def new_output(path: Path) -> Path:
+    output = path.resolve()
+    if not output.is_relative_to(ROOT.resolve()) or output == ROOT.resolve():
+        raise ValueError('Output must be inside the project.')
+    if output.exists():
+        raise ValueError('Output already exists; choose a new directory.')
+    return output
 
 
-def read_version() -> str:
-    """Номер версии из VERSION.json — того же файла, что читает backend."""
-    try:
-        with open(ROOT / "VERSION.json", encoding="utf-8") as f:
-            return json.load(f).get("version", "0.0.0")
-    except Exception as e:
-        log(f"не смог прочитать VERSION.json ({e}) — беру 0.0.0")
-        return "0.0.0"
+def build(output: Path, qt_root: Path, jobs: int) -> Path:
+    build_dir = ROOT / 'ScottAI_qt' / 'build-linux'
+    subprocess.run(['cmake', '-S', str(ROOT/'ScottAI_qt'), '-B', str(build_dir),
+                    '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
+                    f'-DCMAKE_PREFIX_PATH={qt_root}', f'-DCMAKE_INSTALL_PREFIX={output}'], check=True)
+    subprocess.run(['cmake', '--build', str(build_dir), '--parallel', str(jobs)], check=True)
+    subprocess.run(['cmake', '--install', str(build_dir)], check=True)
+    shared.copy_backend(output)
+    shared.copy_voice_assets(output)
+    shared.copy_extras(output)
+    shutil.copytree(ROOT/'assets/brand', output/'assets/brand', dirs_exist_ok=True)
+    shutil.copytree(ROOT/'installer/licenses', output/'licenses', dirs_exist_ok=True)
+    if (qt_root/'sbom').is_dir():
+        shutil.copytree(qt_root/'sbom', output/'licenses/qt-sbom', dirs_exist_ok=True)
+    for name in ('install.py', 'install.sh', 'uninstall.sh', 'run.sh'):
+        target = output/name
+        shutil.copy2(ROOT/'installer/linux'/name, target)
+        target.chmod(0o755)
+    if not (output/'launcher/ScottAIQt').is_file():
+        raise RuntimeError('Qt executable is missing.')
+    if not list((output/'lib').glob('libQt6Core.so*')):
+        raise RuntimeError('Qt libraries were not deployed.')
+    return output
 
 
-def build_launcher(dest: Path) -> None:
-    """
-    Собрать лаунчер под Linux.
-
-    self-contained: .NET на машине человека не нужен, всё внутри. Плюс к
-    размеру около семидесяти мегабайт, зато не приходится объяснять, как
-    ставить среду выполнения.
-    """
-    project = ROOT / "ScottAI_avalonia" / "ScottAI.Avalonia.csproj"
-    target = dest / "launcher"
-
-    log("собираю лаунчер под linux-x64 (это займёт минуту)…")
-    subprocess.run(
-        [
-            "dotnet", "publish", str(project),
-            "-c", "Release",
-            "-r", "linux-x64",
-            "--self-contained", "true",
-            "-o", str(target),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    # Отладочные символы в дистрибутиве не нужны — это десятки мегабайт.
-    for pdb in target.glob("*.pdb"):
-        pdb.unlink()
-
-    log(f"лаунчер собран: {target}")
-
-
-def copy_backend(dest: Path) -> None:
-    source = ROOT / "backend"
-    target = dest / "backend"
-    target.mkdir(parents=True, exist_ok=True)
-
-    count = 0
-    for pattern in BACKEND_FILES:
-        for item in source.glob(pattern):
-            if item.is_file() and item.parent.name not in BACKEND_SKIP:
-                shutil.copy2(item, target / item.name)
-                count += 1
-
-    log(f"backend скопирован: {count} файлов")
-
-
-def copy_extras(dest: Path) -> None:
-    """Сопроводительные файлы, скрипт установки и иконка."""
-    for name in (".env.example", "README.md", "VERSION.json"):
-        source = ROOT / name
-        if source.exists():
-            shutil.copy2(source, dest / name)
-
-    installer_script = INSTALLER / "linux" / "install.sh"
-    target = dest / "install.sh"
-    shutil.copy2(installer_script, target)
-
-    # Права на исполнение внутри архива выставляются при упаковке, но на всякий
-    # случай ставим их и файлу: если человек распакует архив штатным
-    # менеджером, флаг сохранится.
-    target.chmod(0o755)
-
-    icon = ROOT / "ScottAI_avalonia" / "Assets" / "icon-256.png"
-    if icon.exists():
-        shutil.copy2(icon, dest / "scott.png")
-
-    log("сопроводительные файлы скопированы")
-
-
-def pack(dest: Path, version: str) -> Path:
-    """
-    Упаковать в tar.gz.
-
-    Права на исполнение проставляются здесь: на Windows их нет как понятия, и
-    без этого распакованный на Linux лаунчер не запустился бы, а install.sh
-    пришлось бы вызывать через «bash install.sh».
-    """
-    RELEASE.mkdir(parents=True, exist_ok=True)
-    archive_path = RELEASE / f"ScottAI-{version}-linux-x64.tar.gz"
-
-    executables = {"install.sh", "uninstall.sh", "ScottAI", "createdump"}
-
-    def prepare(item: tarfile.TarInfo) -> tarfile.TarInfo:
-        name = Path(item.name).name
-        if name in executables or name.endswith(".so"):
-            item.mode = 0o755
-        elif item.isdir():
-            item.mode = 0o755
-        else:
-            item.mode = 0o644
-        return item
-
-    log("упаковываю архив…")
-    with tarfile.open(archive_path, "w:gz") as archive:
-        archive.add(dest, arcname=f"ScottAI-{version}", filter=prepare)
-
-    size = archive_path.stat().st_size / 1024 ** 2
-    log(f"архив готов: {archive_path} ({size:.0f} МБ)")
-    return archive_path
+def pack(output: Path) -> Path:
+    version = shared.read_version()
+    release = ROOT/'installer/release'
+    release.mkdir(parents=True, exist_ok=True)
+    name = f'ScottAI-{version}-Qt-linux-x86_64'
+    archive = release/f'{name}.tar.gz'
+    if archive.exists():
+        raise ValueError('Linux archive already exists; refusing to overwrite it.')
+    def permissions(info: tarfile.TarInfo) -> tarfile.TarInfo:
+        info.uid = info.gid = 0
+        info.uname = info.gname = 'root'
+        return info
+    with tarfile.open(archive, 'w:gz') as tar:
+        tar.add(output, arcname=name, filter=permissions)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    archive.with_suffix('.gz.sha256').write_text(f'{digest}  {archive.name}\n', encoding='ascii')
+    print(json.dumps({'archive': str(archive), 'bytes': archive.stat().st_size, 'sha256': digest}))
+    return archive
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Собрать дистрибутив Scott AI для Linux")
-    parser.add_argument("--clean", action="store_true", help="очистить папку сборки перед началом")
-    parser.add_argument("--skip-launcher", action="store_true", help="не собирать лаунчер (быстрее для проверки)")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--qt-root', type=Path, default=os.environ.get('QT_ROOT_DIR'))
+    parser.add_argument('--output', type=Path, default=ROOT/'installer/dist-linux-qt')
+    parser.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
-
-    if args.clean and DIST.exists():
-        shutil.rmtree(DIST)
-        log("папка сборки очищена")
-
-    DIST.mkdir(parents=True, exist_ok=True)
-
-    version = read_version()
-    print(f"Собираю дистрибутив Scott AI {version} для Linux")
-
-    copy_backend(DIST)
-    copy_extras(DIST)
-    if not args.skip_launcher:
-        build_launcher(DIST)
-
-    total = sum(f.stat().st_size for f in DIST.rglob("*") if f.is_file())
-    log(f"размер распакованного: {total / 1024 ** 2:.0f} МБ")
-    log("(torch и модели — ещё около 4.5 ГБ — ставятся при первом запуске)")
-
-    pack(DIST, version)
-
-    print(f"\nГотово: {DIST}")
+    if sys.platform != 'linux' or platform.machine() not in ('x86_64', 'amd64'):
+        parser.error('Build this package on Linux x86-64 (for example Ubuntu 24.04).')
+    if args.qt_root is None or not args.qt_root.is_dir():
+        parser.error('Set --qt-root or QT_ROOT_DIR to the Qt SDK directory.')
+    if not 1 <= args.jobs <= 16:
+        parser.error('--jobs must be between 1 and 16.')
+    try:
+        pack(build(new_output(args.output), args.qt_root.resolve(), args.jobs))
+    except (ValueError, RuntimeError, subprocess.CalledProcessError) as error:
+        parser.exit(1, f'{error}\n')
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    raise SystemExit(main())
