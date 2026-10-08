@@ -1,20 +1,43 @@
 # Scott AI на Linux
 
-Экспериментальный Qt-пакет для Ubuntu 24.04 x86-64. Он включает приложение,
+Экспериментальный Qt-пакет для Linux x86-64. Он включает приложение,
 библиотеки Qt, QML-модули, backend и отдельный Python 3.13.16. Системный Python
 для установки не нужен; зависимости и модели речи устанавливаются при первом
-запуске. Голос на настоящем устройстве, Wayland и другие дистрибутивы пока
-не проверены. Scott Voice остаётся экспериментом Windows/NVIDIA.
+запуске. Установка, backend и запуск X11 проверены на Ubuntu 22.04/24.04,
+Debian 12/13, Fedora 44 и Arch. GNOME/KDE, голос на настоящем устройстве и
+Wayland ещё предстоит проверить. Scott Voice остаётся экспериментом Windows/NVIDIA.
 
 ## Установка
 
-Для Ubuntu 24.04:
+Сначала установите системные библиотеки для своего дистрибутива.
+
+### Ubuntu 22.04/24.04 и Debian 12/13
 
 ```bash
-sudo apt-get install ca-certificates libportaudio2 libpulse0 ffmpeg \
-  libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+sudo apt-get install ca-certificates fonts-dejavu-core libportaudio2 libpulse0 ffmpeg \
+  libegl1 libgl1 libopengl0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
   libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1
 ```
+
+### Fedora 44
+
+```bash
+sudo dnf install ca-certificates dejavu-sans-fonts mesa-libEGL mesa-libGL \
+  libxkbcommon-x11 xcb-util-cursor xcb-util-wm xcb-util-keysyms \
+  xcb-util-image xcb-util-renderutil libXcursor libXrandr libXi libXrender \
+  pulseaudio-libs portaudio ffmpeg-free
+```
+
+### Arch Linux
+
+```bash
+sudo pacman -Syu --needed ca-certificates ttf-dejavu mesa libglvnd \
+  libxkbcommon libxkbcommon-x11 libxcb xcb-util-cursor xcb-util-wm \
+  xcb-util-keysyms xcb-util-image xcb-util-renderutil libxcursor \
+  libxrandr libxi libxrender libpulse portaudio ffmpeg
+```
+
+### Установка приложения
 
 Скачайте архив и файл `.sha256` среди артефактов успешного запуска
 [сборки Linux](https://github.com/stalker1243/Scott-AI/actions/workflows/linux-qt.yml).
@@ -32,6 +55,7 @@ cd ScottAI-2.0.0-Qt-linux-x86_64
 Папку можно выбрать через `./install.sh --prefix /путь/к/ScottAI`.
 Нужны интернет и место под зависимости и модели. Python включён в пакет;
 его архив закреплён по SHA256. Установка не меняет системный Python.
+Источник Python — [python-build-standalone, выпуск 20261003](https://github.com/astral-sh/python-build-standalone/releases/tag/20261003).
 При обновлении прежней установки окружение backend пересоздаётся на встроенном
 Python; библиотеки потребуется подготовить заново. История и настройки остаются
 на месте. Если создание окружения не удалось, прежнее окружение восстанавливается.
@@ -78,9 +102,26 @@ python3 backend/run_tests.py
 и запуск упакованного интерфейса без доступа к Qt SDK. Тесты поведения
 настоящего Windows-композитора в Linux-набор не входят.
 
-В CI добавлена проверка того же архива в контейнерах Ubuntu 22.04, Debian 12/13,
-Fedora 44 и Arch. Проверяются встроенный Python, системные сертификаты,
-установка и сохранение данных, зависимости backend, API чатов и интерфейс X11.
-Результаты контейнеров не заменяют проверку GNOME/KDE, Wayland и реального звука.
+8 октября 2026 года [сборка на Ubuntu 24.04](https://github.com/stalker1243/Scott-AI/actions/runs/37767800122/job/113279603485)
+прошла 13 проверок Qt и 1752 теста backend на Python из пакета. Пропущены 11
+проверок установки необязательного Scott Voice для Windows; 7 integration/slow
+исключены. [Тот же архив прошёл матрицу дистрибутивов](https://github.com/stalker1243/Scott-AI/actions/runs/37770049454):
+
+| Система | Окружение проверки | Результат |
+| --- | --- | --- |
+| Ubuntu 24.04 | GitHub Actions, Xvfb | Успешно |
+| Ubuntu 22.04 | Контейнер, Xvfb | Успешно |
+| Debian 12 и 13 | Контейнеры, Xvfb | Успешно |
+| Fedora 44 | Контейнер, Xvfb | Успешно |
+| Arch Linux | Контейнер, Xvfb; состояние на 8 октября | Успешно |
+
+В матрице проверены встроенный Python, системные сертификаты, установка при
+запрещённом системном Python, обновление, сохранение данных и переустановка,
+зависимости backend, health/API чатов и интерфейс X11. GNOME/KDE, Wayland,
+трей, GPU и реальный звук пока не проверены. Mint требует отдельной проверки.
+
+Матрицу можно повторить отдельно через workflow «Проверка Linux-дистрибутивов»:
+укажите ID сборки, которая загрузила артефакт `ScottAI-Qt-Linux-x86_64`. Это
+позволяет проверить новые системные зависимости на уже собранном архиве.
 
 Qt deployment API: [развёртывание Qt Quick](https://doc.qt.io/qt-6/cmake-deployment.html).
