@@ -1,0 +1,43 @@
+name: Проверка Linux-дистрибутивов
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_run:
+        description: 'ID успешной сборки Linux с артефактом ScottAI-Qt-Linux-x86_64'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      package_run:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  distributions:
+    name: Пакет в ${{ matrix.image }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ['ubuntu:22.04', 'debian:12', 'debian:13', 'registry.fedoraproject.org/fedora:44', 'archlinux:base']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ScottAI-Qt-Linux-x86_64
+          path: ${{ runner.temp }}/linux-artifact
+          run-id: ${{ inputs.package_run }}
+          github-token: ${{ github.token }}
+      - name: Проверить тот же пакет в чистом дистрибутиве
+        env:
+          SCOTT_IMAGE: ${{ matrix.image }}
+        run: |
+          docker pull "$SCOTT_IMAGE"
+          docker image inspect "$SCOTT_IMAGE" --format '{{json .RepoDigests}}'
+          docker run --rm -e SCOTT_CONTAINER_TEST=1 -v "$RUNNER_TEMP/linux-artifact:/artifact:ro" -v "$GITHUB_WORKSPACE/installer/linux:/checks:ro" "$SCOTT_IMAGE" bash /checks/check_distribution.sh

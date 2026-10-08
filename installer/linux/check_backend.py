@@ -18,10 +18,11 @@ import main
 from fastapi.testclient import TestClient
 
 # Leave lifespan inactive: no model preparation, devices or background listener.
-with_context = TestClient(main.app)
+with_context = TestClient(main.app, client=('127.0.0.1', 50000))
 try:
     response = with_context.get('/health')
-    assert response.status_code == 200 and response.json()['status'] == 'online'
+    assert response.status_code == 200, (response.status_code, response.text)
+    assert response.json()['status'] == 'online'
     assert with_context.get('/chats').status_code == 200
     response = with_context.post('/chats', json={'title':'Linux package check'})
     assert response.status_code == 200
