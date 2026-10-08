@@ -94,6 +94,20 @@ def test_client_import_does_not_load_torch():
     assert result.returncode==0,result.stderr
 
 
+def test_config_round_trip_preserves_venv_executable_path(config, tmp_path):
+    from dataclasses import replace
+    executable = tmp_path/'runtime'/'bin'/'python'
+    executable.parent.mkdir(parents=True)
+    try:
+        executable.symlink_to(sys.executable)
+    except OSError:
+        pytest.skip('Creating an executable symlink is unavailable')
+    configured = replace(config, python=executable)
+    restored = VoiceProcessConfig.from_wire(configured.wire())
+    assert restored.python == executable.absolute()
+    assert restored.python != executable.resolve()
+
+
 def test_prepare_does_not_create_audio_and_reuses_worker(config):
     with ScottVoiceProcess(config) as voice:
         assert not voice.status()['model_loaded']

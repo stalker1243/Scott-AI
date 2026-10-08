@@ -15,7 +15,7 @@ case "$ID" in
         dnf install -y ca-certificates tar gzip xorg-x11-server-Xvfb dejavu-sans-fonts mesa-libEGL mesa-libGL libxkbcommon-x11 xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil libXcursor libXrandr libXi libXrender pulseaudio-libs portaudio ffmpeg-free
         ;;
     arch)
-        pacman -Syu --noconfirm --needed ca-certificates tar gzip xorg-server-xvfb ttf-dejavu mesa libglvnd libxkbcommon libxcb xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil libxcursor libxrandr libxi libxrender libpulse portaudio ffmpeg
+        pacman -Syu --noconfirm --needed ca-certificates tar gzip xorg-server-xvfb ttf-dejavu mesa libglvnd libxkbcommon libxkbcommon-x11 libxcb xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil libxcursor libxrandr libxi libxrender libpulse portaudio ffmpeg
         ;;
     *) echo "Unsupported CI image: $ID" >&2; exit 1 ;;
 esac

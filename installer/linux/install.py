@@ -208,7 +208,7 @@ def main() -> int:
         else:
             install(args.prefix, shortcut=not args.no_shortcut)
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
-        parser.exit(1, f'{error}\nДля создания Python-окружения может потребоваться пакет python3-venv.\n')
+        parser.exit(1, f'{error}\n')
     return 0
 
 

@@ -112,7 +112,9 @@ class VoiceProcessConfig:
         if any(isinstance(value, bool) or not isinstance(value, int) or value < 1
                for value in (self.cache_max_bytes, self.cache_max_entries)):
             raise ValueError('Invalid voice cache budget')
-        return {name: str(value.resolve()) if isinstance(value,Path) else value
+        # A venv executable can be a symlink. Resolve it and Python loses the
+        # pyvenv.cfg beside the invoked path, along with installed dependencies.
+        return {name: str(value.absolute() if name == 'python' else value.resolve()) if isinstance(value,Path) else value
                 for name,value in self.__dict__.items()}
 
     @classmethod
