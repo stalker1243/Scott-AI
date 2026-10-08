@@ -41,6 +41,8 @@ jobs:
           version: '6.11.2'
           arch: win64_mingw
           tools: 'tools_mingw1310'
+          # Qt 6.11 separates SDK repositories by architecture; aqt 3.3 lacks this mapping.
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7'
           cache: true
       - name: Собрать и проверить Qt
         shell: pwsh
