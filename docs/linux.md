@@ -57,6 +57,7 @@ cd ScottAI-2.0.0-Qt-linux-x86_64
 QuickControls2, Network, Widgets и Test. CI использует Qt 6.11.2.
 
 ```bash
+python3 -m pip install psutil==7.2.2
 python3 installer/build_linux.py --qt-root /путь/к/Qt/6.11.2/gcc_64
 xvfb-run -a ctest --test-dir ScottAI_qt/build-linux --output-on-failure \
   -E 'window_lifecycle|window_states|qml_screens'

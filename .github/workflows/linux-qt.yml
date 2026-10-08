@@ -42,8 +42,10 @@ jobs:
           python-version: '3.13'
           cache: pip
           cache-dependency-path: backend/requirements.txt
-      - name: Проверить Python backend
-        run: python -c "import sys; print(sys.version); assert sys.version_info[:2] == (3, 13)"
+      - name: Подготовить Python сборщика
+        run: |
+          python -c "import sys; print(sys.version); assert sys.version_info[:2] == (3, 13)"
+          python -m pip install psutil==7.2.2
       - name: Собрать пакет Qt
         run: python installer/build_linux.py --qt-root "$QT_ROOT_DIR"
       - name: Проверить Qt
