@@ -8,7 +8,11 @@ private slots:
     void preparationRetryAndCancellation() {
         QTemporaryDir directory; QVERIFY(directory.isValid()); SetupController setup;
         QSignalSpy ready(&setup, &SetupController::ready);
-        const auto probe = QCoreApplication::applicationDirPath() + "/setup_probe.exe";
+        auto probe = QCoreApplication::applicationDirPath() + "/setup_probe";
+#ifdef Q_OS_WIN
+        probe += ".exe";
+#endif
+        QVERIFY2(QFileInfo::exists(probe), qPrintable(probe));
         setup.check(probe, directory.path()); QTRY_VERIFY(!setup.busy()); QVERIFY(setup.visible()); QCOMPARE(ready.count(), 0);
         qputenv("SCOTT_SETUP_PROBE_FAIL", "1"); setup.prepare(); QTRY_VERIFY(!setup.busy());
         QVERIFY(setup.visible()); QCOMPARE(setup.error(), "Network unavailable"); QCOMPARE(ready.count(), 0);
