@@ -81,4 +81,7 @@ if(BUILD_TESTING)
     set_tests_properties(window_states PROPERTIES TIMEOUT 20)
     add_test(NAME qml_screens COMMAND ScottAIQt --smoke-test)
     set_tests_properties(qml_screens PROPERTIES TIMEOUT 110)
+    # These compare native desktop pixels and require a client Windows compositor.
+    # Keep them in the default local suite; hosted Windows Server runs portable tests.
+    set_tests_properties(window_lifecycle qml_screens PROPERTIES LABELS native_desktop)
 endif()

@@ -53,5 +53,6 @@ jobs:
           if ($LASTEXITCODE) { throw 'Configure failed' }
           cmake --build ScottAI_qt/build --parallel 4
           if ($LASTEXITCODE) { throw 'Build failed' }
-          ctest --test-dir ScottAI_qt/build --output-on-failure
+          # Native desktop/compositor checks run locally on Windows 11.
+          ctest --test-dir ScottAI_qt/build --output-on-failure -LE native_desktop
           if ($LASTEXITCODE) { throw 'Qt checks failed' }
