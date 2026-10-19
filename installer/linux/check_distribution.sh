@@ -44,6 +44,8 @@ for scott_try in {1..30}; do
     sleep 0.1
 done
 export DISPLAY=:99
+mkdir -p "$RUNNER_TEMP/ui-check"
+cd "$RUNNER_TEMP/ui-check"
 "$scott_prefix/run.sh" --smoke-chat
 "$scott_prefix/run.sh" --smoke-voice
 "$scott_prefix/run.sh" --smoke-setup
