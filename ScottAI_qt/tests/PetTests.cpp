@@ -29,6 +29,7 @@
 #include <atomic>
 #include <QDateTime>
 #include <QEnterEvent>
+#include <QCursor>
 #include <QSaveFile>
 #include <QStyleHints>
 #ifdef Q_OS_WIN
@@ -243,22 +244,37 @@ private slots:
         // QTest's QWindow mouseMove sends a move, not a native Enter event.
         // Supply the complete pointer sequence independently of the runner's
         // real cursor position; retain the actual hover and animation checks.
-        const QPoint start(60,90);
-        QEnterEvent enter(start,start,window.mapToGlobal(start));
-        QCoreApplication::sendEvent(&window,&enter);
-        QTest::mouseMove(&window,QPoint(60,90));
+        const auto priorCursor=QCursor::pos();
+        const auto restoreCursor=qScopeGuard([&]{
+#ifdef Q_OS_WIN
+            QCursor::setPos(priorCursor);
+#endif
+        });
+        const auto hoverAt=[&](QPoint point){
+#ifdef Q_OS_WIN
+            // Windows also receives native hover packets. Keep their physical
+            // cursor coordinate consistent with the synthetic QWindow event.
+            QCursor::setPos(window.mapToGlobal(point));
+#endif
+            QEnterEvent enter(point,point,window.mapToGlobal(point));
+            QCoreApplication::sendEvent(&window,&enter);
+            QTest::mouseMove(&window,point,20);
+        };
+        hoverAt(QPoint(60,90));
         QTRY_VERIFY2(character->property("lookX").toReal()<-0.3,
-            qPrintable(QString("look=%1 gaze=%2 attention=%3").arg(character->property("lookX").toReal())
-                .arg(character->property("gazeX").toReal()).arg(character->property("attention").toBool())));
+            qPrintable(QString("look=%1 gaze=%2 attention=%3 cursor=%4,%5 target=%6,%7 dpr=%8").arg(character->property("lookX").toReal())
+                .arg(character->property("gazeX").toReal()).arg(character->property("attention").toBool())
+                .arg(QCursor::pos().x()).arg(QCursor::pos().y()).arg(window.mapToGlobal(QPoint(60,90)).x())
+                .arg(window.mapToGlobal(QPoint(60,90)).y()).arg(window.devicePixelRatio())));
         QDir().mkpath("screenshots/pets-motion");
         for(const auto &kind:{"scott"}) {
             character->setProperty("kind",kind);
-            QTest::mouseMove(&window,QPoint(220,90));
+            hoverAt(QPoint(220,90));
             QTRY_VERIFY(character->property("lookX").toReal()>0.3);
             QTest::mouseClick(&window,Qt::LeftButton,Qt::NoModifier,QPoint(220,90));
             QTest::qWait(220);QVERIFY(character->property("joy").toReal()>0.7);
             QVERIFY(window.grabWindow().save(QString("screenshots/pets-motion/%1-happy.png").arg(kind)));
-            QTest::mouseMove(&window,QPoint(60,90));
+            hoverAt(QPoint(60,90));
             QTRY_VERIFY(character->property("lookX").toReal()<-0.3);
         }
         character->setProperty("motion",false);QTest::qWait(250);

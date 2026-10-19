@@ -5,5 +5,8 @@
 *.desktop text eol=lf
 installer/linux/AppRun text eol=lf
 
+# The SDK manifest hashes the patch bytes; Windows checkout must retain LF.
+tools/voice_compat/*.patch text eol=lf
+
 # Остальное — как принято в репозитории: в рабочей копии CRLF, в истории LF.
 * text=auto
