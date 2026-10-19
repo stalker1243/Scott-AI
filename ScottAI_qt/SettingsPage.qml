@@ -9,6 +9,7 @@ ColumnLayout {
     readonly property bool voiceWarming: ["running", "cancelling"].indexOf(voicePreparation.state) >= 0
     readonly property bool voicePreparing: ["running", "cancelling"].indexOf(voiceInstall.state) >= 0
     required property var client
+    required property var updater
     required property QtObject theme
     required property bool backgroundAllowed
     required property bool backgroundEnabled
@@ -37,8 +38,8 @@ ColumnLayout {
     }
     function deviceList(kind) {
         const devices = audio.devices || ({})
-        const list = [{id: "", title: "Как в системе"}]
-        for (const entry of (devices[kind] || [])) list.push({id: entry.name, title: entry.name + (entry.default ? " · по умолчанию" : "")})
+        const list = [{id: "", title: qsTranslate("Launcher", "Как в системе")}]
+        for (const entry of (devices[kind] || [])) list.push({id: entry.name, title: entry.name + (entry.default ? qsTranslate("Launcher", " · по умолчанию") : "")})
         return list
     }
     function syncVolume() {
@@ -70,13 +71,14 @@ ColumnLayout {
     component Hint: Text { color: page.theme.muted; font.family: page.theme.fontFamily; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
     component SettingCard: SurfacePanel {
         theme: page.theme
+        flat: true
         default property alias content: body.data
-        implicitHeight: body.implicitHeight + 32
+        implicitHeight: body.implicitHeight + 24
         Layout.fillWidth: true
         data: ColumnLayout {
             id: body
             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-            anchors.margins: 16; spacing: 10
+            anchors.margins: 12; spacing: 10
         }
     }
     component Option: UiComboBox { theme: page.theme; textRole: "title"; valueRole: "id"; Layout.fillWidth: true }
@@ -90,17 +92,17 @@ ColumnLayout {
         UiSegmentedControl {
             objectName: "settingsTabs"
             theme: page.theme
-            model: ["Голос", "Обработка", "Прочее"]
+            model: [qsTranslate("Launcher", "Голос"), qsTranslate("Launcher", "Обработка"), qsTranslate("Launcher", "Общее")]
             currentIndex: page.section
             onActivated: function(index) { page.section = index }
         }
         Item { Layout.fillWidth: true }
-        UiButton { theme: page.theme; text: client.settingsBusy ? "Загрузка…" : "Обновить"; enabled: client.online && !client.settingsBusy; onClicked: client.refreshSettings() }
+        UiButton { theme: page.theme; text: client.settingsBusy ? qsTranslate("Launcher", "Загрузка…") : qsTranslate("Launcher", "Обновить"); enabled: client.online && !client.settingsBusy; onClicked: client.refreshSettings() }
     }
     UiNotice {
         theme: page.theme; Layout.fillWidth: true
         error: !client.online || client.settingsError.length > 0
-        text: !client.online ? "Подключите Scott, чтобы загрузить и изменить настройки." : client.settingsError.length > 0 ? client.settingsError : client.settingsNotice
+        text: !client.online ? qsTranslate("Launcher", "Подключите Scott, чтобы загрузить и изменить настройки.") : client.settingsError.length > 0 ? client.settingsError : client.settingsNotice
     }
     Item {
         id: activity
@@ -131,7 +133,7 @@ ColumnLayout {
                 }
             }
             Text {
-                text: "Scott обрабатывает запрос…"; color: page.theme.muted
+                text: qsTranslate("Launcher", "Scott обрабатывает запрос…"); color: page.theme.muted
                 font.family: page.theme.fontFamily; font.pixelSize: 12
                 height: 20; verticalAlignment: Text.AlignVCenter
             }
@@ -155,62 +157,62 @@ ColumnLayout {
                 ColumnLayout {
                     width: voiceScroll.availableWidth; spacing: 16
                     SettingCard {
-                        Heading { text: "Громкость и тихий режим" }
+                        Heading { text: qsTranslate("Launcher", "Громкость и тихий режим") }
                         UiSwitch {
                             objectName: "quietSwitch"
-                            theme: page.theme; text: "Scott выполняет команды без озвучивания"
+                            theme: page.theme; text: qsTranslate("Launcher", "Scott выполняет команды без озвучивания")
                             Layout.fillWidth: true
                             checked: page.audioState.quiet || false; enabled: page.editable("audio")
                             onToggled: client.applySetting("quiet", {quiet: checked})
                         }
-                        Hint { text: "Тихий режим останавливает текущую речь. Пробная фраза звучит и в этом режиме." }
+                        Hint { text: qsTranslate("Launcher", "Тихий режим останавливает текущую речь. Пробная фраза звучит и в этом режиме.") }
                         RowLayout {
                             UiSlider {
                                 objectName: "speechVolume"
                                 theme: page.theme; Layout.fillWidth: true; value: page.volumeDraft
                                 enabled: page.editable("audio")
-                                Accessible.name: "Громкость речи"
+                                Accessible.name: qsTranslate("Launcher", "Громкость речи")
                                 onMoved: { page.volumeDraft = value; page.volumeDirty = true }
                             }
                             Text { text: Math.round(page.volumeDraft) + "%"; color: page.theme.ink; font.family: page.theme.fontFamily; Layout.preferredWidth: 50 }
                             UiButton {
                                 objectName: "saveVolume"
-                                theme: page.theme; text: "Применить"; enabled: page.editable("audio") && page.volumeDirty
+                                theme: page.theme; text: qsTranslate("Launcher", "Применить"); enabled: page.editable("audio") && page.volumeDirty
                                 onClicked: client.applySetting("audio", {volume: Math.round(page.volumeDraft)})
                             }
                         }
                     }
                     SettingCard {
-                        Heading { text: "Звуковые устройства" }
-                        Hint { text: page.audio.available === false ? "Звуковая подсистема недоступна." : "Устройства сохраняются по названию. «Как в системе» возвращает автоматический выбор." }
-                        Hint { text: "Динамики или наушники" }
+                        Heading { text: qsTranslate("Launcher", "Звуковые устройства") }
+                        Hint { text: page.audio.available === false ? qsTranslate("Launcher", "Звуковая подсистема недоступна.") : qsTranslate("Launcher", "Устройства сохраняются по названию. «Как в системе» возвращает автоматический выбор.") }
+                        Hint { text: qsTranslate("Launcher", "Динамики или наушники") }
                         Option {
                             objectName: "outputDevice"
-                            model: page.deviceList("output"); currentIndex: Math.max(0, page.indexOf(model, page.audioState.output_device || ""))
+                            model: page.deviceList("output"); translateDisplay: false; currentIndex: Math.max(0, page.indexOf(model, page.audioState.output_device || ""))
                             enabled: page.editable("audio") && page.audio.available === true
                             onActivated: client.applySetting("audio", {output_device: currentValue})
                         }
-                        Hint { text: "Микрофон" }
+                        Hint { text: qsTranslate("Launcher", "Микрофон") }
                         Option {
                             objectName: "inputDevice"
-                            model: page.deviceList("input"); currentIndex: Math.max(0, page.indexOf(model, page.audioState.input_device || ""))
+                            model: page.deviceList("input"); translateDisplay: false; currentIndex: Math.max(0, page.indexOf(model, page.audioState.input_device || ""))
                             enabled: page.editable("audio") && page.audio.available === true
                             onActivated: client.applySetting("audio", {input_device: currentValue})
                         }
                     }
                     SettingCard {
                         objectName: "voiceCard"
-                        Heading { text: "Голос Scott" }
+                        Heading { text: qsTranslate("Launcher", "Голос Scott") }
                         Hint {
                             objectName: "voiceInstallMessage"
-                            text: page.voiceInstall.message || (page.voiceInstall.installed ? "Scott Voice установлен. Можно проверить его готовность." : "Scott Voice можно установить отдельно. Потребуются интернет и несколько гигабайт на диске. Пока проверена NVIDIA/CUDA.")
+                            text: page.voiceInstall.message || (page.voiceInstall.installed ? qsTranslate("Launcher", "Scott Voice установлен. Можно проверить его готовность.") : qsTranslate("Launcher", "Scott Voice можно установить отдельно. Потребуются интернет и несколько гигабайт на диске. Пока проверена NVIDIA/CUDA."))
                         }
                         ProgressBar {
                             objectName: "voiceInstallProgress"
                             Layout.fillWidth: true
                             visible: page.voicePreparing
                             indeterminate: true
-                            Accessible.name: "Подготовка Scott Voice"
+                            Accessible.name: qsTranslate("Launcher", "Подготовка Scott Voice")
                             background: Rectangle { implicitHeight: 4; radius: 2; color: page.theme.line }
                             contentItem: Item {
                                 implicitHeight: 4; clip: true
@@ -231,38 +233,47 @@ ColumnLayout {
                             UiButton {
                                 objectName: "installScottVoice"
                                 theme: page.theme
-                                text: page.scottInfo.error === "runtime_update_required" ? "Обновить Scott Voice" : page.voiceInstall.state === "failed" || page.voiceInstall.state === "cancelled" ? "Повторить установку" : "Установить Scott Voice"
+                                text: page.scottInfo.error === "runtime_update_required" ? qsTranslate("Launcher", "Обновить Scott Voice") : page.voiceInstall.state === "failed" || page.voiceInstall.state === "cancelled" ? qsTranslate("Launcher", "Повторить установку") : qsTranslate("Launcher", "Установить Scott Voice")
                                 visible: !page.voiceInstall.installed || page.voiceInstall.state === "failed" || page.voiceInstall.state === "cancelled" || page.scottInfo.error === "runtime_update_required"
                                 enabled: client.online && client.voiceInstallReady && page.voiceInstall.supported === true && !page.voicePreparing
                                 onClicked: client.prepareScottVoice(false)
                             }
                             UiButton {
                                 objectName: "checkScottVoice"
-                                theme: page.theme; text: "Проверить"
+                                theme: page.theme; text: qsTranslate("Launcher", "Проверить")
                                 enabled: client.online && client.voiceInstallReady && !page.voicePreparing
                                 onClicked: client.prepareScottVoice(true)
                             }
                             UiButton {
                                 objectName: "cancelScottVoice"
-                                theme: page.theme; text: page.voiceInstall.state === "cancelling" ? "Отмена…" : "Отменить"
+                                theme: page.theme; text: page.voiceInstall.state === "cancelling" ? qsTranslate("Launcher", "Отмена…") : qsTranslate("Launcher", "Отменить")
                                 visible: page.voicePreparing
                                 enabled: client.online && page.voiceInstall.state === "running" && !!page.voiceInstall.id
                                 onClicked: client.cancelScottVoice()
                             }
                         }
-                        Hint { text: "Локальные голоса работают без интернета. Scott Voice — собственный мужской тембр. Выбор сохраняется." }
+                        Hint {
+                            objectName: "scottVoiceStorageInfo"
+                            visible: !page.voiceInstall.installed && page.voiceInstall.supported === true
+                            text: (page.voiceInstall.space || {}).hint || qsTranslate("Launcher", "Scott Voice: около 7–8 ГиБ дополнительно. На время подготовки оставьте 10 ГиБ свободно.")
+                        }
+                        Hint { text: qsTranslate("Launcher", "Локальные голоса работают без интернета. Scott Voice — собственный мужской тембр. Выбор сохраняется.") }
                         RowLayout {
                             Option {
                                 objectName: "voiceChoice"
-                                model: (page.voices.voices || []).map(function(v) { return {id:v.id, title:v.label + (v.available === false ? " · недоступен" : v.local ? " · локальный" : " · облачный")} })
+                                model: (page.voices.voices || []).map(function(v) { return {id:v.id, title:qsTranslate("Launcher", v.label) + (v.available === false ? qsTranslate("Launcher", " · недоступен") : v.local ? qsTranslate("Launcher", " · локальный") : qsTranslate("Launcher", " · облачный"))} })
                                 currentIndex: page.indexOf(model, page.voices.current)
                                 enabled: page.editable("voices") && count > 0
                                 onActivated: client.applySetting("voice", {voice: currentValue})
                             }
-                            UiButton { theme: page.theme; text: "Прослушать"; enabled: page.editable("voices"); onClicked: client.previewVoice() }
+                            UiButton { theme: page.theme; text: qsTranslate("Launcher", "Прослушать"); enabled: page.editable("voices"); onClicked: client.previewVoice() }
                         }
-                        Hint { visible: page.scottSelected || page.scottInfo.available === false; text: page.scottInfo.reason || "Scott Voice работает локально. Подготовка новой фразы занимает несколько секунд; готовые ответы берутся из кеша." }
-                        Hint { text: page.scottSelected ? "Характер Scott Voice" : "Характер звучания" }
+                        Hint { visible: page.scottSelected || page.scottInfo.available === false; text: qsTranslate("Launcher", page.scottInfo.reason || qsTranslate("Launcher", "Scott Voice работает локально. Новая фраза может готовиться дольше её звучания; готовые ответы берутся из кеша.")) }
+                        Hint {
+                            visible: page.scottSelected && page.scottInfo.fallback_active === true
+                            text: qsTranslate("Launcher", "Scott Voice временно недоступен. Резервный голос: ") + (page.scottInfo.fallback_label || qsTranslate("Launcher", "обычный голос")) + qsTranslate("Launcher", ". Проверьте или подготовьте Scott Voice.")
+                        }
+                        Hint { text: page.scottSelected ? qsTranslate("Launcher", "Характер Scott Voice") : qsTranslate("Launcher", "Характер звучания") }
                         Option {
                             objectName: "voiceCharacter"
                             model: page.scottSelected ? (page.voices.scott_profiles || []) : (page.characters.characters || [])
@@ -270,17 +281,17 @@ ColumnLayout {
                             enabled: page.editable(page.scottSelected ? "voices" : "characters") && count > 0 && (!page.scottSelected || page.scottInfo.available === true)
                             onActivated: page.scottSelected ? client.applySetting("voiceProfile", {voice:"scott-voice", profile:currentValue}) : client.applySetting("audio", {character: currentValue})
                         }
-                        Hint { text: page.scottSelected ? "Оцените цифровую окраску кнопкой «Прослушать». При сбое Scott использует резервный голос." : "«Спокойный» смягчает резкие звуки, сохраняя высоту и темп. Оцените кнопкой «Прослушать»." }
+                        Hint { text: page.scottSelected ? qsTranslate("Launcher", "Оцените цифровую окраску кнопкой «Прослушать». При сбое Scott использует резервный голос.") : qsTranslate("Launcher", "«Спокойный» смягчает резкие звуки, сохраняя высоту и темп. Оцените кнопкой «Прослушать».") }
                         Hint {
                             objectName: "voicePreparationMessage"
                             visible: page.scottSelected
-                            text: page.voicePreparation.message || "Подготовьте модель перед разговором, чтобы сократить ожидание первого ответа. После двух минут простоя она освобождает память."
+                            text: page.voicePreparation.message || qsTranslate("Launcher", "Подготовьте модель перед разговором, чтобы сократить ожидание первого ответа. После двух минут простоя она освобождает память.")
                         }
                         RowLayout {
                             visible: page.scottSelected
                             UiButton {
                                 objectName: "warmScottVoice"
-                                theme: page.theme; text: "Подготовить к речи"
+                                theme: page.theme; text: qsTranslate("Launcher", "Подготовить к речи")
                                 visible: !page.voiceWarming && page.voicePreparation.model_loaded !== true
                                 enabled: page.editable("voices") && client.voicePreparationReady && page.scottInfo.available === true
                                 onClicked: client.warmScottVoice()
@@ -288,7 +299,7 @@ ColumnLayout {
                             UiButton {
                                 objectName: "releaseScottVoice"
                                 theme: page.theme
-                                text: page.voiceWarming ? "Отменить подготовку" : "Освободить модель"
+                                text: page.voiceWarming ? qsTranslate("Launcher", "Отменить подготовку") : qsTranslate("Launcher", "Освободить модель")
                                 visible: page.voiceWarming || page.voicePreparation.model_loaded === true
                                 enabled: client.online && client.voicePreparationReady && page.voicePreparation.state !== "cancelling" && !!page.voicePreparation.id
                                 onClicked: client.releaseScottVoice()
@@ -296,7 +307,7 @@ ColumnLayout {
                         }
                         UiSwitch {
                             objectName: "scottStreaming"
-                            theme: page.theme; text: "Раннее начало речи"
+                            theme: page.theme; text: qsTranslate("Launcher", "Раннее начало речи")
                             Layout.fillWidth: true
                             visible: page.scottSelected
                             checked: page.voices.scott_streaming === true
@@ -305,9 +316,9 @@ ColumnLayout {
                         }
                         Hint {
                             visible: page.scottSelected
-                            text: "Эксперимент: Scott начинает говорить во время подготовки ответа. Между фрагментами возможны паузы."
+                            text: qsTranslate("Launcher", "Эксперимент: Scott начинает говорить во время подготовки ответа. Между фрагментами возможны паузы.")
                         }
-                        Hint { visible: page.scottSelected && page.voices.scott_streaming === true; text: "Запас звука" }
+                        Hint { visible: page.scottSelected && page.voices.scott_streaming === true; text: qsTranslate("Launcher", "Запас звука") }
                         Option {
                             objectName: "scottBuffer"
                             visible: page.scottSelected && page.voices.scott_streaming === true
@@ -318,11 +329,11 @@ ColumnLayout {
                         }
                         Hint {
                             visible: page.scottSelected && page.voices.scott_streaming === true
-                            text: "Больше запаса — позже начало, меньше ожидания блоков. «Вся фраза» готовит её целиком перед воспроизведением."
+                            text: qsTranslate("Launcher", "Больше запаса — позже начало, меньше ожидания блоков. «Вся фраза» готовит её целиком перед воспроизведением.")
                         }
                         UiSwitch {
                             objectName: "scottAcceleration"
-                            theme: page.theme; text: "Ускоренный синтез"
+                            theme: page.theme; text: qsTranslate("Launcher", "Ускоренный синтез")
                             Layout.fillWidth: true
                             visible: page.scottSelected
                             checked: page.voices.scott_acceleration === true
@@ -331,7 +342,7 @@ ColumnLayout {
                         }
                         Hint {
                             visible: page.scottSelected
-                            text: "Эксперимент: ускорение может изменить тембр и паузы. Сравните звучание кнопкой «Прослушать»."
+                            text: qsTranslate("Launcher", "Эксперимент: ускорение может изменить тембр и паузы. Сравните звучание кнопкой «Прослушать».")
                         }
                     }
                 }
@@ -341,16 +352,16 @@ ColumnLayout {
                 ColumnLayout {
                     width: processingScroll.availableWidth; spacing: 16
                     Repeater {
-                        model: [{id:"whisper", title:"Распознавание речи"}, {id:"silero", title:"Синтез речи"}]
+                        model: [{id:"whisper", title:qsTranslate("Launcher", "Распознавание речи")}, {id:"silero", title:qsTranslate("Launcher", "Синтез речи")}]
                         SettingCard {
                             id: engineCard
                             required property var modelData
                             readonly property var info: (page.device.engines || ({}))[modelData.id] || ({})
                             Heading { text: engineCard.modelData.title }
-                            Hint { text: "Выбрано: " + (engineCard.info.device_label || (engineCard.info.device === "cuda" ? "видеокарта" : engineCard.info.device === "cpu" ? "процессор" : engineCard.info.device || "—")) }
+                            Hint { text: qsTranslate("Launcher", "Выбрано: ") + (engineCard.info.device_label || (engineCard.info.device === "cuda" ? qsTranslate("Launcher", "видеокарта") : engineCard.info.device === "cpu" ? qsTranslate("Launcher", "процессор") : engineCard.info.device || "—")) }
                             RowLayout {
                                 Repeater {
-                                    model: engineCard.info.options || [{id:"auto", title:"Авто", available:true}, {id:"cuda", title:"NVIDIA", available:!!page.device.cuda_available}, {id:"rocm", title:"AMD", available:!!page.device.rocm_available}, {id:"cpu", title:"Процессор", available:true}]
+                                    model: engineCard.info.options || [{id:"auto", title:qsTranslate("Launcher", "Авто"), available:true}, {id:"cuda", title:"NVIDIA", available:!!page.device.cuda_available}, {id:"rocm", title:"AMD", available:!!page.device.rocm_available}, {id:"cpu", title:qsTranslate("Launcher", "Процессор"), available:true}]
                                     UiButton {
                                         required property var modelData
                                         theme: page.theme; text: modelData.title; primary: engineCard.info.choice === modelData.id
@@ -359,7 +370,7 @@ ColumnLayout {
                                     }
                                 }
                             }
-                            Hint { text: engineCard.info.locked_by_env ? "Выбор задан переменной " + engineCard.info.env_var + ". Измените её, чтобы переключать устройство здесь." : "Авто выбирает доступное устройство. Модель перезагрузится при следующем обращении." }
+                            Hint { text: engineCard.info.locked_by_env ? qsTranslate("Launcher", "Выбор задан переменной ") + engineCard.info.env_var + qsTranslate("Launcher", ". Измените её, чтобы переключать устройство здесь.") : qsTranslate("Launcher", "Авто выбирает доступное устройство. Модель перезагрузится при следующем обращении.") }
                         }
                     }
                 }
@@ -369,31 +380,52 @@ ColumnLayout {
                 ColumnLayout {
                     width: otherScroll.availableWidth; spacing: 16
                     SettingCard {
-                        Heading { text: "Работа в фоне" }
+                        Heading { text: qsTranslate("Launcher", "Язык интерфейса") }
+                        Option {
+                            objectName: "interfaceLanguage"
+                            translateDisplay: false
+                            model: typeof appLanguage !== "undefined" ? appLanguage.languages : [{id:"ru", title:qsTranslate("Launcher", "Русский")}]
+                            currentIndex: typeof appLanguage !== "undefined" ? model.findIndex(function(item) { return item.id === appLanguage.language }) : 0
+                            onActivated: function(index) { appLanguage.setLanguage(model[index].id) }
+                        }
+                        Hint { text: qsTranslate("Launcher", "Применяется сразу. Переписка, команды и голос сохраняют свой язык.") }
+                    }
+                    SettingCard {
+                        Heading { text: qsTranslate("Launcher", "Работа в фоне") }
                         UiSwitch {
-                            theme: page.theme; text: "Закрывать в трей"
+                            theme: page.theme; text: qsTranslate("Launcher", "Закрывать в трей")
                             Layout.fillWidth: true
                             checked: page.backgroundEnabled; enabled: page.backgroundAllowed
                             onToggled: page.backgroundChanged(checked)
                         }
                         UiSwitch {
-                            theme: page.theme; text: "Уведомлять о готовом ответе"
+                            theme: page.theme; text: qsTranslate("Launcher", "Уведомлять о готовом ответе")
                             Layout.fillWidth: true; checked: page.notificationsEnabled; enabled: page.backgroundAllowed
                             onToggled: page.notificationsChanged(checked)
                         }
                     }
                     SettingCard {
-                        Heading { text: "Оформление лаунчера" }
-                        Hint { text: "Вернуть тему, стиль, значок, прозрачность и анимации к исходным значениям." }
-                        UiButton { theme: page.theme; text: "Сбросить оформление"; destructive: true; onClicked: resetDialog.open() }
+                        Heading { text: qsTranslate("Launcher", "Обновления Scott AI") }
+                        Hint { text: page.updater.message || qsTranslate("Launcher", "Проверить наличие новой версии приложения.") }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            UiButton { theme: page.theme; text: page.updater.busy ? qsTranslate("Launcher", "Подождите…") : qsTranslate("Launcher", "Проверить"); enabled: !page.updater.busy; onClicked: page.updater.check() }
+                            UiButton { theme: page.theme; text: qsTranslate("Launcher", "Обновить до ") + page.updater.version; visible: page.updater.available && page.updater.canInstall; enabled: !page.updater.busy; onClicked: page.updater.install() }
+                            UiButton { theme: page.theme; text: qsTranslate("Launcher", "Открыть выпуск"); visible: page.updater.available && !page.updater.canInstall; enabled: !page.updater.busy; onClicked: page.updater.openRelease() }
+                        }
                     }
                     SettingCard {
-                        Heading { text: "Версии сохранённых действий" }
+                        Heading { text: qsTranslate("Launcher", "Оформление лаунчера") }
+                        Hint { text: qsTranslate("Launcher", "Вернуть тему, стиль, значок, прозрачность и анимации к исходным значениям.") }
+                        UiButton { theme: page.theme; text: qsTranslate("Launcher", "Сбросить оформление"); destructive: true; onClicked: resetDialog.open() }
+                    }
+                    SettingCard {
+                        Heading { text: qsTranslate("Launcher", "Версии сохранённых действий") }
                         Repeater {
                             model: (client.settings.versions || ({})).data || []
-                            Hint { required property var modelData; text: modelData.item_id + " · " + modelData.item_type + " · версий: " + modelData.versions_count }
+                            Hint { required property var modelData; text: modelData.item_id + " · " + modelData.item_type + qsTranslate("Launcher", " · версий: ") + modelData.versions_count }
                         }
-                        Hint { visible: !client.settings.versions || (client.settings.versions.data || []).length === 0; text: "Версии появятся после создания или изменения действия." }
+                        Hint { visible: !client.settings.versions || (client.settings.versions.data || []).length === 0; text: qsTranslate("Launcher", "Версии появятся после создания или изменения действия.") }
                     }
                 }
             }
@@ -426,12 +458,12 @@ ColumnLayout {
         background: SurfacePanel { theme: page.theme; color: page.theme.popup }
         contentItem: ColumnLayout {
             spacing: 18
-            Heading { text: "Сбросить оформление?" }
-            Hint { text: "Тема, стиль, прозрачность, значок и анимации Qt-лаунчера вернутся к исходным значениям." }
+            Heading { text: qsTranslate("Launcher", "Сбросить оформление?") }
+            Hint { text: qsTranslate("Launcher", "Тема, стиль, прозрачность, значок и анимации Qt-лаунчера вернутся к исходным значениям.") }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                UiButton { theme: page.theme; text: "Отмена"; onClicked: resetDialog.close() }
-                UiButton { theme: page.theme; text: "Сбросить"; destructive: true; onClicked: { page.resetAppearanceRequested(); resetDialog.close() } }
+                UiButton { theme: page.theme; text: qsTranslate("Launcher", "Отмена"); onClicked: resetDialog.close() }
+                UiButton { theme: page.theme; text: qsTranslate("Launcher", "Сбросить"); destructive: true; onClicked: { page.resetAppearanceRequested(); resetDialog.close() } }
             }
         }
     }

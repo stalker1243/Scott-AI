@@ -10,7 +10,7 @@ Flow {
     signal featureRequested(string feature)
     spacing: 5
     Repeater {
-        model: [{key:"documents", name:"Файлы"}, {key:"images", name:"Фото"}, {key:"video", name:"Видео"}, {key:"image_generation", name:"Генерация"}]
+        model: [{key:"documents", name:qsTranslate("Launcher", "Файлы")}, {key:"images", name:qsTranslate("Launcher", "Фото")}, {key:"video", name:qsTranslate("Launcher", "Видео")}, {key:"image_generation", name:qsTranslate("Launcher", "Генерация")}]
         delegate: Rectangle {
             required property var modelData
             readonly property bool supported: badges.capabilities[modelData.key] === true

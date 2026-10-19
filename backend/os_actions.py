@@ -53,7 +53,8 @@ def find_tool(*candidates: str) -> Optional[str]:
 def _run(command: Sequence[str]) -> Dict:
     """Выполнить команду и вернуть единообразный результат."""
     try:
-        result = subprocess.run(list(command), capture_output=True, text=True, timeout=TIMEOUT)
+        result = subprocess.run(list(command), capture_output=True, text=True, timeout=TIMEOUT,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         if result.returncode == 0:
             return {"success": True, "output": result.stdout.strip()}
         return {"success": False, "error": (result.stderr or result.stdout).strip() or f"код возврата {result.returncode}"}
@@ -77,6 +78,10 @@ def volume_command(direction: str) -> Optional[List[str]]:
     step_up = direction == "up"
 
     if is_windows():
+        from system_volume import native_path
+        helper = native_path()
+        if helper:
+            return [helper, 'delta', '5' if step_up else '-5']
         # nircmd умеет менять громкость точно, но он есть не у всех; без него
         # шлём мультимедийную клавишу через PowerShell — её понимает сам Windows.
         if find_tool("nircmd"):

@@ -33,16 +33,24 @@ def main():
         shutil.copytree(backend, isolated, ignore=ignore)
         # Distribution tests inspect the actual builders and public resources.
         # Copy only these known source files; release/cache/data stay excluded.
-        for name in ('installer/build.py',
-                     'installer/build_linux.py', 'installer/linux_python.py', 'installer/linux/install.py',
+        for name in ('installer/build.py', 'tools/audit_dependencies.py', 'tools/build_voice_sdk.py',
+                     'tools/voice_compat/manifest.json', 'tools/voice_compat/qwen-transformers5.patch',
+                     'assets/scott-voice/vendor/qwen_tts-0.1.1+scott.1-py3-none-any.whl',
+                     'assets/scott-voice/vendor/provenance.json', 'assets/scott-voice/vendor/NOTICE.txt',
+                     'installer/build_linux.py', 'installer/build_appimage.py',
+                     'installer/linux/AppRun', 'installer/linux/com.scottai.launcher.desktop',
+                     'installer/linux_python.py', 'installer/linux/install.py',
                      'installer/linux/install.sh', 'installer/linux/uninstall.sh',
                      'installer/linux/run.sh',
                      'installer/linux/python-environment.sh',
                      'VERSION.json', 'README.md', '.env.example', 'docs/installation.md', 'docs/models.md',
+                     'docs/voice-check.md', 'docs/desktop-control.md', 'docs/interface.md', 'docs/security.md',
                      'assets/brand/scott-logo.png',
                      'assets/brand/scott-logo-light.png',
                      'experiments/voice_design/stream_voice.py',
+                     'experiments/voice_design/requirements.txt',
                      'experiments/voice_design/create_scott_voice.py',
+                     'experiments/voice_design/robotic_profiles.json',
                      'experiments/voice_design/trial_utils.py',
                      'experiments/voice_design/generate_samples.py',
                      'experiments/voice_design/evaluate_samples.py'):
@@ -59,8 +67,9 @@ def main():
         for key in ('OPENAI_API_KEY', 'GROQ_API_KEY', 'DEEPSEEK_API_KEY',
                     'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'AI_PROVIDER', 'AI_MODEL'):
             env[key] = ''
-        env.update(WARMUP_MODELS='0', SCOTT_SEMANTIC_MEMORY='0', WHISPER_MODEL='small', WHISPER_ENGINE='auto',
-                   SCOTT_VOICE_HOME='', SCOTT_VOICE_DEVICE='cuda',
+        env.update(WARMUP_MODELS='0', SCOTT_SEMANTIC_MEMORY='0', SCOTT_DESKTOP_DISABLED='1', WHISPER_MODEL='small', WHISPER_ENGINE='auto',
+                   SCOTT_STORAGE_MODE='legacy',
+                   SCOTT_VOICE_HOME='', SCOTT_VOICE_DEVICE='cuda', SCOTT_LOG_DIR=str(root/'logs'),
                    PYTHONPATH=str(root)+os.pathsep+str(isolated), PYTHONDONTWRITEBYTECODE='1')
         args = sys.argv[1:] or ['tests', '-q', '-m', 'not integration and not slow']
         print('Tests use an isolated copy; personal data and API settings are excluded.', flush=True)

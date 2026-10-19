@@ -218,6 +218,7 @@ def test_model_manifest_respects_choice_and_xdg_cache(tmp_path, monkeypatch, nam
 
 def test_readiness_rejects_valid_zip_without_silero_model(tmp_path, monkeypatch):
     import model_setup
+    monkeypatch.setenv('WHISPER_ENGINE', 'openai')
     whisper = tmp_path / 'small.pt'
     whisper.write_bytes(DATA)
     repo = tmp_path / 'repo'

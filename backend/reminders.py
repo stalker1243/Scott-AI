@@ -30,7 +30,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-STORE_PATH = Path(__file__).resolve().parent / "data" / "reminders.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+STORE_PATH = backend_path('reminders.json')
 
 # Как часто проверяем, не пора ли что-то выполнить. Пятнадцать секунд —
 # компромисс: напоминание «в 15:00» срабатывает достаточно точно, а процесс не

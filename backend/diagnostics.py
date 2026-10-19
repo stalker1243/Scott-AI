@@ -20,9 +20,17 @@ import platform
 import re
 import sys
 import zipfile
+import tempfile
+import subprocess
+import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+try:
+    from . import support_logs
+except ImportError:
+    import support_logs
 
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = BACKEND_DIR.parent
@@ -32,18 +40,28 @@ PROJECT_DIR = BACKEND_DIR.parent
 # Журнал лаунчера лежит в папке пользователя, а не рядом с программой: она
 # может быть установлена туда, где записывать нельзя. Именно в нём видно
 # падения при запуске — те самые случаи, когда «нажимаю ярлык, и ничего».
-LAUNCHER_LOG = Path(os.path.expanduser("~")) / "AppData" / "Local" / "ScottAI" / "logs" / "launcher.log"
+LAUNCHER_LOG = (Path(os.path.expanduser("~")) / "AppData" / "Local" / "ScottAI" / "logs" / "launcher.log"
+                if os.name == 'nt' else support_logs.log_directory()/'launcher.log')
 
 LOG_FILES = {
     "launcher.log": LAUNCHER_LOG,
-    "backend_errors.log": PROJECT_DIR / "backend_errors.log",
-    "dangerous_actions.log": BACKEND_DIR / "logs" / "dangerous_actions.log",
-    "secure_exec.log": BACKEND_DIR / "logs" / "secure_exec.log",
-    "timings.jsonl": BACKEND_DIR / "logs" / "timings.jsonl",
+    "backend_errors.log": support_logs.backend_error_path(),
+    "dangerous_actions.log": Path(os.getenv('EXECUTE_LOG_DIR') or support_logs.backend_log_directory()) / "dangerous_actions.log",
+    "secure_exec.log": Path(os.getenv('EXECUTE_LOG_DIR') or support_logs.backend_log_directory()) / "secure_exec.log",
+    "timings.jsonl": Path(os.getenv('TIMING_LOG_DIR') or support_logs.backend_log_directory()) / "timings.jsonl",
 }
+if os.name != 'nt':
+    LOG_FILES['backend-errors-legacy.log'] = PROJECT_DIR/'backend_errors.log'
+    LOG_FILES['timings-legacy.jsonl'] = BACKEND_DIR/'logs/timings.jsonl'
+for _name in ('qt-launcher.log', 'backend-process.log', 'setup.log', 'scott-voice-install.log', 'browser-setup.log', 'linux-install.log', 'updater.log', 'api-errors.log'):
+    LOG_FILES[_name] = support_logs.log_directory()/_name
+    for _index in (1, 2):
+        LOG_FILES[_name+f'.{_index}'] = support_logs.log_directory()/(_name+f'.{_index}')
+LOG_FILES['qt-launcher-legacy.log'] = PROJECT_DIR/'qt-launcher.log'
+MAX_LOG_BYTES = 2 * 1024 * 1024
 
 # Куда складываются собранные архивы.
-REPORTS_DIR = PROJECT_DIR / "reports"
+REPORTS_DIR = support_logs.report_directory()
 
 # Что считать секретом. Ключи разных сервисов имеют узнаваемые префиксы, но
 # полагаться только на них нельзя: EXECUTE_TOKEN придумывает пользователь и
@@ -80,14 +98,10 @@ def mask_secrets(text: str) -> str:
     известно дословно), затем — общие шаблоны известных сервисов на случай,
     если в лог попал чужой ключ или ключ из прошлого запуска.
     """
-    for value in _secret_values():
-        text = text.replace(value, "***СКРЫТО***")
-    for pattern in SECRET_PATTERNS:
-        text = pattern.sub("***СКРЫТО***", text)
-    return text
+    return support_logs.redact(text, PROJECT_DIR)
 
 
-def collect_system_info() -> Dict:
+def collect_system_info(lightweight=False) -> Dict:
     """Сведения о машине и окружении: то, что первым делом спрашивают при разборе проблемы."""
     info: Dict = {
         "собрано": datetime.now().isoformat(timespec="seconds"),
@@ -110,7 +124,23 @@ def collect_system_info() -> Dict:
     except Exception as e:
         info["железо"] = {"ошибка": str(e)}
 
-    info["видеокарта"] = collect_gpu_info()
+    if lightweight:
+        info['видеокарта'] = {'проверка': 'Драйвер; модель и CUDA не загружаются'}
+        try:
+            probe = subprocess.run(['nvidia-smi', '--query-gpu=name,driver_version,memory.total', '--format=csv,noheader'],
+                capture_output=True, text=True, timeout=8, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            if probe.returncode == 0:
+                info['видеокарта']['nvidia'] = mask_secrets(probe.stdout.strip())
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        info["видеокарта"] = collect_gpu_info()
+    try:
+        version_info = json.loads((PROJECT_DIR/'VERSION.json').read_text(encoding='utf-8'))
+        info['приложение'] = {name: version_info.get(name) for name in ('version', 'build_number')}
+        info['место_свободно_гб'] = round(shutil.disk_usage(PROJECT_DIR).free/1024**3, 1)
+    except (OSError, ValueError):
+        pass
 
     versions = {}
     for package in ("torch", "openai-whisper", "fastapi", "numpy", "edge-tts"):
@@ -133,10 +163,32 @@ def collect_system_info() -> Dict:
             if any(hint in name.upper() for hint in SECRET_ENV_HINTS):
                 env_state[name] = "задано" if value else "пусто"
             else:
-                env_state[name] = value
+                env_state[name] = value if re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', value) else ('задано' if value else 'пусто')
     info["настройки"] = env_state
 
     return info
+
+
+def _bounded_text(path):
+    if path.is_symlink() or not path.is_file():
+        return ''
+    with path.open('rb') as stream:
+        size = path.stat().st_size
+        stream.seek(max(0, size-MAX_LOG_BYTES))
+        if size > MAX_LOG_BYTES:
+            stream.readline()
+        return stream.read(MAX_LOG_BYTES).decode('utf-8', errors='replace')
+
+
+def available_logs():
+    result = []
+    for name, path in LOG_FILES.items():
+        try:
+            exists = path.is_file() and not path.is_symlink()
+            result.append(dict(name=name, exists=exists, size_bytes=path.stat().st_size if exists else 0))
+        except OSError:
+            result.append(dict(name=name, exists=False, size_bytes=0))
+    return result
 
 
 def collect_gpu_info() -> Dict:
@@ -203,7 +255,7 @@ def tail_log(name: str, lines: int = 200) -> Dict:
         return {"success": True, "name": name, "lines": [], "message": "Файл ещё не создан"}
 
     try:
-        content = path.read_text(encoding="utf-8", errors="replace")
+        content = _bounded_text(path)
     except OSError as e:
         return {"success": False, "message": f"Не удалось прочитать {name}: {e}"}
 
@@ -248,7 +300,7 @@ def recent_errors(limit: int = 50) -> List[Dict]:
         return []
 
     try:
-        content = path.read_text(encoding="utf-8", errors="replace")
+        content = _bounded_text(path)
     except OSError:
         return []
 
@@ -316,7 +368,7 @@ def recent_errors(limit: int = 50) -> List[Dict]:
     return collapsed[-max(1, limit):]
 
 
-def build_report(note: Optional[str] = None) -> Dict:
+def build_report(note: Optional[str] = None, output=None, lightweight=False) -> Dict:
     """
     Собрать архив для отправки разработчику.
 
@@ -324,36 +376,69 @@ def build_report(note: Optional[str] = None) -> Dict:
     пользователь его написал, описание проблемы своими словами — оно обычно
     полезнее всего остального.
     """
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    archive_path = REPORTS_DIR / f"scott_report_{stamp}.zip"
-
-    system_info = collect_system_info()
-
+    archive_path = Path(output) if output else REPORTS_DIR/f"scott_report_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:8]}.zip"
+    if archive_path.suffix.lower() != '.zip' or archive_path.is_symlink():
+        return dict(success=False, message='Выберите обычный ZIP-файл для отчёта.')
+    temporary = None
     try:
-        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        support_logs.private_directory(archive_path.parent)
+        system_info = collect_system_info(lightweight=lightweight)
+        descriptor, temporary = tempfile.mkstemp(prefix='.scott-report-', suffix='.zip', dir=archive_path.parent)
+        os.close(descriptor)
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(
                 "system_info.json",
-                json.dumps(system_info, ensure_ascii=False, indent=2),
+                mask_secrets(json.dumps(system_info, ensure_ascii=False, indent=2)),
             )
             if note:
-                archive.writestr("описание_проблемы.txt", note)
+                archive.writestr("описание_проблемы.txt", mask_secrets(str(note)[:8000]))
+            archive.writestr('README.txt', 'Техническая диагностика ScottAI. API Token маскируются.\nИстория чата, вложения, .env и файлы настроек не включены.\nДля каждого журнала сохранено не больше последних 2 МиБ.\n')
 
             for name, path in LOG_FILES.items():
-                if not path.exists():
+                if name in ('secure_exec.log', 'dangerous_actions.log') or not path.is_file() or path.is_symlink():
                     continue
                 try:
-                    text = path.read_text(encoding="utf-8", errors="replace")
+                    text = _bounded_text(path)
                 except OSError:
                     continue
                 archive.writestr(f"logs/{name}", mask_secrets(text))
+        os.replace(temporary, archive_path)
+        temporary = None
     except OSError as e:
         return {"success": False, "message": f"Не удалось собрать отчёт: {e}"}
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
 
     return {
         "success": True,
         "path": str(archive_path),
-        "folder": str(REPORTS_DIR),
+        "folder": str(archive_path.parent),
         "size_bytes": archive_path.stat().st_size,
         "message": f"Отчёт собран: {archive_path.name}",
     }
+
+
+def main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description='Диагностика без запуска backend и установки библиотек.')
+    parser.add_argument('--json', action='store_true')
+    parser.add_argument('--log', default='backend-process.log', choices=list(LOG_FILES))
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--note', default='')
+    args = parser.parse_args(argv)
+    try:
+        logs = [item for item in available_logs() if item['name'] not in ('secure_exec.log', 'dangerous_actions.log') and (item['exists'] or item['name'].endswith('.log'))]
+        result = build_report(args.note, output=args.output, lightweight=True) if args.output else dict(
+            success=True, logs=logs, selected=args.log, log=tail_log(args.log, 400), system=collect_system_info(lightweight=True))
+    except Exception as error:
+        result = dict(success=False, message=mask_secrets(str(error)))
+    print(json.dumps(result, ensure_ascii=False), flush=True)
+    return 0 if result.get('success') else 1
+
+
+if __name__ == '__main__':
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
+    raise SystemExit(main())

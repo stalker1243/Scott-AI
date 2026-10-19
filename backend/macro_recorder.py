@@ -9,6 +9,11 @@ from datetime import datetime
 from enum import Enum
 
 
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
 class ActionType(Enum):
     """Типы действий в макросе"""
     CLICK = 'click'                    # Клик мыши
@@ -113,8 +118,8 @@ class Macro:
 class MacroRecorder:
     """Менеджер макросов - запись и воспроизведение"""
     
-    def __init__(self, db_path: str = 'data/macros.json'):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        self.db_path = Path(db_path) if db_path is not None else backend_path('macros.json')
         self.data_dir = str(self.db_path.parent)  # Для совместимости с тестами
         self.macros: Dict[str, Macro] = {}
         self.is_recording = False
@@ -279,6 +284,6 @@ class MacroRecorder:
         return f"MacroRecorder({len(self.macros)} макросов, запись: {self.is_recording})"
 
 
-def get_macro_recorder(db_path: str = 'data/macros.json') -> MacroRecorder:
+def get_macro_recorder(db_path: str | None = None) -> MacroRecorder:
     """Factory функция"""
     return MacroRecorder(db_path)

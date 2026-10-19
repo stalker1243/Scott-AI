@@ -1,5 +1,6 @@
 #include "BackendClient.h"
 #include "ProfileAvatar.h"
+#include "AppPaths.h"
 #include <QtTest>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -14,6 +15,51 @@
 class ProfileTests : public QObject {
     Q_OBJECT
 private slots:
+    void linuxAvatarPathAndMigration() {
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        const auto install = directory.path() + "/app";
+        QVERIFY(QDir().mkpath(install));
+        const auto previous = directory.path() + "/previous";
+        QCOMPARE(AppPaths::avatarDirectory(install, previous, "linux"), previous);
+        QFile marker(install + "/.scott-linux-install.json"); QVERIFY(marker.open(QIODevice::WriteOnly)); marker.write("{}"); marker.close();
+        const auto oldXdg = qgetenv("XDG_DATA_HOME");
+        qputenv("XDG_DATA_HOME", (directory.path() + "/user data").toUtf8());
+        const auto target = AppPaths::avatarDirectory(install, previous, "linux");
+        QCOMPARE(target, directory.path() + "/user data/scottai/qt/profile");
+        QCOMPARE(AppPaths::avatarDirectory(install, previous, "windows"), previous);
+        qputenv("XDG_DATA_HOME", "relative");
+        QCOMPARE(AppPaths::avatarDirectory(install, previous, "linux"), QDir::homePath() + "/.local/share/scottai/qt/profile");
+        if (oldXdg.isNull()) qunsetenv("XDG_DATA_HOME"); else qputenv("XDG_DATA_HOME", oldXdg);
+        const auto picture = directory.path() + "/fixture.png";
+        QImage image(600, 300, QImage::Format_RGB32); image.fill(Qt::blue); QVERIFY(image.save(picture));
+        ProfileAvatar old(previous); QVERIFY(old.loadFile(picture)); old.setCrop(2, 30, -10); QVERIFY(old.save());
+        QFile original(previous + "/avatar.json"); QVERIFY(original.open(QIODevice::ReadOnly)); const auto bytes = original.readAll(); original.close();
+        ProfileAvatar migrated(target, false, {}, previous);
+        QVERIFY2(migrated.error().isEmpty(), qPrintable(migrated.error()));
+        QCOMPARE(migrated.image(), old.image()); QCOMPARE(migrated.crop(), old.crop());
+        QFile copy(target + "/avatar.json"); QVERIFY(copy.open(QIODevice::ReadOnly)); QCOMPARE(copy.readAll(), bytes); copy.close();
+        migrated.remove(); QVERIFY(migrated.save());
+        ProfileAvatar cleared(target, false, {}, previous); QVERIFY(!cleared.hasAvatar());
+        QVERIFY(original.open(QIODevice::ReadOnly)); QCOMPARE(original.readAll(), bytes);
+#ifndef Q_OS_WIN
+        original.close();
+        QVERIFY(QDir().rename(previous, previous + "-archive"));
+        QVERIFY(QFile::link(previous + "-archive", previous));
+        ProfileAvatar alreadyMigrated(target, false, {}, previous);
+        QVERIFY(!alreadyMigrated.hasAvatar()); QVERIFY(alreadyMigrated.error().isEmpty());
+        const auto permissions = QFileInfo(target + "/avatar.json").permissions();
+        QVERIFY(!(permissions & (QFile::ReadGroup | QFile::WriteGroup | QFile::ReadOther | QFile::WriteOther)));
+#endif
+    }
+    void invalidPreviousAvatarIsPreserved() {
+        QTemporaryDir directory; const auto previous = directory.path() + "/old";
+        QVERIFY(QDir().mkpath(previous));
+        QFile invalid(previous + "/avatar.json"); QVERIFY(invalid.open(QIODevice::WriteOnly)); invalid.write("broken fixture"); invalid.close();
+        ProfileAvatar avatar(directory.path() + "/new", false, {}, previous);
+        QVERIFY(!avatar.hasAvatar()); QVERIFY(!avatar.error().isEmpty());
+        QVERIFY(!QFileInfo::exists(directory.path() + "/new/avatar.json"));
+        QVERIFY(invalid.open(QIODevice::ReadOnly)); QCOMPARE(invalid.readAll(), QByteArray("broken fixture"));
+    }
     void backendContract() {
         QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost, 0));
         QJsonObject state{{"success", true}, {"name", "Before"}, {"about", "Original"}, {"style", "friendly"}, {"interests", QJsonArray{"Music"}}};

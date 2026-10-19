@@ -34,7 +34,12 @@ try:
 except ImportError:
     from storage import atomic_write_text
 
-CONFIG_PATH = Path(__file__).resolve().parent / "data" / "device_config.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+CONFIG_PATH = backend_path('device_config.json')
 
 VALID_CHOICES = ("auto", "cuda", "rocm", "mps", "cpu")
 _config_lock = threading.RLock()

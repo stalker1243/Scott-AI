@@ -15,6 +15,11 @@ import textwrap
 import psutil
 
 try:
+    from .scott_voice_sdk import VERSIONS as SDK_VERSIONS
+except ImportError:
+    from scott_voice_sdk import VERSIONS as SDK_VERSIONS
+
+try:
     from .scott_voice_process import ScottVoiceProcess, VoiceProcessConfig, VoiceProcessError, recipe_id, stop_process_tree
 except ImportError:
     from scott_voice_process import ScottVoiceProcess, VoiceProcessConfig, VoiceProcessError, recipe_id, stop_process_tree
@@ -78,15 +83,28 @@ def default_config(root=ROOT):
     # A separate optional installation takes priority once provisioning is complete.
     # Explicit overrides also report missing/incomplete installations in the catalog.
     override = os.getenv('SCOTT_VOICE_HOME', '').strip()
-    home = Path(override).expanduser() if override else Path(root)/'voice-runtime'
+    try:
+        from .scott_voice_install import home_path
+    except ImportError:
+        from scott_voice_install import home_path
+    home = home_path(root)
+    def cached(config):
+        # Explicit fixture/installer roots retain their public cache contract.
+        if Path(root).resolve() == ROOT.resolve():
+            try:
+                from .storage_paths import audio_cache
+            except ImportError:
+                from storage_paths import audio_cache
+            return replace(config, cache_dir=audio_cache()/'scott-voice')
+        return config
     if override:
-        return config_at(home, cache_root=root)
+        return cached(config_at(home, cache_root=root))
     try:
         marker = json.loads((home/'scott-install.json').read_text(encoding='utf-8'))
         ready = isinstance(marker, dict) and marker.get('ready') is True
     except (OSError, ValueError, TypeError):
         ready = False
-    return config_at(home if ready else root, cache_root=root)
+    return cached(config_at(home if ready else root, cache_root=root))
 
 
 def preferred_config():
@@ -100,12 +118,19 @@ def preferred_config():
 
 
 @lru_cache(maxsize=4)
-def _probe_runtime(python, device):
+def _probe_runtime(python, device, fingerprint=None):
     # Probe only in the optional interpreter; never load Qwen in the API process.
-    script = ("import importlib.util,json; "
+    script = ("import importlib.util,importlib.metadata as m,json; "
               "ready=all(importlib.util.find_spec(n) is not None for n in "
               "('torch','qwen_tts','soundfile','scipy')); "
-              "import torch; print(json.dumps({'ready':ready,'cuda':torch.cuda.is_available()}))")
+              f"expected={SDK_VERSIONS!r}; versions={{}}\n"
+              "for name in expected:\n"
+              " try: versions[name]=m.version(name)\n"
+              " except m.PackageNotFoundError: pass\n"
+              "compatible=versions==expected\n"
+              "cuda=False\n"
+              "if compatible:\n import torch\n cuda=torch.cuda.is_available()\n"
+              "print(json.dumps({'ready':ready,'compatible':compatible,'cuda':cuda}))")
     env = dict(os.environ)
     for key in tuple(env):
         if key.upper().endswith(('_API_KEY', '_TOKEN')):
@@ -130,6 +155,8 @@ def _probe_runtime(python, device):
         info = json.loads(output.strip()) if process.returncode == 0 else {}
         if not info.get('ready'):
             return 'runtime_unavailable'
+        if not info.get('compatible'):
+            return 'runtime_update_required'
         if device == 'cuda' and not info.get('cuda'):
             return 'cuda_unavailable'
         return ''
@@ -137,8 +164,21 @@ def _probe_runtime(python, device):
         return 'runtime_unavailable'
 
 
-@lru_cache(maxsize=4)
 def inspect_installation(config):
+    # A base update must invalidate readiness even while the expensive probe is cached.
+    try:
+        from .voice_shared_runtime import config_fingerprint, SharedRuntimeError
+    except ImportError:
+        from voice_shared_runtime import config_fingerprint, SharedRuntimeError
+    try:
+        fingerprint = config_fingerprint(config)
+    except SharedRuntimeError:
+        return 'runtime_update_required'
+    return _inspect_installation(config, fingerprint)
+
+
+@lru_cache(maxsize=4)
+def _inspect_installation(config, fingerprint=None):
     if not config.python.is_file() or not config.worker.is_file():
         return 'not_installed'
     try:
@@ -160,14 +200,18 @@ def inspect_installation(config):
             if name in required and (not path.is_file() or not path.stat().st_size):
                 return 'invalid_assets'
         recipe_id(config)  # Includes verification of the accepted reference SHA256.
-        copied_client = config.worker.parents[2]/'backend/scott_voice_process.py'
-        if copied_client.is_file():
-            from hashlib import sha256
-            if sha256(copied_client.read_bytes()).digest() != sha256(Path(__file__).with_name('scott_voice_process.py').read_bytes()).digest():
+        from hashlib import sha256
+        for name in ('scott_voice_process.py', 'voice_shared_runtime.py', 'scott_voice_sdk.py'):
+            copied_client = config.worker.parents[2]/'backend'/name
+            if copied_client.is_file() and sha256(copied_client.read_bytes()).digest() != sha256(Path(__file__).with_name(name).read_bytes()).digest():
                 return 'runtime_update_required'
     except (OSError, ValueError, KeyError, TypeError):
         return 'invalid_assets'
-    return _probe_runtime(str(config.python), config.device)
+    return _probe_runtime(str(config.python), config.device, fingerprint)
+
+
+inspect_installation.cache_clear = _inspect_installation.cache_clear
+inspect_installation.cache_info = _inspect_installation.cache_info
 
 
 def _track_request(method):

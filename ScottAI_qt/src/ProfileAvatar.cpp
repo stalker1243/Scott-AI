@@ -1,4 +1,7 @@
+#include <QCoreApplication>
 #include "ProfileAvatar.h"
+#include "AppPaths.h"
+#include "AppLog.h"
 #include <QBuffer>
 #include <QDir>
 #include <QFile>
@@ -10,17 +13,37 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QSaveFile>
+#include <QLockFile>
+#include <memory>
 #include <cmath>
 
-ProfileAvatar::ProfileAvatar(QString directory, bool temporary, QString legacyDirectory)
+ProfileAvatar::ProfileAvatar(QString directory, bool temporary, QString legacyDirectory, QString previousDirectory)
     : m_directory(std::move(directory)), m_temporary(temporary) {
     if (temporary) return;
     const QString fileName = m_directory + "/avatar.json";
+    std::unique_ptr<QLockFile> migrationLock;
+    bool migrating = false;
+    if (!previousDirectory.isEmpty()) {
+        if (!AppPaths::unlinked(fileName)) {
+            m_error = QStringLiteral("Перенос фото остановлен: путь содержит ссылку. Исходное фото сохранено."); return;
+        }
+        if (!QFileInfo::exists(fileName) && QFileInfo::exists(previousDirectory + "/avatar.json")) {
+            if (!AppPaths::unlinked(previousDirectory + "/avatar.json")) {
+                m_error = QStringLiteral("Перенос фото остановлен: путь содержит ссылку. Исходное фото сохранено."); return;
+            }
+            AppLog::ensureDirectory(m_directory);
+            migrationLock = std::make_unique<QLockFile>(m_directory + "/.avatar-migration.lock");
+            if (!migrationLock->tryLock(1000)) { m_error = QStringLiteral("Фото переносит другой процесс. Повторите запуск."); return; }
+            migrating = !QFileInfo::exists(fileName);
+        }
+    }
     QFile file(fileName);
+    if (migrating) file.setFileName(previousDirectory + "/avatar.json");
     if (file.exists()) {
         bool valid = false;
         if (file.size() <= 32 * 1024 * 1024 && file.open(QIODevice::ReadOnly)) {
-            const auto data = QJsonDocument::fromJson(file.readAll()).object();
+            const auto bytesJson = file.readAll();
+            const auto data = QJsonDocument::fromJson(bytesJson).object();
             const auto bytes = QByteArray::fromBase64(data.value("png").toString().toLatin1());
             QBuffer buffer; buffer.setData(bytes); buffer.open(QIODevice::ReadOnly);
             QImageReader reader(&buffer, "PNG");
@@ -28,6 +51,14 @@ ProfileAvatar::ProfileAvatar(QString directory, bool temporary, QString legacyDi
             if (size.isValid() && qint64(size.width()) * size.height() <= 25000000) m_image = reader.read();
             valid = data.value("png").isString() && (data.value("png").toString().isEmpty() || !m_image.isNull());
             setCrop(data.value("zoom").toDouble(1), data.value("x").toDouble(), data.value("y").toDouble());
+            if (valid && migrating) {
+                QSaveFile copy(fileName);
+                if (copy.open(QIODevice::WriteOnly)) {
+                    copy.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+                    if (copy.write(bytesJson) != bytesJson.size() || !copy.commit())
+                        m_error = QStringLiteral("Не удалось перенести фото. Исходное фото сохранено.");
+                } else m_error = QStringLiteral("Не удалось перенести фото. Исходное фото сохранено.");
+            }
         }
         if (!valid) m_error = QStringLiteral("Не удалось прочитать фото. Можно выбрать другое.");
     } else if (!legacyDirectory.isEmpty() && QFileInfo::exists(legacyDirectory + "/avatar.png")) {
@@ -43,7 +74,7 @@ ProfileAvatar::ProfileAvatar(QString directory, bool temporary, QString legacyDi
 }
 bool ProfileAvatar::choose() {
     if (m_temporary) return false;
-    const auto path = QFileDialog::getOpenFileName(nullptr, QStringLiteral("Фото профиля"), {}, QStringLiteral("Изображения (*.png *.jpg *.jpeg *.webp *.bmp)"));
+    const auto path = QFileDialog::getOpenFileName(nullptr, QCoreApplication::translate("Launcher", "Фото профиля"), {}, QCoreApplication::translate("Launcher", "Изображения (*.png *.jpg *.jpeg *.webp *.bmp)"));
     return !path.isEmpty() && loadFile(path);
 }
 bool ProfileAvatar::loadFile(const QString &path) {
@@ -108,14 +139,19 @@ bool ProfileAvatar::save() {
     if (!m_dirty) return true;
     m_error.clear();
     if (!m_temporary) {
+        AppLog::ensureDirectory(m_directory);
         QByteArray png; QBuffer buffer(&png); buffer.open(QIODevice::WriteOnly);
-        if ((!m_image.isNull() && !m_image.save(&buffer, "PNG")) || !QDir().mkpath(m_directory)) {
+        if ((!m_image.isNull() && !m_image.save(&buffer, "PNG")) || !QDir(m_directory).exists()) {
             m_error = QStringLiteral("Не удалось сохранить фото."); emit changed(); return false;
         }
         // One atomic record keeps the source image and its crop together.
         QSaveFile file(m_directory + "/avatar.json");
         const auto bytes = QJsonDocument(QJsonObject{{"png", QString::fromLatin1(png.toBase64())}, {"zoom", m_zoom}, {"x", m_x}, {"y", m_y}}).toJson(QJsonDocument::Compact);
-        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
+        if (!file.open(QIODevice::WriteOnly)) {
+            m_error = QStringLiteral("Не удалось сохранить фото. Черновик сохранён в окне."); emit changed(); return false;
+        }
+        file.setPermissions(QFile::ReadOwner | QFile::WriteOwner);
+        if (file.write(bytes) != bytes.size() || !file.commit()) {
             m_error = QStringLiteral("Не удалось сохранить фото. Черновик сохранён в окне."); emit changed(); return false;
         }
     }

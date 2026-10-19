@@ -23,7 +23,7 @@ Item {
         UiButton {
             objectName: "navigationToggle"
             theme: bar.theme; text: "☰"; implicitWidth: 34; implicitHeight: 30
-            Accessible.name: bar.navigationExpanded ? "Свернуть навигацию" : "Раскрыть навигацию"
+            Accessible.name: bar.navigationExpanded ? qsTranslate("Launcher", "Свернуть навигацию") : qsTranslate("Launcher", "Раскрыть навигацию")
             ToolTip.visible: hovered; ToolTip.text: Accessible.name; ToolTip.delay: 350
             onClicked: bar.toggleNavigation()
         }
@@ -41,18 +41,18 @@ Item {
         Rectangle {
             width: 7; height: 7; radius: 4
             color: bar.online ? bar.theme.success : bar.theme.danger
-            Accessible.name: bar.statusText
+            Accessible.name: qsTranslate("Launcher", bar.statusText)
             HoverHandler { id: statusHover }
-            ToolTip.visible: statusHover.hovered; ToolTip.text: bar.statusText
+            ToolTip.visible: statusHover.hovered; ToolTip.text: qsTranslate("Launcher", bar.statusText)
         }
         Repeater {
-            model: ["Свернуть", "Развернуть", "Закрыть"]
+            model: [qsTranslate("Launcher", "Свернуть"), qsTranslate("Launcher", "Развернуть"), qsTranslate("Launcher", "Закрыть")]
             Button {
                 id: captionButton
                 required property int index
                 required property string modelData
                 objectName: ["windowMinimize", "windowMaximize", "windowClose"][index]
-                Accessible.name: index === 1 && (bar.windowHost.presentationVisibility === Window.Maximized || bar.windowHost.presentationVisibility === Window.FullScreen) ? "Восстановить размер" : modelData
+                Accessible.name: index === 1 && (bar.windowHost.presentationVisibility === Window.Maximized || bar.windowHost.presentationVisibility === Window.FullScreen) ? qsTranslate("Launcher", "Восстановить размер") : modelData
                 implicitWidth: 34; implicitHeight: 30; hoverEnabled: true
                 onClicked: {
                     if (index === 0) bar.windowHost.minimizeAnimated()

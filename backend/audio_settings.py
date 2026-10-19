@@ -39,7 +39,12 @@ except Exception:  # pragma: no cover — машина без звуковой �
     sd = None
     HAS_SOUNDDEVICE = False
 
-CONFIG_PATH = Path(__file__).resolve().parent / "data" / "audio_config.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+CONFIG_PATH = backend_path('audio_config.json')
 
 DEFAULTS: Dict = {
     # Пустая строка — «как в системе». Отдельного значения «авто» не нужно:

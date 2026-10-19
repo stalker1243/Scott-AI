@@ -18,8 +18,8 @@
 «фотосимтис» — оба неверны, но второе дальше от истины.
 
 ПОЧЕМУ ОБЕ. Быстрая реализация тянет за собой CTranslate2 и скачивает модель в
-собственном формате — это лишние полторы сотни мегабайт и две минуты при
-первом запуске. Если её нет или она не завелась, Scott должен продолжать
+собственном формате. Первая подготовка скачивает формат выбранного движка;
+small в CTranslate2 занимает около 464 МиБ. Если движок не завёлся, Scott должен продолжать
 слышать, а не умолкать. Поэтому выбор движка спрятан здесь, и остальной код о
 нём не знает.
 
@@ -30,6 +30,8 @@
 from __future__ import annotations
 
 import os
+import math
+import re
 import threading
 from pathlib import Path
 from typing import Any, Optional
@@ -68,6 +70,13 @@ try:
 except ValueError:
     BEAM_SIZE = 5
 
+# Retry one short turbo loop with acoustic context. Normal first-pass text,
+# longer phrases and other models keep their measured input path.
+try:
+    SHORT_PADDING_MS = max(0, min(1000, int(os.getenv('WHISPER_SHORT_PADDING_MS', '300'))))
+except ValueError:
+    SHORT_PADDING_MS = 300
+
 
 def prepare_audio(audio: Any) -> Any:
     """Decode real uploads once; microphone arrays are already mono at 16 kHz."""
@@ -100,6 +109,35 @@ def normalize_quiet_audio(audio: Any) -> Any:
         return audio
     gain = min(8.0, .03 / max(rms, 1e-10), .90 / peak)
     return (audio * gain).astype(np.float32) if gain > 1 else audio
+
+
+def pad_short_audio(audio: Any, model_name: str) -> Any:
+    """Context for one short turbo decode; preserve original samples and input."""
+    import numpy as np
+    if (model_name not in ('turbo', 'large-v3-turbo') or not SHORT_PADDING_MS
+            or not isinstance(audio, np.ndarray) or not 0 < audio.size <= 32000):
+        return audio
+    return np.pad(audio, (16*SHORT_PADDING_MS, 16*SHORT_PADDING_MS))
+
+
+def repeated_word(text: str) -> bool:
+    words = re.findall(r'[^\W\d_]+', (text or '').casefold())
+    return len(words) >= 3 and len(set(words)) == 1
+
+
+def _decode_score(result: dict) -> Optional[float]:
+    """Relative decoder score only, never a probability of correct words."""
+    segments = result.get('segments') or []
+    if not segments:
+        return None
+    try:
+        scores = [float(segment['avg_logprob']) for segment in segments]
+        silence = [float(segment['no_speech_prob']) for segment in segments]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not all(math.isfinite(value) for value in scores+silence) or max(silence) > .6:
+        return None
+    return sum(scores)/len(scores)
 
 
 # С какой длины записи проверять, есть ли в ней речь вообще.
@@ -230,7 +268,12 @@ class Recognizer:
         try:
             print(f"🔊 Загружаю faster-whisper «{self.model_name}» "
                   f"на {self.device.upper()} ({compute})...")
-            self._model = WhisperModel(self.model_name, device=self.device,
+            try:
+                from .recognition_models import prepared_faster_path
+            except ImportError:
+                from recognition_models import prepared_faster_path
+            prepared = prepared_faster_path(self.model_name)
+            self._model = WhisperModel(str(prepared) if prepared else self.model_name, device=self.device,
                                        compute_type=compute)
             self.engine = "faster-whisper"
             print(f"✅ faster-whisper «{self.model_name}» готов на {self.device.upper()}")
@@ -250,12 +293,28 @@ class Recognizer:
         # The comparison/downloader can keep large checkpoints beside Scott's
         # other local models. Reuse that checkpoint instead of downloading a
         # second copy into the user profile.
-        checkpoint = Path(__file__).resolve().parent / 'data/models/whisper' / f'{self.model_name}.pt'
+        try:
+            from .storage_paths import model_directory
+        except ImportError:
+            from storage_paths import model_directory
+        checkpoint = model_directory('models/whisper', backend=Path(__file__).resolve().parent) / f'{self.model_name}.pt'
         if self.model_name == 'turbo':
             checkpoint = checkpoint.with_name('large-v3-turbo.pt')
         # load by model name so Whisper still validates the official SHA-256
         # checksum (also detects an interrupted download).
         cache_options = {'download_root': str(checkpoint.parent)} if checkpoint.is_file() else {}
+        # A new faster installation intentionally has no unused .pt. If faster
+        # fails on this device, prepare the necessary fallback with resume/SHA256.
+        # Existing OpenAI installations keep their previous cache/load path.
+        try:
+            from .recognition_models import prepared_faster_path
+            from .model_setup import prepare_openai
+        except ImportError:
+            from recognition_models import prepared_faster_path
+            from model_setup import prepare_openai
+        if prepared_faster_path(self.model_name) is not None:
+            fallback = prepare_openai(self.model_name, lambda message: print(message, flush=True))
+            cache_options = {'download_root': str(fallback.parent)}
         try:
             self._model = whisper.load_model(self.model_name, device=self.device, **cache_options)
         except Exception as e:
@@ -335,6 +394,18 @@ class Recognizer:
                                       initial_prompt=_подсказка(), temperature=TEMPERATURES,
                                       **options)
         text = (итог.get("text") or "").strip()
+        if repeated_word(text):
+            padded = pad_short_audio(audio, self.model_name)
+            first_score = _decode_score(итог)
+            if padded is not audio and first_score is not None:
+                retry = self._model.transcribe(padded, language=language,
+                    fp16=(self.device == "cuda"), initial_prompt=_подсказка(),
+                    temperature=TEMPERATURES, **options)
+                candidate = (retry.get('text') or '').strip()
+                retry_score = _decode_score(retry)
+                if (candidate and not repeated_word(candidate) and not looks_like_hallucination(candidate)
+                        and retry_score is not None and retry_score >= first_score):
+                    text = candidate
         if looks_like_hallucination(text):
             print(f'🔇 Пропускаю выдумку модели: «{text[:60]}»')
             return ''

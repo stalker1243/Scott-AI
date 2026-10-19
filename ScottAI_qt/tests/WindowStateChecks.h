@@ -202,7 +202,10 @@ inline void runWindowStateChecks(QApplication &app, QQuickWindow *window, Window
         } else if (state->phase == 23 && window->opacity() == 1 && elapsed >= 300) {
             if (window->visibility() != QWindow::FullScreen) { fail("Windows restore from minimize lost full screen"); return; }
             key(Qt::Key_Escape); advance();
-        } else if (state->phase == 24 && !motion.running()) {
+        } else if (state->phase == 24 && !motion.running() && window->visibility() != QWindow::FullScreen) {
+            // The queued Esc shortcut may not have begun its transition on the
+            // first timer tick after native restore. Keep the same final-state
+            // assertion and deadline, but wait until full screen actually ends.
             if (window->visibility() != QWindow::Maximized) { fail("Windows minimize changed full screen return mode"); return; }
             window->setProperty("animationsEnabled", false); advance(); systemCommand(SC_RESTORE);
         } else if (state->phase == 25 && window->visibility() == QWindow::Windowed) {

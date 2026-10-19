@@ -8,7 +8,12 @@ from contextlib import contextmanager, closing
 from pathlib import Path
 from datetime import datetime, timezone
 
-DEFAULT_CHAT_DIR = Path(__file__).resolve().parent / 'data' / 'chats'
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+DEFAULT_CHAT_DIR = backend_path('chats')
 
 def now():
     return datetime.now(timezone.utc).isoformat()

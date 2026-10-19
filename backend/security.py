@@ -13,19 +13,29 @@
 import json
 import os
 import time
+import secrets
+import threading
 from pathlib import Path
 from typing import Dict, List
+try:
+    from .support_logs import backend_log_directory, private_directory
+except ImportError:
+    from support_logs import backend_log_directory, private_directory
 
 from fastapi import HTTPException, Request
 
 EXECUTE_TOKEN = os.getenv("EXECUTE_TOKEN", "")
 EXECUTE_WHITELIST = [ip.strip() for ip in os.getenv("EXECUTE_WHITELIST", "127.0.0.1,::1").split(",") if ip.strip()]
-RATE_LIMIT_PER_MIN = int(os.getenv("EXECUTE_RATE_LIMIT", "20"))
+try:
+    RATE_LIMIT_PER_MIN = max(1, min(1000, int(os.getenv("EXECUTE_RATE_LIMIT", "20"))))
+except ValueError:
+    RATE_LIMIT_PER_MIN = 20
 
-LOG_DIR = Path(os.getenv("EXECUTE_LOG_DIR", "logs"))
-LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR = Path(os.getenv("EXECUTE_LOG_DIR") or backend_log_directory())
+private_directory(LOG_DIR)
 
 _rate_store: Dict[str, List[float]] = {}
+_rate_lock = threading.Lock()
 
 # Опциональный Redis для распределённого rate-limit (несколько процессов/машин).
 REDIS_URL = os.getenv("REDIS_URL", "")
@@ -69,13 +79,20 @@ def check_rate_limit(request: Request) -> None:
         except Exception:
             pass  # Redis недоступен — считаем в памяти процесса ниже
 
-    now = time.time()
-    hits = [t for t in _rate_store.get(client_ip, []) if now - t < 60]
-    if len(hits) >= RATE_LIMIT_PER_MIN:
+    now = time.monotonic()
+    with _rate_lock:
+        if len(_rate_store) >= 4096:
+            for address in list(_rate_store):
+                if not _rate_store[address] or now - _rate_store[address][-1] >= 60:
+                    del _rate_store[address]
+            if client_ip not in _rate_store and len(_rate_store) >= 4096:
+                raise HTTPException(status_code=429, detail="Too many requests")
+        hits = [t for t in _rate_store.get(client_ip, []) if now - t < 60]
+        if len(hits) >= RATE_LIMIT_PER_MIN:
+            _rate_store[client_ip] = hits
+            raise HTTPException(status_code=429, detail="Too many requests")
+        hits.append(now)
         _rate_store[client_ip] = hits
-        raise HTTPException(status_code=429, detail="Too many requests")
-    hits.append(now)
-    _rate_store[client_ip] = hits
 
 
 def require_scott_token(request: Request) -> None:
@@ -90,7 +107,7 @@ def require_scott_token(request: Request) -> None:
     client = request.client.host if request.client else None
     path = request.url.path
 
-    if EXECUTE_WHITELIST and client and client not in EXECUTE_WHITELIST:
+    if not client or (EXECUTE_WHITELIST and client not in EXECUTE_WHITELIST):
         audit_log({"ip": client, "path": path, "result": "ip_rejected"}, "dangerous_actions.log")
         raise HTTPException(status_code=403, detail="IP not allowed")
 
@@ -100,6 +117,6 @@ def require_scott_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
 
     token = auth.split(" ", 1)[1]
-    if not EXECUTE_TOKEN or token != EXECUTE_TOKEN:
+    if not EXECUTE_TOKEN or not secrets.compare_digest(token.encode('utf-8'), EXECUTE_TOKEN.encode('utf-8')):
         audit_log({"ip": client, "path": path, "result": "invalid_token"}, "dangerous_actions.log")
         raise HTTPException(status_code=403, detail="Invalid or missing token")

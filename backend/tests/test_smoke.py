@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.routing import APIRoute
+from route_inventory import api_routes
 
 pytestmark = pytest.mark.smoke
 
@@ -20,10 +21,9 @@ SNAPSHOT = Path(__file__).parent / "routes_snapshot.txt"
 def collect_routes(app):
     """Маршруты приложения в виде «МЕТОД путь», без служебных /docs и /openapi.json."""
     rows = set()
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            for method in route.methods - {"HEAD", "OPTIONS"}:
-                rows.add(f"{method} {route.path}")
+    for route in api_routes(app):
+        for method in route.methods - {"HEAD", "OPTIONS"}:
+            rows.add(f"{method} {route.path}")
     return rows
 
 
@@ -121,9 +121,7 @@ def test_no_duplicate_routes(app):
     Ошибка тихая, и найти её без такой проверки трудно.
     """
     seen, duplicates = set(), []
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
-            continue
+    for route in api_routes(app):
         for method in route.methods - {"HEAD", "OPTIONS"}:
             key = f"{method} {route.path}"
             if key in seen:
@@ -177,8 +175,8 @@ def test_dangerous_route_requires_token(app, route):
     """
     method, path = route.split(" ", 1)
     target = next(
-        (r for r in app.routes
-         if isinstance(r, APIRoute) and r.path == path and method in r.methods),
+        (r for r in api_routes(app)
+         if r.path == path and method in r.methods),
         None,
     )
     assert target is not None, f"Маршрут {route} исчез"

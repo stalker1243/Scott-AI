@@ -1,3 +1,4 @@
+#include <QCoreApplication>
 #include "ProtocolFiles.h"
 #include "ProtocolValidation.h"
 #include <QFileDialog>
@@ -6,11 +7,11 @@
 #include <QJsonDocument>
 
 void ProtocolFiles::chooseImport() {
-    const auto path = QFileDialog::getOpenFileName(nullptr, QStringLiteral("Импорт протокола"), {}, QStringLiteral("Протокол Scott (*.json)"));
+    const auto path = QFileDialog::getOpenFileName(nullptr, QCoreApplication::translate("Launcher", "Импорт протокола"), {}, QCoreApplication::translate("Launcher", "Протокол Scott (*.json)"));
     if (!path.isEmpty()) importFile(path);
 }
 void ProtocolFiles::chooseExport(const QString &json) {
-    const auto path = QFileDialog::getSaveFileName(nullptr, QStringLiteral("Экспорт протокола"), "protocol.scott.json", QStringLiteral("Протокол Scott (*.json)"));
+    const auto path = QFileDialog::getSaveFileName(nullptr, QCoreApplication::translate("Launcher", "Экспорт протокола"), "protocol.scott.json", QCoreApplication::translate("Launcher", "Протокол Scott (*.json)"));
     if (!path.isEmpty()) exportFile(path, json);
 }
 bool ProtocolFiles::importFile(const QString &path) {

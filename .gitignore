@@ -120,3 +120,4 @@ PLAN.md
 *.csproj.SdkResolver.*.proj.Backup.tmp
 voice-runtime/
 voice-assets/
+/backend/native/build/

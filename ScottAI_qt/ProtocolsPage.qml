@@ -27,28 +27,28 @@ ColumnLayout {
     })
     readonly property int resultCount: filtered.length
     readonly property string draftIssue: {
-        if (!nameDraft.trim().length) return "Введите имя протокола"
-        if (nameDraft.trim().length > 100) return "Имя — до 100 символов"
-        if (descriptionDraft.length > 2000) return "Описание — до 2000 символов"
-        if (!steps.count || steps.count > 40) return "Нужно от 1 до 40 шагов"
+        if (!nameDraft.trim().length) return qsTranslate("Launcher", "Введите имя протокола")
+        if (nameDraft.trim().length > 100) return qsTranslate("Launcher", "Имя — до 100 символов")
+        if (descriptionDraft.length > 2000) return qsTranslate("Launcher", "Описание — до 2000 символов")
+        if (!steps.count || steps.count > 40) return qsTranslate("Launcher", "Нужно от 1 до 40 шагов")
         let active = false
         for (let i = 0; i < steps.count; ++i) {
             const item = steps.get(i)
-            if (!item.phrase.trim().length) return "Заполните шаг " + (i + 1)
-            if (item.phrase.length > 2000) return "Шаг " + (i + 1) + " — до 2000 символов"
-            if (!Number.isFinite(item.pauseSeconds) || item.pauseSeconds < 0 || item.pauseSeconds > 60) return "Пауза шага " + (i + 1) + ": от 0 до 60 с"
+            if (!item.phrase.trim().length) return qsTranslate("Launcher", "Заполните шаг ") + (i + 1)
+            if (item.phrase.length > 2000) return qsTranslate("Launcher", "Шаг ") + (i + 1) + qsTranslate("Launcher", " — до 2000 символов")
+            if (!Number.isFinite(item.pauseSeconds) || item.pauseSeconds < 0 || item.pauseSeconds > 60) return qsTranslate("Launcher", "Пауза шага ") + (i + 1) + qsTranslate("Launcher", ": от 0 до 60 с")
             active = active || item.active
         }
-        if (!active) return "Включите хотя бы один шаг"
-        if (splitLines(phrasesDraft).length > 20) return "Голосовых фраз — до 20"
-        if (!splitLines(phrasesDraft).every(function(phrase) { return phrase.length <= 200 })) return "Голосовая фраза — до 200 символов"
+        if (!active) return qsTranslate("Launcher", "Включите хотя бы один шаг")
+        if (splitLines(phrasesDraft).length > 20) return qsTranslate("Launcher", "Голосовых фраз — до 20")
+        if (!splitLines(phrasesDraft).every(function(phrase) { return phrase.length <= 200 })) return qsTranslate("Launcher", "Голосовая фраза — до 200 символов")
         return ""
     }
     readonly property bool validDraft: draftIssue.length === 0
     readonly property var templates: [
-        {name:"Рабочий день", description:"Подготовить рабочее пространство", steps:[{text:"открой браузер", pause:2}, {text:"открой редактор кода", pause:2}, {text:"приглуши звук", pause:0}]},
-        {name:"Фокус", description:"Сосредоточиться на задаче", steps:[{text:"приглуши звук", pause:0}, {text:"напомни через 25 минут сделать перерыв", pause:0}]},
-        {name:"Учёба", description:"Начать занятие", steps:[{text:"открой браузер", pause:2}, {text:"открой документы", pause:0}, {text:"напомни через час сделать перерыв", pause:0}]}
+        {name:qsTranslate("Launcher", "Рабочий день"), description:qsTranslate("Launcher", "Подготовить рабочее пространство"), steps:[{text:"открой браузер", pause:2}, {text:"открой редактор кода", pause:2}, {text:"приглуши звук", pause:0}]},
+        {name:qsTranslate("Launcher", "Фокус"), description:qsTranslate("Launcher", "Сосредоточиться на задаче"), steps:[{text:"приглуши звук", pause:0}, {text:"напомни через 25 минут сделать перерыв", pause:0}]},
+        {name:qsTranslate("Launcher", "Учёба"), description:qsTranslate("Launcher", "Начать занятие"), steps:[{text:"открой браузер", pause:2}, {text:"открой документы", pause:0}, {text:"напомни через час сделать перерыв", pause:0}]}
     ]
     spacing: 10
     ListModel { id: steps }
@@ -70,7 +70,7 @@ ColumnLayout {
     }
     function loadDraft(record, copy) {
         editId = copy ? "" : (record.id || "")
-        nameDraft = (record.name || "") + (copy && record.id ? " (копия)" : "")
+        nameDraft = (record.name || "") + (copy && record.id ? qsTranslate("Launcher", " (копия)") : "")
         descriptionDraft = record.description || ""; phrasesDraft = (record.phrases || []).join("\n")
         scheduleDraft = copy ? "" : (typeof record.schedule === "string" ? record.schedule : record.schedule_text || "")
         repeatDraft = record.repeat_count || 1; enabledDraft = copy ? false : record.enabled !== false
@@ -116,6 +116,7 @@ ColumnLayout {
     }
     component Card: SurfacePanel {
         theme: page.theme; Layout.fillWidth: true
+        flat: true
         default property alias content: body.data
         implicitHeight: body.implicitHeight + 28
         data: ColumnLayout { id: body; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 14; spacing: 8 }
@@ -129,21 +130,21 @@ ColumnLayout {
         exit:Transition { enabled:page.theme.motion; NumberAnimation { property:"opacity"; to:0; duration:90 } }
     }
     RowLayout {
-        UiSegmentedControl { objectName:"protocolSections"; theme:page.theme; model:["Список", "Редактор", "Запуск"]; currentIndex:page.section; Layout.fillWidth:true; Layout.minimumWidth:0; implicitHeight:42; onActivated:function(index) { page.section = index } }
-        SmallButton { objectName:"newProtocol"; text:"+"; implicitWidth:36; enabled:!client.protocolsBusy; Accessible.name:"Новый протокол"; ToolTip.visible:hovered; ToolTip.text:"Новый протокол"; onClicked:page.edit({}, false) }
-        SmallButton { text:"Импорт"; enabled:!client.protocolsBusy; onClicked:page.perform(function() { files.chooseImport() }) }
-        SmallButton { objectName:"refreshProtocols"; text:"↻"; implicitWidth:36; Accessible.name:"Обновить протоколы"; enabled:client.online && !client.protocolsBusy; onClicked:client.refreshProtocols() }
+        UiSegmentedControl { objectName:"protocolSections"; theme:page.theme; model:[qsTranslate("Launcher", "Список"), qsTranslate("Launcher", "Редактор"), qsTranslate("Launcher", "Запуск")]; currentIndex:page.section; Layout.fillWidth:true; Layout.minimumWidth:0; implicitHeight:42; onActivated:function(index) { page.section = index } }
+        SmallButton { objectName:"newProtocol"; text:"+"; implicitWidth:36; enabled:!client.protocolsBusy; Accessible.name:qsTranslate("Launcher", "Новый протокол"); ToolTip.visible:hovered; ToolTip.text:qsTranslate("Launcher", "Новый протокол"); onClicked:page.edit({}, false) }
+        SmallButton { text:qsTranslate("Launcher", "Импорт"); enabled:!client.protocolsBusy; onClicked:page.perform(function() { files.chooseImport() }) }
+        SmallButton { objectName:"refreshProtocols"; text:"↻"; implicitWidth:36; Accessible.name:qsTranslate("Launcher", "Обновить протоколы"); enabled:client.online && !client.protocolsBusy; onClicked:client.refreshProtocols() }
     }
     UiNotice { theme:page.theme; Layout.fillWidth:true; error:true; text:client.protocolsError || client.protocolJobError || files.error }
-    UiNotice { theme:page.theme; Layout.fillWidth:true; text:!client.online ? "Scott не подключён. Черновик сохранится в окне." : client.protocolsNotice || files.notice }
+    UiNotice { theme:page.theme; Layout.fillWidth:true; text:!client.online ? qsTranslate("Launcher", "Scott не подключён. Черновик сохранится в окне.") : client.protocolsNotice || files.notice }
     StackLayout {
         Layout.fillWidth:true; Layout.fillHeight:true; Layout.minimumHeight:0; currentIndex:page.section
         ColumnLayout {
             spacing:10
-            Field { id:search; objectName:"protocolSearch"; Layout.fillWidth:true; placeholderText:"Найти протокол, фразу или шаг…" }
+            Field { id:search; objectName:"protocolSearch"; Layout.fillWidth:true; placeholderText:qsTranslate("Launcher", "Найти протокол, фразу или шаг…") }
             Flow {
                 Layout.fillWidth:true; spacing:6
-                Repeater { model:[{id:"all", title:"Все"}, {id:"enabled", title:"Активные"}, {id:"scheduled", title:"По расписанию"}, {id:"disabled", title:"Отключённые"}]
+                Repeater { model:[{id:"all", title:qsTranslate("Launcher", "Все")}, {id:"enabled", title:qsTranslate("Launcher", "Активные")}, {id:"scheduled", title:qsTranslate("Launcher", "По расписанию")}, {id:"disabled", title:qsTranslate("Launcher", "Отключённые")}]
                     SmallButton { required property var modelData; text:modelData.title; primary:page.listFilter === modelData.id; onClicked:page.listFilter = modelData.id }
                 }
             }
@@ -151,7 +152,7 @@ ColumnLayout {
                 Layout.fillWidth:true; Layout.fillHeight:true
                 ColumnLayout {
                     anchors.centerIn:parent; width:parent.width - 24; visible:page.filtered.length === 0; spacing:12
-                    Label { Layout.alignment:Qt.AlignHCenter; text:client.protocolsBusy ? "Загружаю протоколы…" : search.text.length || page.listFilter !== "all" ? "Ничего не найдено" : "Создайте первый протокол"; font.pixelSize:15 }
+                    Label { Layout.alignment:Qt.AlignHCenter; text:client.protocolsBusy ? qsTranslate("Launcher", "Загружаю протоколы…") : search.text.length || page.listFilter !== "all" ? qsTranslate("Launcher", "Ничего не найдено") : qsTranslate("Launcher", "Создайте первый протокол"); font.pixelSize:15 }
                     Flow { Layout.fillWidth:true; spacing:8; visible:!search.text.length && page.listFilter === "all"
                         Repeater { model:page.templates; SmallButton { required property var modelData; required property int index; objectName:"protocolEmptyTemplate" + index; text:modelData.name; onClicked:page.edit(modelData, true) } }
                     }
@@ -166,17 +167,17 @@ ColumnLayout {
                             id:rowBody; anchors.left:parent.left; anchors.right:parent.right; anchors.top:parent.top; anchors.margins:14; spacing:7
                             RowLayout {
                                 Label { Layout.fillWidth:true; Layout.minimumWidth:0; text:modelData.name; color:page.theme.ink; font.pixelSize:15; font.weight:Font.DemiBold; wrapMode:Text.WordWrap }
-                                Label { text:modelData.enabled ? "● Активен" : "○ Отключён"; color:modelData.enabled ? page.theme.accent : page.theme.muted }
+                                Label { text:modelData.enabled ? qsTranslate("Launcher", "● Активен") : qsTranslate("Launcher", "○ Отключён"); color:modelData.enabled ? page.theme.accent : page.theme.muted }
                             }
                             Label { Layout.fillWidth:true; text:modelData.description; visible:text.length > 0; wrapMode:Text.WordWrap }
-                            Label { Layout.fillWidth:true; text:modelData.steps.length + " шагов · " + (modelData.repeat_count || 1) + "× · " + modelData.runs + " запусков" }
-                            Label { Layout.fillWidth:true; text:modelData.schedule_text.length ? modelData.schedule_text : "По запросу: протокол «" + modelData.name + "»"; color:page.theme.accent; wrapMode:Text.WordWrap }
+                            Label { Layout.fillWidth:true; text:modelData.steps.length + qsTranslate("Launcher", " шагов · ") + (modelData.repeat_count || 1) + "× · " + modelData.runs + qsTranslate("Launcher", " запусков") }
+                            Label { Layout.fillWidth:true; text:modelData.schedule_text.length ? modelData.schedule_text : qsTranslate("Launcher", "По запросу: протокол «") + modelData.name + "»"; color:page.theme.accent; wrapMode:Text.WordWrap }
                             Flow {
                                 Layout.fillWidth:true; spacing:6
-                                SmallButton { objectName:"runProtocol_" + modelData.id; text:"Запустить"; primary:true; enabled:client.online && client.protocolsReady && !client.protocolsBusy && client.protocolJobReady && !client.protocolRunning && !client.protocolJobBusy && modelData.enabled; onClicked:page.run(modelData) }
-                                SmallButton { objectName:"editProtocol_" + modelData.id; text:"Изменить"; enabled:!client.protocolsBusy; onClicked:page.edit(modelData, false) }
-                                SmallButton { text:"Копия"; enabled:!client.protocolsBusy; onClicked:page.edit(modelData, true) }
-                                SmallButton { text:"Удалить"; destructive:true; enabled:client.online && client.protocolsReady && !client.protocolsBusy && !(client.protocolRunning && client.protocolJob.protocol_id === modelData.id); onClicked: { page.pendingDelete = modelData; deleteDialog.open() } }
+                                SmallButton { objectName:"runProtocol_" + modelData.id; text:qsTranslate("Launcher", "Запустить"); primary:true; enabled:client.online && client.protocolsReady && !client.protocolsBusy && client.protocolJobReady && !client.protocolRunning && !client.protocolJobBusy && modelData.enabled; onClicked:page.run(modelData) }
+                                SmallButton { objectName:"editProtocol_" + modelData.id; text:qsTranslate("Launcher", "Изменить"); enabled:!client.protocolsBusy; onClicked:page.edit(modelData, false) }
+                                SmallButton { text:qsTranslate("Launcher", "Копия"); enabled:!client.protocolsBusy; onClicked:page.edit(modelData, true) }
+                                SmallButton { text:qsTranslate("Launcher", "Удалить"); destructive:true; enabled:client.online && client.protocolsReady && !client.protocolsBusy && !(client.protocolRunning && client.protocolJob.protocol_id === modelData.id); onClicked: { page.pendingDelete = modelData; deleteDialog.open() } }
                             }
                         }
                     }
@@ -196,20 +197,20 @@ ColumnLayout {
                         Repeater { model:page.templates; SmallButton { required property var modelData; text:modelData.name; enabled:!client.protocolsBusy; onClicked:page.edit(modelData, true) } }
                     }
                     Card {
-                        Field { objectName:"protocolName"; Layout.fillWidth:true; placeholderText:"Имя протокола"; text:page.nameDraft; enabled:!client.protocolsBusy; onTextEdited: { page.nameDraft = text; page.dirty = true } }
-                        Field { Layout.fillWidth:true; placeholderText:"Описание"; text:page.descriptionDraft; enabled:!client.protocolsBusy; onTextEdited: { page.descriptionDraft = text; page.dirty = true } }
+                        Field { objectName:"protocolName"; Layout.fillWidth:true; placeholderText:qsTranslate("Launcher", "Имя протокола"); text:page.nameDraft; enabled:!client.protocolsBusy; onTextEdited: { page.nameDraft = text; page.dirty = true } }
+                        Field { Layout.fillWidth:true; placeholderText:qsTranslate("Launcher", "Описание"); text:page.descriptionDraft; enabled:!client.protocolsBusy; onTextEdited: { page.descriptionDraft = text; page.dirty = true } }
                         RowLayout {
-                            UiSwitch { theme:page.theme; text:"Активен"; checked:page.enabledDraft; enabled:!client.protocolsBusy; onToggled: { page.enabledDraft = checked; page.dirty = true } }
+                            UiSwitch { theme:page.theme; text:qsTranslate("Launcher", "Активен"); checked:page.enabledDraft; enabled:!client.protocolsBusy; onToggled: { page.enabledDraft = checked; page.dirty = true } }
                             Item { Layout.fillWidth:true }
-                            Label { text:"Повторы" }
+                            Label { text:qsTranslate("Launcher", "Повторы") }
                             UiComboBox { objectName:"protocolRepeat"; theme:page.theme; Layout.preferredWidth:85; implicitHeight:36; model:Array.from({length:20}, function(_, i) { return (i + 1) + "×" }); currentIndex:page.repeatDraft - 1; enabled:!client.protocolsBusy; onActivated: { page.repeatDraft = currentIndex + 1; page.dirty = true } }
                         }
-                        UiSwitch { objectName:"protocolStopOnError"; theme:page.theme; text:"Остановиться при ошибке"; checked:page.stopDraft; enabled:!client.protocolsBusy; onToggled: { page.stopDraft = checked; page.dirty = true } }
+                        UiSwitch { objectName:"protocolStopOnError"; theme:page.theme; text:qsTranslate("Launcher", "Остановиться при ошибке"); checked:page.stopDraft; enabled:!client.protocolsBusy; onToggled: { page.stopDraft = checked; page.dirty = true } }
                     }
                     RowLayout {
-                        Label { text:"Шаги · " + steps.count + " / 40"; font.weight:Font.DemiBold; Layout.fillWidth:true }
-                        SmallButton { text:"Из действий"; enabled:steps.count < 40 && !client.protocolsBusy; onClicked:actionsDialog.open() }
-                        SmallButton { text:"Вставить список"; enabled:steps.count < 40 && !client.protocolsBusy; onClicked:bulkDialog.open() }
+                        Label { text:qsTranslate("Launcher", "Шаги · ") + steps.count + " / 40"; font.weight:Font.DemiBold; Layout.fillWidth:true }
+                        SmallButton { text:qsTranslate("Launcher", "Из действий"); enabled:steps.count < 40 && !client.protocolsBusy; onClicked:actionsDialog.open() }
+                        SmallButton { text:qsTranslate("Launcher", "Вставить список"); enabled:steps.count < 40 && !client.protocolsBusy; onClicked:bulkDialog.open() }
                     }
                     Repeater {
                         model:steps
@@ -220,53 +221,53 @@ ColumnLayout {
                             required property real pauseSeconds
                             required property bool active
                             RowLayout {
-                                Label { text:"Шаг " + (stepCard.index + 1); Layout.fillWidth:true }
-                                UiSwitch { theme:page.theme; checked:stepCard.active; implicitHeight:30; Accessible.name:"Включить шаг " + (stepCard.index + 1); enabled:!client.protocolsBusy; onToggled: { steps.setProperty(stepCard.index, "active", checked); page.dirty = true } }
-                                SmallButton { text:"↑"; implicitWidth:30; leftPadding:4; rightPadding:4; Accessible.name:"Переместить шаг вверх"; enabled:stepCard.index > 0 && !client.protocolsBusy; onClicked: { steps.move(stepCard.index, stepCard.index - 1, 1); page.dirty = true } }
-                                SmallButton { text:"↓"; implicitWidth:30; leftPadding:4; rightPadding:4; Accessible.name:"Переместить шаг вниз"; enabled:stepCard.index < steps.count - 1 && !client.protocolsBusy; onClicked: { steps.move(stepCard.index, stepCard.index + 1, 1); page.dirty = true } }
-                                SmallButton { text:"⧉"; implicitWidth:30; leftPadding:4; rightPadding:4; Accessible.name:"Копировать шаг"; enabled:steps.count < 40 && !client.protocolsBusy; onClicked:page.cloneStep(stepCard.index) }
-                                SmallButton { text:"×"; implicitWidth:30; leftPadding:4; rightPadding:4; destructive:true; Accessible.name:"Удалить шаг"; enabled:!client.protocolsBusy; onClicked: { steps.remove(stepCard.index); page.dirty = true } }
+                                Label { text:qsTranslate("Launcher", "Шаг ") + (stepCard.index + 1); Layout.fillWidth:true }
+                                UiSwitch { theme:page.theme; checked:stepCard.active; implicitHeight:30; Accessible.name:qsTranslate("Launcher", "Включить шаг ") + (stepCard.index + 1); enabled:!client.protocolsBusy; onToggled: { steps.setProperty(stepCard.index, "active", checked); page.dirty = true } }
+                                SmallButton { text:"↑"; implicitWidth:30; leftPadding:4; rightPadding:4; Accessible.name:qsTranslate("Launcher", "Переместить шаг вверх"); enabled:stepCard.index > 0 && !client.protocolsBusy; onClicked: { steps.move(stepCard.index, stepCard.index - 1, 1); page.dirty = true } }
+                                SmallButton { text:"↓"; implicitWidth:30; leftPadding:4; rightPadding:4; Accessible.name:qsTranslate("Launcher", "Переместить шаг вниз"); enabled:stepCard.index < steps.count - 1 && !client.protocolsBusy; onClicked: { steps.move(stepCard.index, stepCard.index + 1, 1); page.dirty = true } }
+                                SmallButton { text:"⧉"; implicitWidth:30; leftPadding:4; rightPadding:4; Accessible.name:qsTranslate("Launcher", "Копировать шаг"); enabled:steps.count < 40 && !client.protocolsBusy; onClicked:page.cloneStep(stepCard.index) }
+                                SmallButton { text:"×"; implicitWidth:30; leftPadding:4; rightPadding:4; destructive:true; Accessible.name:qsTranslate("Launcher", "Удалить шаг"); enabled:!client.protocolsBusy; onClicked: { steps.remove(stepCard.index); page.dirty = true } }
                             }
-                            Area { objectName:"protocolStep" + stepCard.index; Layout.fillWidth:true; placeholderText:"Команда словами, например «открой браузер»"; text:stepCard.phrase; enabled:stepCard.active && !client.protocolsBusy; onTextChanged:if (activeFocus) { steps.setProperty(stepCard.index, "phrase", text); page.dirty = true } }
+                            Area { objectName:"protocolStep" + stepCard.index; Layout.fillWidth:true; placeholderText:qsTranslate("Launcher", "Команда словами, например «открой браузер»"); text:stepCard.phrase; enabled:stepCard.active && !client.protocolsBusy; onTextChanged:if (activeFocus) { steps.setProperty(stepCard.index, "phrase", text); page.dirty = true } }
                             RowLayout {
-                                Label { text:"Пауза после шага, с"; Layout.fillWidth:true }
+                                Label { text:qsTranslate("Launcher", "Пауза после шага, с"); Layout.fillWidth:true }
                                 Field { Layout.preferredWidth:85; implicitHeight:32; text:stepCard.pauseSeconds.toString(); enabled:!client.protocolsBusy; validator:DoubleValidator { bottom:0; top:60; decimals:2; locale:"C" } onTextEdited: { steps.setProperty(stepCard.index, "pauseSeconds", Number(text.replace(",", "."))); page.dirty = true } }
                             }
                         }
                     }
-                    SmallButton { objectName:"addProtocolStep"; text:"+ Добавить шаг"; enabled:steps.count < 40 && !client.protocolsBusy; onClicked:page.addStep("") }
+                    SmallButton { objectName:"addProtocolStep"; text:qsTranslate("Launcher", "+ Добавить шаг"); enabled:steps.count < 40 && !client.protocolsBusy; onClicked:page.addStep("") }
                     Card {
-                        Label { text:"Голос и расписание"; color:page.theme.ink; font.weight:Font.DemiBold }
-                        Area { Layout.fillWidth:true; placeholderText:"Дополнительные фразы запуска — по одной на строку"; text:page.phrasesDraft; enabled:!client.protocolsBusy; onTextChanged:if (activeFocus) { page.phrasesDraft = text; page.dirty = true } }
-                        Field { objectName:"protocolSchedule"; Layout.fillWidth:true; placeholderText:"По запросу; или «пн, ср, пт в 18:00»"; text:page.scheduleDraft; enabled:!client.protocolsBusy; onTextEdited: { page.scheduleDraft = text; page.dirty = true } }
+                        Label { text:qsTranslate("Launcher", "Голос и расписание"); color:page.theme.ink; font.weight:Font.DemiBold }
+                        Area { Layout.fillWidth:true; placeholderText:qsTranslate("Launcher", "Дополнительные фразы запуска — по одной на строку"); text:page.phrasesDraft; enabled:!client.protocolsBusy; onTextChanged:if (activeFocus) { page.phrasesDraft = text; page.dirty = true } }
+                        Field { objectName:"protocolSchedule"; Layout.fillWidth:true; placeholderText:qsTranslate("Launcher", "По запросу; или «пн, ср, пт в 18:00»"); text:page.scheduleDraft; enabled:!client.protocolsBusy; onTextEdited: { page.scheduleDraft = text; page.dirty = true } }
                         Flow { Layout.fillWidth:true; spacing:6
                             Repeater { model:["по будням в 09:00", "каждый день в 23:00", "по выходным в 11:00"]
                                 SmallButton { required property string modelData; text:modelData; enabled:!client.protocolsBusy; onClicked: { page.scheduleDraft = modelData; page.dirty = true } }
                             }
-                            SmallButton { text:"По запросу"; enabled:!client.protocolsBusy; onClicked: { page.scheduleDraft = ""; page.dirty = true } }
+                            SmallButton { text:qsTranslate("Launcher", "По запросу"); enabled:!client.protocolsBusy; onClicked: { page.scheduleDraft = ""; page.dirty = true } }
                         }
                     }
                 }
             }
             RowLayout {
-                Label { Layout.fillWidth:true; Layout.minimumWidth:0; wrapMode:Text.WordWrap; text:page.draftIssue || (page.dirty ? "Есть изменения" : page.editId.length ? "Сохранено" : "Новый протокол"); color:page.draftIssue.length ? page.theme.danger : page.theme.muted }
-                SmallButton { text:"Экспорт"; enabled:page.validDraft; onClicked:files.chooseExport(JSON.stringify(page.payload())) }
-                SmallButton { text:"Отмена"; enabled:!client.protocolsBusy; onClicked:page.cancelDraft() }
-                SmallButton { objectName:"saveProtocol"; text:client.protocolsBusy ? "Сохранение…" : "Сохранить"; primary:true; enabled:client.online && client.protocolsReady && !client.protocolsBusy && page.validDraft && page.dirty; onClicked:client.saveProtocol(page.editId, JSON.stringify(page.payload())) }
+                Label { Layout.fillWidth:true; Layout.minimumWidth:0; wrapMode:Text.WordWrap; text:page.draftIssue || (page.dirty ? qsTranslate("Launcher", "Есть изменения") : page.editId.length ? qsTranslate("Launcher", "Сохранено") : qsTranslate("Launcher", "Новый протокол")); color:page.draftIssue.length ? page.theme.danger : page.theme.muted }
+                SmallButton { text:qsTranslate("Launcher", "Экспорт"); enabled:page.validDraft; onClicked:files.chooseExport(JSON.stringify(page.payload())) }
+                SmallButton { text:qsTranslate("Launcher", "Отмена"); enabled:!client.protocolsBusy; onClicked:page.cancelDraft() }
+                SmallButton { objectName:"saveProtocol"; text:client.protocolsBusy ? qsTranslate("Launcher", "Сохранение…") : qsTranslate("Launcher", "Сохранить"); primary:true; enabled:client.online && client.protocolsReady && !client.protocolsBusy && page.validDraft && page.dirty; onClicked:client.saveProtocol(page.editId, JSON.stringify(page.payload())) }
             }
         }
         ColumnLayout {
             spacing:10
             Card {
-                Label { text:client.protocolJob.name || "Запуск протокола"; color:page.theme.ink; font.pixelSize:15; font.weight:Font.DemiBold; Layout.fillWidth:true; wrapMode:Text.WordWrap }
-                Label { Layout.fillWidth:true; wrapMode:Text.WordWrap; text:client.protocolJob.message || "Запустите сохранённый протокол из списка." }
-                Label { Layout.fillWidth:true; wrapMode:Text.WordWrap; visible:client.protocolRunning; text:(client.protocolJob.current || 0) + " / " + (client.protocolJob.total || 0) + " · " + (client.protocolJob.text || "Ожидание начала") }
+                Label { text:client.protocolJob.name || qsTranslate("Launcher", "Запуск протокола"); color:page.theme.ink; font.pixelSize:15; font.weight:Font.DemiBold; Layout.fillWidth:true; wrapMode:Text.WordWrap }
+                Label { Layout.fillWidth:true; wrapMode:Text.WordWrap; text:client.protocolJob.message || qsTranslate("Launcher", "Запустите сохранённый протокол из списка.") }
+                Label { Layout.fillWidth:true; wrapMode:Text.WordWrap; visible:client.protocolRunning; text:(client.protocolJob.current || 0) + " / " + (client.protocolJob.total || 0) + " · " + (client.protocolJob.text || qsTranslate("Launcher", "Ожидание начала")) }
                 Rectangle {
                     Layout.fillWidth:true; height:4; radius:2; color:page.theme.elevated; visible:client.protocolJob.total > 0
                     Rectangle { width:parent.width * (client.protocolJob.current || 0) / Math.max(1, client.protocolJob.total || 1); height:parent.height; radius:2; color:page.theme.accent; Behavior on width { enabled:page.theme.motion; NumberAnimation { duration:180 } } }
                 }
-                SmallButton { objectName:"cancelProtocol"; text:client.protocolJob.state === "cancelling" ? "Останавливаю…" : "Остановить"; destructive:true; visible:client.protocolRunning; enabled:client.online && !client.protocolJobBusy && client.protocolJob.state !== "cancelling"; onClicked:client.cancelProtocol() }
-                Label { visible:client.protocolRunning; text:"Остановка прервёт дальнейшие шаги. Завершённые действия сохранятся."; Layout.fillWidth:true; wrapMode:Text.WordWrap }
+                SmallButton { objectName:"cancelProtocol"; text:client.protocolJob.state === "cancelling" ? qsTranslate("Launcher", "Останавливаю…") : qsTranslate("Launcher", "Остановить"); destructive:true; visible:client.protocolRunning; enabled:client.online && !client.protocolJobBusy && client.protocolJob.state !== "cancelling"; onClicked:client.cancelProtocol() }
+                Label { visible:client.protocolRunning; text:qsTranslate("Launcher", "Остановка прервёт дальнейшие шаги. Завершённые действия сохранятся."); Layout.fillWidth:true; wrapMode:Text.WordWrap }
             }
             ListView {
                 objectName:"protocolResults"; Layout.fillWidth:true; Layout.fillHeight:true; clip:true; spacing:8
@@ -278,7 +279,7 @@ ColumnLayout {
                     theme:page.theme; width:ListView.view.width - 12; implicitHeight:resultBody.implicitHeight + 24
                     ColumnLayout {
                         id:resultBody; anchors.left:parent.left; anchors.right:parent.right; anchors.top:parent.top; anchors.margins:12; spacing:6
-                        Label { Layout.fillWidth:true; wrapMode:Text.WordWrap; text:(modelData.ok ? "✓ " : "× ") + (index + 1) + ". " + modelData.text + (modelData.iteration > 1 ? " · повтор " + modelData.iteration : ""); color:modelData.ok ? page.theme.accent : page.theme.danger }
+                        Label { Layout.fillWidth:true; wrapMode:Text.WordWrap; text:(modelData.ok ? "✓ " : "× ") + (index + 1) + ". " + modelData.text + (modelData.iteration > 1 ? qsTranslate("Launcher", " · повтор ") + modelData.iteration : ""); color:modelData.ok ? page.theme.accent : page.theme.danger }
                         TextEdit { Layout.fillWidth:true; text:modelData.response; visible:text.length > 0; textFormat:TextEdit.PlainText; color:page.theme.ink; font.family:page.theme.fontFamily; font.pixelSize:12; readOnly:true; selectByMouse:true; wrapMode:TextEdit.Wrap }
                     }
                 }
@@ -287,34 +288,34 @@ ColumnLayout {
     }
     Modal {
         id:discardDialog; objectName:"discardProtocolDraft"; parent:Overlay.overlay; anchors.centerIn:parent
-        width:Math.min(440, parent.width - 32); modal:true; padding:18; title:"Оставить изменения?"
+        width:Math.min(440, parent.width - 32); modal:true; padding:18; title:qsTranslate("Launcher", "Оставить изменения?")
         background:Rectangle { color:page.theme.popup; radius:page.theme.cardRadius; border.color:page.theme.line }
-        contentItem:Label { text:"Несохранённый черновик будет заменён."; wrapMode:Text.WordWrap }
+        contentItem:Label { text:qsTranslate("Launcher", "Несохранённый черновик будет заменён."); wrapMode:Text.WordWrap }
         palette.windowText:page.theme.ink
-        footer:RowLayout { spacing:8; SmallButton { text:"Продолжить правку"; Layout.fillWidth:true; onClicked:discardDialog.close() } SmallButton { text:"Заменить"; destructive:true; onClicked: { discardDialog.close(); const action = page.pendingAction; page.pendingAction = null; if (action) action() } } }
+        footer:RowLayout { spacing:8; SmallButton { text:qsTranslate("Launcher", "Продолжить правку"); Layout.fillWidth:true; onClicked:discardDialog.close() } SmallButton { text:qsTranslate("Launcher", "Заменить"); destructive:true; onClicked: { discardDialog.close(); const action = page.pendingAction; page.pendingAction = null; if (action) action() } } }
     }
     Modal {
         id:deleteDialog; objectName:"confirmDeleteProtocol"; parent:Overlay.overlay; anchors.centerIn:parent
-        width:Math.min(440, parent.width - 32); modal:true; padding:18; title:"Удалить протокол?"
+        width:Math.min(440, parent.width - 32); modal:true; padding:18; title:qsTranslate("Launcher", "Удалить протокол?")
         background:Rectangle { color:page.theme.popup; radius:page.theme.cardRadius; border.color:page.theme.line }
         contentItem:Label { text:page.pendingDelete.name || ""; wrapMode:Text.WordWrap }
         palette.windowText:page.theme.ink
-        footer:RowLayout { SmallButton { text:"Отмена"; Layout.fillWidth:true; onClicked:deleteDialog.close() } SmallButton { objectName:"deleteProtocolConfirmed"; text:"Удалить"; destructive:true; enabled:client.online && client.protocolsReady && !client.protocolsBusy; onClicked: { client.deleteProtocol(page.pendingDelete.id); deleteDialog.close() } } }
+        footer:RowLayout { SmallButton { text:qsTranslate("Launcher", "Отмена"); Layout.fillWidth:true; onClicked:deleteDialog.close() } SmallButton { objectName:"deleteProtocolConfirmed"; text:qsTranslate("Launcher", "Удалить"); destructive:true; enabled:client.online && client.protocolsReady && !client.protocolsBusy; onClicked: { client.deleteProtocol(page.pendingDelete.id); deleteDialog.close() } } }
     }
     Modal {
         id:actionsDialog; objectName:"protocolActionsDialog"; parent:Overlay.overlay; anchors.centerIn:parent
-        width:Math.min(680, parent.width - 32); height:Math.min(520, parent.height - 32); modal:true; padding:16; title:"Добавить команду"
+        width:Math.min(680, parent.width - 32); height:Math.min(520, parent.height - 32); modal:true; padding:16; title:qsTranslate("Launcher", "Добавить команду")
         palette.windowText:page.theme.ink
         background:Rectangle { color:page.theme.popup; radius:page.theme.cardRadius; border.color:page.theme.line }
         contentItem:ActionsPage { client:page.client; theme:page.theme; onPhraseRequested:function(phrase) { page.addStep(phrase); actionsDialog.close() } }
-        footer:SmallButton { text:"Закрыть"; onClicked:actionsDialog.close() }
+        footer:SmallButton { text:qsTranslate("Launcher", "Закрыть"); onClicked:actionsDialog.close() }
     }
     Modal {
         id:bulkDialog; objectName:"protocolBulkDialog"; parent:Overlay.overlay; anchors.centerIn:parent
-        width:Math.min(580, parent.width - 32); height:Math.min(360, parent.height - 32); modal:true; padding:16; title:"Команды — по одной на строку"
+        width:Math.min(580, parent.width - 32); height:Math.min(360, parent.height - 32); modal:true; padding:16; title:qsTranslate("Launcher", "Команды — по одной на строку")
         background:Rectangle { color:page.theme.popup; radius:page.theme.cardRadius; border.color:page.theme.line }
         contentItem:ScrollView { clip:true; contentWidth:availableWidth; Area { id:bulkText; objectName:"protocolBulkText"; width:parent.width; placeholderText:"открой браузер\nоткрой документы" } }
         palette.windowText:page.theme.ink
-        footer:RowLayout { SmallButton { text:"Отмена"; Layout.fillWidth:true; onClicked:bulkDialog.close() } SmallButton { objectName:"protocolBulkAdd"; text:"Добавить"; primary:true; enabled:page.splitLines(bulkText.text).length > 0 && page.splitLines(bulkText.text).length + steps.count <= 40; onClicked: { for (const phrase of page.splitLines(bulkText.text)) page.addStep(phrase); bulkText.text = ""; bulkDialog.close() } } }
+        footer:RowLayout { SmallButton { text:qsTranslate("Launcher", "Отмена"); Layout.fillWidth:true; onClicked:bulkDialog.close() } SmallButton { objectName:"protocolBulkAdd"; text:qsTranslate("Launcher", "Добавить"); primary:true; enabled:page.splitLines(bulkText.text).length > 0 && page.splitLines(bulkText.text).length + steps.count <= 40; onClicked: { for (const phrase of page.splitLines(bulkText.text)) page.addStep(phrase); bulkText.text = ""; bulkDialog.close() } } }
     }
 }

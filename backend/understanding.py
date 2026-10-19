@@ -31,6 +31,8 @@ from typing import Any, Optional
 
 import vocabulary
 import voice_commands
+import utility_commands
+import desktop_commands
 from command_parser import ParsedCommand
 
 # ==================== Что может быть решено ====================
@@ -114,6 +116,20 @@ EXPLICIT_ACTION_PREFIXES = tuple(verb + ' ' for verb in vocabulary.LAUNCH_VERBS)
     'вкл ', 'open file ', 'открой файл ',
 )
 
+# The chat contains discussion as well as requests. A verb in a quoted example
+# must not be enough to act; use the beginning of the actual request.
+CHAT_COMMAND_STARTS = frozenset(vocabulary.LAUNCH_VERBS + vocabulary.CLOSE_VERBS
+    + vocabulary.SEARCH_ENTRY_VERBS + vocabulary.SEARCH_WORDS + vocabulary.WEAK_SEARCH_HINTS + (
+    'создай', 'создать', 'создайте', 'сделай', 'сделать', 'покажи', 'показать',
+    'перемести', 'переместить', 'удали', 'удалить', 'скопируй', 'копировать',
+    'переименуй', 'переименовать', 'перезагрузи', 'перезагрузить', 'отключи',
+    'переключи', 'установи', 'измени', 'увеличь', 'уменьши', 'прибавь', 'прибав',
+    'убавь', 'настрой', 'останови', 'поставь', 'сохрани', 'очисти', 'начни',
+    'подготовь', 'освободи', 'напомни', 'зайди', 'перейди', 'разверни',
+    'расположи', 'выполни', 'выполнить', 'shutdown', 'reboot', 'restart',
+    'delete', 'move', 'copy', 'rename', 'set', 'increase', 'decrease',
+))
+
 # Названия, при упоминании которых речь почти наверняка о программе.
 KNOWN_APP_NAMES = vocabulary.KNOWN_APP_NAMES
 
@@ -128,6 +144,7 @@ EXPLICIT_SEARCH_WORDS = vocabulary.SEARCH_WORDS
 # «сколько памяти занято» тоже начинаются с вопросительного слова, и это
 # настоящие команды, на которые Scott отвечает сам.
 PROGRAM_ACTION_TYPES = {
+    'desktop_control',
     'open_app', 'close_app', 'create_file', 'create_folder',
     'open_folder', 'open_website', 'open_url',
     'manage_window', 'file_operation',
@@ -138,6 +155,7 @@ PROGRAM_ACTION_TYPES = {
 
 # Типы, которые Scott выполняет сам.
 ACTION_COMMAND_TYPES = {
+    'desktop_control',
     'open_app', 'close_app', 'create_file', 'create_folder', 'open_website',
     'get_currency', 'get_weather', 'get_news', 'system_info', 'manage_window',
     'file_operation', 'system_command', 'open_url',
@@ -223,6 +241,41 @@ QUESTION_KEYWORDS = vocabulary.QUESTION_WORDS
 # ==================== Само решение ====================
 
 
+def chat_action(text: str, **engines) -> Optional[Decision]:
+    """Route chat requests through the same parser; code discussion stays in chat."""
+    request = strip_command_wrapper(text)
+    for wrapper in ('я хочу, чтобы ты ', 'я хочу ', 'мне нужно ', 'давай ', 'будь добр, ', 'будь добр '):
+        if request.lower().startswith(wrapper):
+            request = strip_command_wrapper(request[len(wrapper):])
+            break
+    if re.match(r'(?i)^(?:я\b|мы\b|он\b|она\b|не\b|если\b|например\b|(?:это\s+)?пример\b|(?:это\s+)?цитата\b|["«“])', request):
+        return None
+    # Source code and examples are content, not instructions to the computer.
+    content_request = re.match(r'(?i)^(?:напиши\w*|написать|покажи\w*|показать|сгенерируй\w*|создай\w*|создать|сделай\w*|сделать|подготовь\w*|реализуй\w*|добавь\w*|исправь\w*|перепиши\w*|объясни\w*|разбери\w*|write|generate|explain|show)\b', request)
+    code_or_example = re.search(r'(?i)\b(?:код\w*|программ\w*|скрипт\w*|функци\w*|класс\w*|пример\w*|code|script|function|program|example)\b', request)
+    desktop_request = desktop_commands.parse(request)
+    if '`' in request or '\n' in request or (content_request and code_or_example and desktop_request is None):
+        return None
+    decision = understand(request, **engines)
+    first = request.lower().split(maxsplit=1)[0] if request else ''
+    request_like = first in CHAT_COMMAND_STARTS
+    if re.match(r'(?i)^(?:объясни\w*|расскажи\w*|обсудим|подскажи\w*|почему|что\s+будет)\b', request) and not (
+            decision.kind == 'action' and decision.action in SELF_ANSWERABLE):
+        return None
+    if decision.kind == 'question' or (decision.kind == 'action' and decision.action in ('unknown', 'write_code')):
+        return None
+    if decision.kind == 'action' and not (request_like
+            or decision.action in SELF_ANSWERABLE or decision.action in ('voice_settings', 'desktop_control')
+            or any(request.lower().startswith(prefix) for prefix in EXPLICIT_ACTION_PREFIXES)
+            or request.lower() in KNOWN_APP_NAMES):
+        return None
+    # Mentioning a service in conversation must not open its website.
+    if decision.kind == 'web' and not (request_like
+            or request.lower() in ('youtube', 'ютуб', 'github', 'гитхаб')):
+        return None
+    return decision
+
+
 def understand(text: str, *, intent_engine, parser, answerer,
                find_protocol=None) -> Decision:
     """
@@ -252,12 +305,21 @@ def understand(text: str, *, intent_engine, parser, answerer,
                 intent=intent,
             )
 
-    voice_command = voice_commands.parse(strip_command_wrapper(text))
+    command_text = strip_command_wrapper(text)
+    reminder_request = re.match(r'(?i)^не\s+забудь\s+напомнить\b', command_text)
+    if re.match(r'(?i)^(?:не\b|["«“])', command_text) and not reminder_request:
+        return Decision(kind='question', intent=intent, reason='отрицание или цитата не запускает действие')
+
+    voice_command = voice_commands.parse(command_text)
     if voice_command is not None:
         parsed = ParsedCommand('voice_settings', voice_command.action,
                                {'voice_value': voice_command.value}, 1.0)
         return Decision(kind='action', action='voice_settings', param=voice_command.action,
                         parsed=parsed, intent=intent, reason='настройка озвучки Scott')
+
+    local_request = utility_commands.parse(strip_command_wrapper(text))
+    if local_request is not None:
+        return Decision(kind='utility', parsed=local_request, intent=intent, reason='локальный инструмент Scott')
 
     # 0.5 Просьба запомнить.
     #
@@ -308,6 +370,12 @@ def understand(text: str, *, intent_engine, parser, answerer,
             reason=f"просьба открыть проект «{проект}»",
             intent=intent,
         )
+
+    desktop = desktop_commands.parse(strip_command_wrapper(text))
+    if desktop is not None:
+        parsed = ParsedCommand('desktop_control', desktop['operation'], {'desktop':desktop}, 1.)
+        return Decision(kind='action', action='desktop_control', param=desktop['operation'],
+                        parsed=parsed, intent=intent, reason='явное действие с окном или элементом интерфейса')
 
     # 1. Названный сервис — самый надёжный признак из всех. Упоминание YouTube
     #    или GitHub однозначно говорит о намерении, и рисковать тем, что общая

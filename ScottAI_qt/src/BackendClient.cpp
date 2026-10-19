@@ -1,5 +1,8 @@
 #include "BackendClient.h"
+#include "ApiError.h"
 #include "ProtocolValidation.h"
+#include "ProcessSupport.h"
+#include "AppLog.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -13,8 +16,11 @@
 #include <memory>
 
 BackendClient::BackendClient(QUrl base, QObject *parent) : QObject(parent), m_base(base) {
+    backgroundProcess(m_process);
     m_network.setProxy(QNetworkProxy::NoProxy);
     m_poll.setInterval(5000);
+    m_browserPoll.setInterval(800);
+    connect(&m_browserPoll, &QTimer::timeout, this, &BackendClient::refreshBrowser);
     connect(&m_poll, &QTimer::timeout, this, &BackendClient::refresh);
     m_protocolPoll.setInterval(800);
     m_voiceInstallPoll.setInterval(900);
@@ -23,16 +29,20 @@ BackendClient::BackendClient(QUrl base, QObject *parent) : QObject(parent), m_ba
     connect(&m_voiceInstallPoll, &QTimer::timeout, this, &BackendClient::refreshVoiceInstall);
     connect(&m_protocolPoll, &QTimer::timeout, this, &BackendClient::pollProtocolJob);
     // Drain both channels immediately; never let Python block on a full pipe.
-    connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] { m_process.readAllStandardOutput(); });
-    connect(&m_process, &QProcess::readyReadStandardError, this, [this] { m_process.readAllStandardError(); });
+    connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] { AppLog::appendChunk("backend-process.log", m_outputLog, m_process.readAllStandardOutput()); });
+    connect(&m_process, &QProcess::readyReadStandardError, this, [this] { AppLog::appendChunk("backend-process.log", m_errorLog, m_process.readAllStandardError()); });
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
         m_starting = false;
         m_error = QStringLiteral("Не удалось запустить Python: ") + m_process.errorString();
+        AppLog::append("backend-process.log", m_error);
         emit stateChanged();
     });
     connect(&m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus) {
+        AppLog::appendChunk("backend-process.log", m_outputLog, "\n");
+        AppLog::appendChunk("backend-process.log", m_errorLog, "\n");
         m_starting = false;
         m_online = false;
+        m_browserReady = false; ++m_browserRevision; m_browserPoll.stop(); emit browserChanged();
         m_abilitiesReady = false;
         m_modelsReady = false; ++m_modelsGeneration; emit modelsStateChanged();
         m_protocolsReady = false; m_protocolJobReady = false;
@@ -40,11 +50,19 @@ BackendClient::BackendClient(QUrl base, QObject *parent) : QObject(parent), m_ba
         emit abilitiesStateChanged();
         m_metrics.clear();
         if (code != 0) m_error = QStringLiteral("Backend завершился. Код: %1").arg(code);
+        AppLog::append("backend-process.log", QString("Backend exit: %1").arg(code));
         emit metricsChanged();
         emit stateChanged();
     });
 }
-BackendClient::~BackendClient() { stopBackend(); }
+BackendClient::~BackendClient() {
+    // Replies may finish while QNetworkAccessManager destroys its children,
+    // after the chat/state members have already been destroyed.
+    for(auto *reply:m_network.findChildren<QNetworkReply *>()) {
+        reply->disconnect(this);reply->abort();
+    }
+    stopBackend();
+}
 QString BackendClient::status() const {
     if (m_online) return QStringLiteral("На связи");
     if (m_starting) return QStringLiteral("Загрузка моделей…");
@@ -75,11 +93,11 @@ void BackendClient::request(const QString &path, const QJsonObject *body, int ti
     connect(reply, &QNetworkReply::finished, this, [reply, callback] {
         QString error;
         QJsonObject object;
-        const auto bytes = reply->readAll();
+        const auto bytes = reply->isOpen() ? reply->readAll() : QByteArray();
         if (reply->error() != QNetworkReply::NoError) {
             const auto details = QJsonDocument::fromJson(bytes).object();
-            error = details.value("message").toString(details.value("error").toString(details.value("detail").toString()));
-            if (error.isEmpty()) error = QStringLiteral("Нет ответа от backend: ") + reply->errorString();
+            error = apiErrorMessage(details);
+            if (error.isEmpty()) error = backendNetworkError(reply->error());
         } else {
             QJsonParseError parse;
             const auto json = QJsonDocument::fromJson(bytes, &parse);
@@ -99,6 +117,7 @@ void BackendClient::refresh() {
         if (m_online) m_starting = false;
         emit stateChanged();
         if (!m_online) {
+            m_browserReady = false; ++m_browserRevision; m_browserPoll.stop(); emit browserChanged();
             m_voiceInstallReady = false; ++m_voiceInstallRevision;
             emit voiceInstallChanged();
             m_modelsReady = false; ++m_modelsGeneration; emit modelsStateChanged();
@@ -121,6 +140,7 @@ void BackendClient::refresh() {
             emit metricsChanged();
         });
         refreshListening();
+        refreshBrowser();
         if (!m_voiceInstall.isEmpty() && (!m_voiceInstallReady || m_voiceInstall.value("state").toString() == "running" || m_voiceInstall.value("state").toString() == "cancelling")) refreshVoiceInstall();
         if (protocolRunning()) pollProtocolJob();
     });
@@ -608,6 +628,7 @@ void BackendClient::startBackend() {
         auto env = QProcessEnvironment::systemEnvironment();
         env.insert("SCOTT_PARENT_PID", QString::number(QCoreApplication::applicationPid()));
         env.insert("PYTHONIOENCODING", "utf-8");
+        env.insert("SCOTT_LOG_DIR", AppLog::directory.isEmpty() ? AppLog::defaultDirectory() : AppLog::directory);
         m_process.setProcessEnvironment(env);
         m_process.setWorkingDirectory(m_directory);
         m_process.start(m_python, {"-u", "main.py"});

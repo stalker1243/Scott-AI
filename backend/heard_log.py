@@ -31,7 +31,11 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-LOG_PATH = Path(__file__).resolve().parent / "logs" / "heard.jsonl"
+try:
+    from .storage_paths import heard_log_path
+except ImportError:
+    from storage_paths import heard_log_path
+LOG_PATH = heard_log_path()
 
 # Сколько последних фраз хранить.
 #

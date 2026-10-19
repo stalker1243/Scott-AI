@@ -1,0 +1,7 @@
+ScottAI compatibility changes, 2026-10-19, Apache-2.0.
+Upstream: https://github.com/QwenLM/Qwen3-TTS
+Modified: three Python files for Transformers 5 API, generation masks,
+Mimi causal context and nonpersistent RoPE initialization.
+Transformers 4.57.3 default RoPE formula: Hugging Face, Apache-2.0.
+Source patch, provenance and reproducible builder ship with ScottAI.
+Gradio is optional (web extra); the headless worker does not use it.

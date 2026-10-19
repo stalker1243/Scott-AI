@@ -71,6 +71,23 @@ def test_stream_callbacks_are_ordered_files_are_live_and_cache_is_complete(strea
         assert hit.cached and seen==[(.3,True,True)] and not client.status()['running']
 
 
+def test_stream_prepares_cold_worker_before_starting_generation_deadline(streaming):
+    source=STREAM_WORKER.replace("features=['stream_v1']","features=['stream_v1','prepare_v1']")
+    source=source.replace("    r=json.loads(line); req=r['id']; text=r['text']; n=0", """
+    r=json.loads(line); req=r['id']
+    if r['action']=='prepare':
+        time.sleep(.75)
+        emit(dict(event='prepared',id=req,recipe=recipe_id(c)))
+        continue
+    text=r['text']; n=0""")
+    streaming.worker.write_text(source,encoding='utf-8')
+    seen=[]
+    with ScottVoiceProcess(streaming,timeout=.5,prepare_timeout=3) as client:
+        result=client.stream('поток','natural',lambda audio,last:seen.append(last))
+        assert result.seconds==.3 and seen==[False,False,True]
+        assert not list(streaming.cache_dir.glob('.stream-*'))
+
+
 @pytest.mark.parametrize('text,code',[('порядок','invalid_protocol'),('хеш','invalid_audio'),
                                     ('конец','invalid_protocol'),('длина','invalid_audio')])
 def test_bad_stream_is_stopped_before_partial_files_are_removed(streaming,text,code):
@@ -162,6 +179,35 @@ def test_digital_colour_matches_full_processor_across_arbitrary_boundaries(mix):
     np.testing.assert_allclose(result,colour_voice(signal,rate,profile),atol=1e-7,rtol=1e-6)
 
 
+@pytest.mark.parametrize('rate',[16000,24000,48000])
+def test_selected_scott_colour_keeps_filter_and_carrier_state(rate):
+    profiles=json.loads((Path(__file__).resolve().parents[2]/'experiments/voice_design/robotic_profiles.json').read_text(encoding='utf-8'))
+    profile=next(row for row in profiles if row['id']=='scott')
+    assert profile['processor']=='soft-v2'
+    timebase=np.arange(rate//2)/rate
+    signal=(.08*np.sin(2*np.pi*147*timebase)+.03*np.sin(2*np.pi*3700*timebase)).astype(np.float32)
+    # Include silence and single-sample blocks: a reset at either boundary
+    # creates an audible edge or changes the modulation phase.
+    signal[rate//8:rate//4]=0
+    pieces=np.split(signal,[1,37,rate//8,rate//4,rate//4+1])
+    stream=ColourStream(rate,profile)
+    result=np.concatenate([stream.process(piece) for piece in pieces])
+    full=colour_voice(signal,rate,profile)
+    assert result.shape==signal.shape and np.isfinite(result).all()
+    np.testing.assert_allclose(result,full,atol=1e-7,rtol=1e-6)
+    # Upper speech frequencies are deliberately kept dry; a delayed/resonant
+    # legacy path would change the selected character at these settings.
+    assert profile['delay_ms']==profile['resonance']==profile['presence']==0
+
+
+def test_unknown_colour_processor_fails_instead_of_using_wrong_voice():
+    profile=dict(processor='not-a-processor',carrier_hz=64,body_mix=.12)
+    with pytest.raises(ValueError,match='Unknown voice colour processor'):
+        ColourStream(24000,profile)
+    with pytest.raises(ValueError,match='Unknown voice colour processor'):
+        colour_voice(np.ones(2400,dtype=np.float32)*.02,24000,profile)
+
+
 def test_stream_gain_is_fixed_after_first_speech_and_preserves_silence():
     volume=StreamVolume()
     assert not volume.process(np.zeros(200)).any() and volume.gain is None
@@ -239,7 +285,7 @@ def test_voice_route_validates_streaming_and_keeps_preferences_on_failure(main_m
     import asyncio,httpx,voice_config
     monkeypatch.setattr(integrated.engine,'describe',lambda:dict(available=True,streaming_available=True))
     async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app),base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app),base_url='http://localhost') as client:
             assert (await client.post('/voice/select',json={'voice':'scott-voice','streaming':True})).status_code==200
             assert voice_config.get_scott_streaming()
             for voice,value in [('scott-voice',1),('scott-voice',None),('scott-voice','true'),('eugene',True)]:

@@ -1,5 +1,7 @@
 #include "TrayController.h"
+#include "DesktopSupport.h"
 #include <QApplication>
+#include <QCoreApplication>
 #include <QAction>
 #include <QMetaProperty>
 #include <QSignalBlocker>
@@ -11,7 +13,8 @@ static bool invokeIfPresent(QObject *object, const char *method) {
 }
 
 QAction *TrayController::action(const char *name, const QString &text, bool checkable) {
-    auto *item = m_menu.addAction(text);
+    auto *item = m_menu.addAction(QCoreApplication::translate("Launcher",text.toUtf8().constData()));
+    item->setProperty("sourceText",text);
     item->setObjectName(name); item->setCheckable(checkable);
     return item;
 }
@@ -49,7 +52,9 @@ TrayController::TrayController(QSystemTrayIcon *tray, BackendClient *client, QQu
     connect(m_notifications, &QAction::triggered, this, [this](bool enabled) {
         m_window->setProperty("trayNotifications", enabled); persist(); sync();
     });
-    connect(action("trayCenter", "Окно в центр экрана"), &QAction::triggered, this, [this] {
+    auto *center = action("trayCenter", "Окно в центр экрана");
+    center->setEnabled(DesktopSupport::supportsWindowPositioning(QGuiApplication::platformName()));
+    connect(center, &QAction::triggered, this, [this] {
         showWindow(); invokeIfPresent(m_window, "centerOnScreen");
     });
     m_menu.addSeparator();
@@ -109,6 +114,11 @@ TrayController::TrayController(QSystemTrayIcon *tray, BackendClient *client, QQu
 TrayController::~TrayController() { m_tray->setContextMenu(nullptr); }
 void TrayController::persist() { invokeIfPresent(m_window, "persistWorkspace"); }
 void TrayController::restoreWindow() { showWindow(); }
+void TrayController::availabilityChanged(bool available) {
+    if (!available && !m_window->property("pendingQuit").toBool() && !m_window->property("setupActive").toBool()
+            && (!m_window->isVisible() || m_window->property("pendingHide").toBool()))
+        showWindow();
+}
 void TrayController::showWindow(int tab) {
     if (m_window->property("pendingQuit").toBool()) return;
     if (m_window->property("setupActive").toBool()) { invokeIfPresent(m_window, "raiseSetup"); return; }
@@ -128,14 +138,18 @@ void TrayController::showWindow(int tab) {
 }
 void TrayController::notify(const QString &title, const QString &text) {
     if (!m_window->property("trayNotifications").toBool()) return;
-    emit notificationRequested(title, text);
+    const auto translatedTitle=QCoreApplication::translate("Launcher",title.toUtf8().constData());
+    const auto translatedText=QCoreApplication::translate("Launcher",text.toUtf8().constData());
+    emit notificationRequested(translatedTitle, translatedText);
     if (!m_testMode && m_tray->isVisible() && QSystemTrayIcon::supportsMessages())
-        m_tray->showMessage(title, text, QSystemTrayIcon::Information, 4000);
+        m_tray->showMessage(translatedTitle, translatedText, QSystemTrayIcon::Information, 4000);
 }
 void TrayController::sync() {
-    m_status->setText(QStringLiteral("ScottAI · ") + m_client->status());
+    for(auto *item:m_menu.actions())if(item->property("sourceText").isValid())
+        item->setText(QCoreApplication::translate("Launcher",item->property("sourceText").toString().toUtf8().constData()));
+    m_status->setText(QStringLiteral("ScottAI · ") + QCoreApplication::translate("Launcher",m_client->status().toUtf8().constData()));
     m_toggle->setText(m_window->isVisible() && m_window->windowState() != Qt::WindowMinimized
-                     ? QStringLiteral("Скрыть окно") : QStringLiteral("Открыть окно"));
+                     ? QCoreApplication::translate("Launcher","Скрыть окно") : QCoreApplication::translate("Launcher","Открыть окно"));
     const auto audio = m_client->settings().value("audio").toMap();
     m_quiet->setEnabled(m_client->online() && !m_client->settingsBusy() && m_client->settingsReady().contains("audio") && audio.value("available").toBool());
     m_pause->setEnabled(m_client->online() && m_client->listeningReady() && m_client->listeningAvailable() && !m_client->listeningBusy());
@@ -146,12 +160,12 @@ void TrayController::sync() {
     m_notifications->setChecked(m_window->property("trayNotifications").toBool());
     m_start->setEnabled(!m_window->property("setupActive").toBool() && !m_client->online() && !m_client->starting() && !m_client->ownsBackend());
     m_stop->setEnabled(m_client->ownsBackend() && !m_client->busy() && !m_client->settingsBusy() && !m_client->listeningBusy());
-    QString tooltip = QStringLiteral("ScottAI · ") + m_client->status();
+    QString tooltip = QStringLiteral("ScottAI · ") + QCoreApplication::translate("Launcher",m_client->status().toUtf8().constData());
     if (m_client->online()) {
         const auto metrics = m_client->metrics();
         if (metrics.contains("cpu") && metrics.contains("ram"))
             tooltip += QStringLiteral("\nCPU %1% · RAM %2%").arg(qRound(metrics.value("cpu").toDouble())).arg(qRound(metrics.value("ram").toDouble()));
-        if (m_client->listeningReady()) tooltip += m_client->listening() ? QStringLiteral("\nМикрофон включён") : QStringLiteral("\nГолосовой ассистент на паузе");
+        if (m_client->listeningReady()) tooltip += m_client->listening() ? QCoreApplication::translate("Launcher","\nМикрофон включён") : QCoreApplication::translate("Launcher","\nГолосовой ассистент на паузе");
     }
     m_tray->setToolTip(tooltip);
 }

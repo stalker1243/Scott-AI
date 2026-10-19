@@ -35,10 +35,10 @@ from typing import Callable, List, Optional
 # драйверами; более новые сборки требуют свежих драйверов, а разница в скорости
 # для наших моделей неразличима.
 CUDA_INDEX = "https://download.pytorch.org/whl/cu126"
-TORCH_CUDA = "torch==2.9.1+cu126"
+TORCH_CUDA = "torch==2.14.1+cu126"
 TORCH_CPU = "torch"
 CPU_INDEX = 'https://download.pytorch.org/whl/cpu'
-TORCH_CPU_PIN = 'torch==2.9.1+cpu'
+TORCH_CPU_PIN = 'torch==2.14.1+cpu'
 ROCM_INDEX = 'https://stable.repo.amd.com/rocm/whl-next/'
 TORCH_ROCM_VERSION = '2.13.0+rocm10.0.0'
 ROCM_ARCHITECTURES = ('all', 'gfx908', 'gfx90a', 'gfx942', 'gfx950', 'gfx1030',
@@ -57,6 +57,8 @@ Progress = Callable[[str, float], None]
 
 def _stream_process(command, on_line, timeout, **kwargs) -> int:
     """Enforce a wall-clock deadline even when a child stops producing output."""
+    kwargs.setdefault('creationflags', getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    kwargs.setdefault('stdin', subprocess.DEVNULL)
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, encoding='utf-8', errors='replace', bufsize=1, **kwargs)
     lines = queue.Queue()
@@ -217,13 +219,22 @@ def _run_pip(
     больше.
     """
     command = [executable, "-m", "pip", "install", "--no-warn-script-location", "--no-cache-dir",
+               "--disable-pip-version-check", "--no-input", "--prefer-binary",
                "--timeout", "30", "--retries", "3", *args]
+    try:
+        help_result = subprocess.run([executable, '-m', 'pip', 'install', '--help'],
+            capture_output=True, text=True, timeout=15, env=provisioning_environment(), creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if '--resume-retries' in (help_result.stdout or ''):
+            command[5:5] = ['--resume-retries', '5']
+    except (OSError, subprocess.SubprocessError):
+        pass
 
     with tempfile.TemporaryDirectory(prefix="scott_pip_") as tmp:
         folder = Path(tmp)
         # Своя временная папка нужна не для чистоты, а чтобы было за чем
         # наблюдать: в общем %TEMP% лежит чужое, и размер там ничего не значит.
-        env = dict(os.environ, PYTHONUNBUFFERED="1", TMP=tmp, TEMP=tmp, TMPDIR=tmp)
+        env = provisioning_environment()
+        env.update(PYTHONUNBUFFERED="1", TMP=tmp, TEMP=tmp, TMPDIR=tmp)
 
         tail: List[str] = []
         _report(progress, message, start)
@@ -236,6 +247,12 @@ def _run_pip(
 
                     tail.append(line)
                     del tail[:-40]
+                    try:
+                        from support_logs import append_log
+                        append_log('setup.log', line)
+                    except ImportError:
+                        from .support_logs import append_log
+                        append_log('setup.log', line)
 
                     size = _parse_download_size(line)
                     if size:
@@ -243,9 +260,43 @@ def _run_pip(
 
                 code = _stream_process(command, consume, timeout, env=env)
             except subprocess.TimeoutExpired:
-                return False, "установка затянулась — вероятно, оборвалась сеть"
+                return False, "превышен срок установки пакетов; последняя операция сохранена в setup.log. Повторите подготовку"
 
         return code == 0, "\n".join(tail[-12:])
+
+
+def provisioning_environment():
+    """Package installers do not need provider credentials from the application."""
+    return {name:value for name,value in os.environ.items()
+            if not name.upper().endswith(('_API_KEY','_TOKEN'))
+            and name.upper() not in ('AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY')}
+
+
+def _install_torch(executable, arguments, progress, managed):
+    """Use durable downloads only for the pinned, application-owned runtime."""
+    try:
+        from . import torch_download
+    except ImportError:
+        import torch_download
+    kind='cuda' if CUDA_INDEX in arguments else 'cpu' if CPU_INDEX in arguments else ''
+    wheel=torch_download.selected(kind) if managed else None
+    if wheel is None:
+        return _run_pip(executable,arguments,progress,
+            'Скачиваю и устанавливаю PyTorch…',start=.10,span=.45)
+    directory=Path(executable).absolute().parent/'.scott-downloads'
+    last=[0.]
+    def transfer(done,total):
+        now=time.monotonic()
+        if done==total or now-last[0]>=.5:
+            last[0]=now
+            _report(progress,f'Скачиваю PyTorch: {done/1024**2:.1f} / {total/1024**2:.1f} МиБ. При обрыве можно продолжить.',
+                    .10+.38*done/total)
+    path=torch_download.fetch(wheel,directory,progress=transfer)
+    local=[str(path) if item in (TORCH_CPU_PIN,TORCH_CUDA) else item for item in arguments]
+    ok,tail=_run_pip(executable,local,progress,'Проверка пройдена. Устанавливаю PyTorch…',start=.48,span=.07)
+    if ok:
+        torch_download.discard(wheel,directory)
+    return ok,tail
 
 
 def models_ready() -> bool:
@@ -270,6 +321,7 @@ def has_nvidia_gpu() -> bool:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
             capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
         return result.returncode == 0 and bool(result.stdout.strip())
     except Exception:
@@ -284,6 +336,7 @@ def gpu_name() -> Optional[str]:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
             capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
         return result.stdout.strip().splitlines()[0] if result.stdout.strip() else None
     except Exception:
@@ -326,6 +379,10 @@ def torch_requirement() -> tuple[List[str], str]:
         from gpu_hardware import amd_adapters
     adapters = amd_adapters()
     if adapters:
+        legacy = all(entry.get('rocm_candidate') is False or re.search(r'\bRX\s*[45]\d\d\b', entry['name'], re.I) for entry in adapters)
+        if legacy:
+            return (['--index-url', CPU_INDEX, TORCH_CPU_PIN],
+                    'Найдена AMD RX 400/500: профиль ROCm не поддерживает эту карту. Ставлю CPU без больших GPU-пакетов; чат и голос сохраняются.')
         if sys.version_info[:2] < (3, 11) or sys.version_info[:2] > (3, 14):
             return (['--index-url', CPU_INDEX, TORCH_CPU_PIN], 'Найдена AMD, но профиль ROCm требует Python 3.11–3.14. Пока ставлю сборку для процессора; см. docs/amd-support.md.')
         return (rocm_requirement(), f"Найдена {adapters[0]['name']} — ставлю PyTorch для AMD ROCm/HIP. "
@@ -354,6 +411,7 @@ def dependencies_ready(python: Optional[str] = None) -> bool:
              "assert all(r.specifier.contains(version(r.name), prereleases=True) for r in reqs if r.marker is None or r.marker.evaluate()); "
              "assert os.getenv('SCOTT_TORCH_BACKEND', '').lower() != 'cpu' or (torch.version.cuda is None and torch.version.hip is None); print('ok')"],
             capture_output=True, text=True, timeout=120,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
         if result.returncode != 0 or "ok" not in result.stdout:
             return False
@@ -370,7 +428,8 @@ def is_ready(python: Optional[str] = None) -> bool:
         return models_ready()
     try:
         result = subprocess.run([python, str(Path(__file__).resolve()), '--models-check'],
-                                capture_output=True, text=True, timeout=120)
+                                capture_output=True, text=True, timeout=120,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -382,6 +441,7 @@ def has_pip(executable: str) -> bool:
         result = subprocess.run(
             [executable, "-m", "pip", "--version"],
             capture_output=True, text=True, timeout=120,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
         return result.returncode == 0
     except Exception:
@@ -413,7 +473,8 @@ def ensure_pip(executable: str, progress: Optional[Progress] = None) -> Optional
         result = subprocess.run(
             [executable, str(get_pip), "--no-warn-script-location", "--no-cache-dir"],
             capture_output=True, text=True, timeout=900,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", env=provisioning_environment(),
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
     except Exception as e:
         return f"не удалось поставить pip: {e}"
@@ -441,6 +502,26 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
     torch_args, explanation = torch_requirement()
     _report(progress, explanation, 0.05)
 
+    # Do not apply a full-install budget to repairs or a developer's global Python.
+    root = Path(__file__).resolve().parent.parent
+    executable_path = Path(executable).absolute()
+    external_slot = executable_path.parent.parent.parent/'.scott-runtime.json'
+    managed_runtime = executable_path.is_relative_to(root/'runtime') or (os.name != 'nt' and external_slot.is_file())
+    existing_torch = False
+    if managed_runtime:
+        runtime_home = executable_path.parent if os.name == 'nt' else executable_path.parent.parent
+        site = runtime_home/('Lib/site-packages' if os.name == 'nt' else f'lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages')
+        existing_torch = (site/'torch').exists()
+        if not existing_torch:
+            try:
+                try:
+                    from .installation_space import require_space, InsufficientSpace
+                except ImportError:
+                    from installation_space import require_space, InsufficientSpace
+                require_space('gpu' if any(index in torch_args for index in (CUDA_INDEX, ROCM_INDEX)) else 'cpu', executable_path.resolve().parent)
+            except InsufficientSpace as error:
+                return Step(title='Свободное место', error=str(error))
+
     step = Step(title="Установка зависимостей")
 
     # Без pip дальше делать нечего: во встроенной сборке Python его нет.
@@ -450,29 +531,37 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
         return step
 
     try:
-        # Keep a manually configured ROCm wheel even when preparing missing
-        # dependencies/models, or running from another Python interpreter.
-        probe = subprocess.run([executable, '-c', 'import torch; print(bool(torch.version.hip))'],
-            capture_output=True, text=True, timeout=30)
-        preserve_rocm = (probe.returncode == 0 and probe.stdout.strip() == 'True'
-                         and os.getenv('SCOTT_TORCH_BACKEND', '').strip().lower() != 'cpu')
+        # A retry for other dependencies must preserve a working Torch profile.
+        probe = subprocess.run([executable, '-c',
+            "import os,torch; assert tuple(map(int,torch.__version__.split('+')[0].split('.')[:2])) >= (2,13); choice=os.getenv('SCOTT_TORCH_BACKEND','').lower(); "
+            "assert not choice or choice=='auto' or (choice=='cpu' and not torch.version.cuda and not torch.version.hip) or (choice=='cuda' and torch.version.cuda) or (choice=='rocm' and torch.version.hip); print('ok')"],
+            capture_output=True, text=True, timeout=30, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        preserve_torch = probe.returncode == 0 and probe.stdout.strip() in ('ok', 'True')
     except (OSError, subprocess.TimeoutExpired):
-        preserve_rocm = False
+        preserve_torch = False
+
+    if managed_runtime and existing_torch and not preserve_torch:
+        # Upgrading an old wheel also needs download/unpack space. Keep the
+        # installed files intact if there is not enough room for that step.
+        try:
+            try:
+                from .installation_space import require_space, InsufficientSpace
+            except ImportError:
+                from installation_space import require_space, InsufficientSpace
+            require_space('gpu' if any(index in torch_args for index in (CUDA_INDEX, ROCM_INDEX)) else 'cpu', executable_path.resolve().parent)
+        except InsufficientSpace as error:
+            return Step(title='Свободное место', error=str(error))
 
     try:
         # Доли шкалы поделены по весу: torch — почти четыре гигабайта, всё
         # остальное вместе — меньше сотни мегабайт.
-        ok, tail = (True, '') if preserve_rocm else _run_pip(
-            executable, torch_args, progress,
-            "Скачиваю torch — самая долгая часть, несколько минут…",
-            start=0.10, span=0.45,
-        )
+        ok, tail = (True, '') if preserve_torch else _install_torch(executable,torch_args,progress,managed_runtime)
         if not ok:
             if ROCM_INDEX in torch_args:
                 _report(progress, 'Не удалось установить профиль AMD. Ставлю CPU, чтобы Scott мог работать; см. docs/amd-support.md.', 0.45)
-                ok, tail = _run_pip(executable,
+                ok, tail = _install_torch(executable,
                     ['--index-url', CPU_INDEX, TORCH_CPU_PIN],
-                    progress, 'Ставлю запасную сборку torch для процессора…', start=0.45, span=0.10)
+                    progress,managed_runtime)
         if not ok:
             step.error = f"не удалось поставить torch: {tail[-400:]}"
             return step
@@ -586,7 +675,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Быстрая проверка без установки: лаунчер спрашивает, нужен ли мастер.
         ready = is_ready()
         if as_json:
-            _emit({"type": "check", "ready": ready, "gpu": gpu_name()})
+            try:
+                from .installation_space import setup_budgets
+            except ImportError:
+                from installation_space import setup_budgets
+            _emit({"type": "check", "ready": ready, "gpu": gpu_name(),
+                   "space": setup_budgets(Path(__file__).resolve().parent.parent)})
         else:
             print("готово" if ready else "нужна подготовка")
         return 0 if ready else 2

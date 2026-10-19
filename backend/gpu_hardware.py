@@ -15,7 +15,10 @@ def _linux_amd(root=Path('/sys/class/drm')):
                 continue
             seen.add(device)
             driver = (device / 'driver').resolve().name if (device / 'driver').exists() else ''
-            result.append({'name': f'AMD GPU ({card.name})', 'driver': driver})
+            pci = (device/'device').read_text().strip().lower() if (device/'device').is_file() else ''
+            legacy = pci in ('0x67df', '0x67ef', '0x67ff', '0x67c4', '0x67c7')
+            result.append({'name': f'AMD GPU ({card.name})', 'driver': driver,
+                           'pci_device': pci, 'rocm_candidate': not legacy})
         except OSError:
             continue
     return result

@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
 class UserProfile:
     """Профиль пользователя со своими данными"""
     
@@ -80,8 +85,8 @@ class UserProfile:
 class ProfileManager:
     """Управляет профилями пользователей"""
     
-    def __init__(self, db_path: str = 'data/profiles.json'):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        self.db_path = Path(db_path) if db_path is not None else backend_path('profiles.json')
         self.data_dir = str(self.db_path.parent)  # Для совместимости с тестами
         self.profiles: Dict[str, UserProfile] = {}
         self.current_user: Optional[str] = None
@@ -269,6 +274,6 @@ class ProfileManager:
         return f"ProfileManager({len(self.profiles)} профилей, текущий: {self.current_user})"
 
 
-def get_profile_manager(db_path: str = 'data/profiles.json') -> ProfileManager:
+def get_profile_manager(db_path: str | None = None) -> ProfileManager:
     """Factory функция"""
     return ProfileManager(db_path)

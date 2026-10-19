@@ -134,6 +134,13 @@ def test_пример_про_проект_разбирается_как_прос
     assert understanding.extract_project(пример) is not None
 
 
+@pytest.mark.parametrize('ability_id',['desktop_windows','desktop_controls','app_catalog'])
+def test_desktop_examples_are_explicit_commands(ability_id):
+    import desktop_commands
+    ability=next(row for group in abilities.ABILITIES for row in group['items'] if row['id']==ability_id)
+    assert all(desktop_commands.parse(example) for example in ability['examples'])
+
+
 def _пример(ability_id: str, содержит: str = "") -> str:
     """Первый пример указанного умения — тот самый, что видит человек."""
     for группа in abilities.ABILITIES:

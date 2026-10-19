@@ -1248,6 +1248,15 @@ class VoiceListener:
                     self._записать_услышанное(text, "имя без команды")
                     return
 
+                # Именной стоп действует и до начала озвучки, пока модель
+                # готовит ответ. Только отдельная просьба: обсуждение слова
+                # «стоп» продолжает обычный путь команды.
+                if command.casefold().strip(" .,!?…") in {"стоп", "хватит", "замолчи", "достаточно"}:
+                    self._handle_interruption(text)
+                    self.stats.last_dispatch = "выполнена"
+                    self._записать_услышанное(text, "выполнена", "замолчи")
+                    return
+
         self.stats.triggered += 1
         self.stats.last_command = command
         self.stats.last_command_at = time.time()

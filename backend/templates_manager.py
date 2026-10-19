@@ -8,6 +8,11 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
 class Template:
     """Шаблон готового сценария"""
     
@@ -52,8 +57,8 @@ class Template:
 class TemplateManager:
     """Управляет шаблонами"""
     
-    def __init__(self, db_path: str = 'data/templates.json'):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        self.db_path = Path(db_path) if db_path is not None else backend_path('templates.json')
         self.data_dir = str(self.db_path.parent)  # Для совместимости с тестами
         self.templates: Dict[str, Template] = {}
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -312,6 +317,6 @@ class TemplateManager:
         return f"TemplateManager({len(self.templates)} шаблонов)"
 
 
-def get_template_manager(db_path: str = 'data/templates.json') -> TemplateManager:
+def get_template_manager(db_path: str | None = None) -> TemplateManager:
     """Factory функция"""
     return TemplateManager(db_path)

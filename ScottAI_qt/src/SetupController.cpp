@@ -1,4 +1,6 @@
 #include "SetupController.h"
+#include "ProcessSupport.h"
+#include "AppLog.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFileInfo>
@@ -8,36 +10,53 @@
 #endif
 
 SetupController::SetupController(QObject *parent) : QObject(parent) {
+    backgroundProcess(m_process);
+    m_tick.setInterval(1000);
+    connect(&m_tick, &QTimer::timeout, this, &SetupController::changed);
     connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] {
-        m_buffer += m_process.readAllStandardOutput();
+        const auto bytes = m_process.readAllStandardOutput();
+        m_buffer += bytes;
         while (m_buffer.contains('\n')) {
             const auto end = m_buffer.indexOf('\n'); const auto line = m_buffer.left(end); m_buffer.remove(0, end + 1);
+            AppLog::append("setup.log", QString::fromUtf8(line));
             const auto value = QJsonDocument::fromJson(line).object();
             if (value.value("type").toString() == "progress") {
                 m_message = value.value("message").toString(); m_progress = qBound(0.0, value.value("fraction").toDouble(), 1.0); emit changed();
+            } else if (value.value("type").toString() == "check") {
+                m_space = value.value("space").toObject(); emit changed();
             } else if (value.value("type").toString() == "error") m_error = value.value("message").toString();
         }
     });
-    connect(&m_process, &QProcess::readyReadStandardError, this, [this] { m_process.readAllStandardError(); });
+    connect(&m_process, &QProcess::readyReadStandardError, this, [this] { AppLog::appendChunk("setup.log", m_errorBuffer, m_process.readAllStandardError()); });
     connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) { m_busy = false; m_error = QStringLiteral("Не удалось запустить Python для подготовки. Повторите установку приложения."); emit changed(); }
+        if (error == QProcess::FailedToStart) { m_tick.stop(); m_busy = false; m_error = QStringLiteral("Не удалось запустить Python для подготовки. Повторите установку приложения."); emit changed(); }
     });
     connect(&m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+        m_tick.stop();
+        AppLog::appendChunk("setup.log", m_errorBuffer, "\n");
         m_busy = false;
         if (m_cancelled) { m_message = QStringLiteral("Подготовка остановлена. Нажмите «Продолжить» — скачанная часть модели сохранена."); m_error.clear(); emit changed(); return; }
         if (code == 0 && status == QProcess::NormalExit) { m_visible = false; m_progress = 1; emit changed(); emit ready(); return; }
         if (m_check && code == 2) { m_message = QStringLiteral("Подготовим библиотеки и модели речи для вашего компьютера."); m_error.clear(); }
-        else if (m_error.isEmpty()) m_error = QStringLiteral("Подготовка не завершена. Проверьте подключение к интернету и повторите попытку.");
+        else if (m_error.isEmpty()) m_error = QStringLiteral("Подготовка не завершена. Соберите логи — в них сохранена причина ошибки. Затем повторите попытку.");
         emit changed();
     });
+}
+QString SetupController::sizeHint() const {
+    const auto hint = m_space.value(m_compact ? "cpu" : "auto").toObject().value("hint").toString();
+    if (!hint.isEmpty()) return hint;
+    return m_compact ? QStringLiteral("Чат и голос: около 2 ГиБ. На время подготовки оставьте 2,5 ГиБ свободно.")
+        : QStringLiteral("Чат и голос: около 2 ГиБ на CPU или 5–7 ГиБ на GPU. Дополнительные модели устанавливаются отдельно.");
 }
 SetupController::~SetupController() { cancel(); }
 void SetupController::check(const QString &python, const QString &backend) { m_python = python; m_backend = backend; run(true); }
 void SetupController::run(bool check) {
     if (m_process.state() != QProcess::NotRunning) return;
     m_check = check; m_cancelled = false; m_visible = true; m_busy = true; m_progress = 0; m_error.clear(); m_buffer.clear();
+    m_elapsed.start(); m_tick.start();
     m_message = check ? QStringLiteral("Проверяем готовность…") : QStringLiteral("Начинаем подготовку…"); emit changed();
     auto env = QProcessEnvironment::systemEnvironment(); env.insert("PYTHONIOENCODING", "utf-8");
+    env.insert("SCOTT_LOG_DIR", AppLog::directory.isEmpty() ? AppLog::defaultDirectory() : AppLog::directory);
     if (m_compact) env.insert("SCOTT_TORCH_BACKEND", "cpu");
     env.insert("SCOTT_SETUP_GROUP", "1"); m_process.setProcessEnvironment(env);
     m_process.setWorkingDirectory(m_backend);
@@ -50,7 +69,7 @@ void SetupController::cancel() {
     m_cancelled = true;
     // Only the process tree started by this controller belongs to preparation.
 #ifdef Q_OS_WIN
-    QProcess stop; stop.start("taskkill", {"/PID", QString::number(m_process.processId()), "/T", "/F"}); stop.waitForFinished(3000);
+    QProcess stop; backgroundProcess(stop); stop.start("taskkill", {"/PID", QString::number(m_process.processId()), "/T", "/F"}); stop.waitForFinished(3000);
 #else
     const auto pid = static_cast<pid_t>(m_process.processId());
     if (pid > 0 && getpgid(pid) == pid) ::kill(-pid, SIGKILL);

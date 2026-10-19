@@ -15,6 +15,20 @@ import bootstrap
 
 pytestmark = pytest.mark.unit
 
+@pytest.mark.parametrize('adapter', [{'name':'AMD Radeon RX 580', 'driver':'fixture'}, {'name':'AMD GPU (card0)', 'driver':'amdgpu', 'rocm_candidate':False}])
+def test_rx580_automatic_setup_uses_cpu(monkeypatch, adapter):
+    monkeypatch.delenv('SCOTT_TORCH_BACKEND', raising=False)
+    monkeypatch.setattr(bootstrap, 'has_nvidia_gpu', lambda: False)
+    monkeypatch.setattr(gpu_hardware, 'amd_adapters', lambda: [adapter])
+    args, reason = bootstrap.torch_requirement()
+    assert bootstrap.CPU_INDEX in args and bootstrap.ROCM_INDEX not in args
+    assert 'CPU' in reason
+
+def test_rx580_linux_pci_identity(tmp_path):
+    path = tmp_path/'card0/device'; path.mkdir(parents=True)
+    (path/'vendor').write_text('0x1002'); (path/'device').write_text('0x67df')
+    assert gpu_hardware._linux_amd(tmp_path)[0]['rocm_candidate'] is False
+
 
 @pytest.fixture
 def hip(monkeypatch, tmp_path):
@@ -194,7 +208,8 @@ def test_explicit_cpu_install_overrides_amd_and_existing_rocm(monkeypatch):
     args, _ = bootstrap.torch_requirement()
     assert args == ['--index-url', bootstrap.CPU_INDEX, bootstrap.TORCH_CPU_PIN]
     monkeypatch.setattr(bootstrap, 'ensure_pip', lambda *a: None)
-    monkeypatch.setattr(bootstrap.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=0, stdout='True'))
+    # A ROCm wheel fails the requested CPU profile probe.
+    monkeypatch.setattr(bootstrap.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=1, stdout=''))
     commands = []
     monkeypatch.setattr(bootstrap, '_run_pip', lambda executable, args, *a, **k: commands.append(args) or (True, ''))
     assert bootstrap.install_dependencies('test-python').done
@@ -230,7 +245,7 @@ def test_device_endpoint_returns_amd_options_without_hardware_access(main_module
     for variable in devices.ENV_VARS.values():
         monkeypatch.delenv(variable, raising=False)
     async def check():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             response = await client.post('/settings/device', json={'engine': 'whisper', 'choice': 'rocm'})
             assert response.status_code == 200 and response.json()['engines']['whisper']['backend'] == 'rocm'
             assert (await client.post('/settings/device', json={'engine': [], 'choice': 5})).status_code == 400

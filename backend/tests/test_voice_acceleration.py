@@ -87,7 +87,7 @@ def test_api_validates_and_applies_acceleration_without_losing_other_preferences
     voice_config.save_voice('scott-voice',profile='restrained',streaming=True)
     monkeypatch.setattr(integrated.engine,'describe',lambda:dict(available=True,acceleration_available=True))
     async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app),base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app),base_url='http://localhost') as client:
             for voice,value in [('scott-voice',None),('scott-voice',1),('scott-voice','true'),('eugene',True)]:
                 assert (await client.post('/voice/select',json={'voice':voice,'acceleration':value})).status_code==400
                 assert not voice_config.get_scott_acceleration()

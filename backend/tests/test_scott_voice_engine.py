@@ -120,10 +120,10 @@ def test_manifest_cannot_reference_files_outside_model(installed_assets):
 
 
 def test_profile_and_previous_voice_are_persisted_independently(integrated):
-    scott_voice.set_current_voice('ru-RU-SvetlanaNeural')
+    scott_voice.set_current_voice('eugene')
     assert scott_voice.set_current_voice('scott-voice', 'restrained')
     assert voice_config.get_scott_profile() == 'restrained'
-    assert voice_config.get_fallback_voice('aidar', scott_voice.AVAILABLE_VOICES) == 'ru-RU-SvetlanaNeural'
+    assert voice_config.get_fallback_voice('aidar', scott_voice.AVAILABLE_VOICES) == 'eugene'
     scott_voice.set_current_voice('ru-RU-DmitryNeural')
     scott_voice.set_current_voice('scott-voice')
     assert voice_config.get_scott_profile() == 'restrained'
@@ -159,6 +159,9 @@ def test_runtime_failure_uses_previous_voice_without_overwriting_choice(integrat
     assert fallback == ['eugene']
     assert scott_voice.get_current_voice() == 'scott-voice'
     assert integrated.engine.describe()['state'] == 'fallback'
+    info = next(v for v in scott_voice.describe_voices()['voices'] if v['id'] == 'scott-voice')
+    assert info['fallback_active'] is True and info['fallback_id'] == 'eugene'
+    assert info['fallback_label'] == scott_voice.AVAILABLE_VOICES['eugene']
     before = len(integrated.calls)
     assert integrated.voice.speak_to_file('Ещё одна проверка')
     assert len(integrated.calls) == before  # Cooldown prevents repeated slow failures.
@@ -226,7 +229,7 @@ def test_factory_failure_has_safe_status_and_can_retry(integrated):
 
 def test_voice_routes_validate_profile_and_preserve_selection(main_module, integrated, monkeypatch):
     async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             catalog = (await client.get('/voice/available?gender=male')).json()
             assert catalog['scott_profile'] == 'natural'
             assert all(v['gender'] == 'male' for v in catalog['voices'])
@@ -251,7 +254,7 @@ def test_catalog_probe_does_not_block_health(main_module, integrated, monkeypatc
         return ''
     monkeypatch.setattr(engine_module, 'inspect_installation', probe)
     async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             pending = asyncio.create_task(client.get('/voice/available'))
             assert await asyncio.to_thread(entered.wait, 1)
             health = await client.get('/health')

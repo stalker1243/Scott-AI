@@ -28,33 +28,33 @@ Item {
     function clearDraft() { draft.text = "" }
     function categoryName(key) {
         for (let i = 0; i < client.memoryKinds.length; ++i)
-            if (client.memoryKinds[i].id === key) return client.memoryKinds[i].title
+            if (client.memoryKinds[i].id === key) return qsTranslate("Launcher", client.memoryKinds[i].title)
         return key
     }
-    function dateLabel(seconds) { return seconds > 0 ? Qt.formatDate(new Date(seconds * 1000), "dd.MM.yyyy") : "" }
+    function dateLabel(seconds) { return seconds > 0 ? new Date(seconds * 1000).toLocaleDateString(Qt.locale(typeof appLanguage !== "undefined" ? appLanguage.locale : "ru_RU"), Locale.ShortFormat) : "" }
 
     component MemoryButton: UiButton {
         theme: page.theme
-        implicitHeight: 40; leftPadding: 16; rightPadding: 16
+        implicitHeight: 36; leftPadding: 12; rightPadding: 12
         font.pixelSize: 13
     }
     ColumnLayout {
         anchors.fill: parent; spacing: 14
         SurfacePanel {
             objectName: "memoryDraftCard"
-            theme: page.theme
-            Layout.fillWidth: true; implicitHeight: draftLayout.implicitHeight + 32; radius: page.theme.cardRadius; color: page.surface; border.color: page.line
+            theme: page.theme; flat: true
+            Layout.fillWidth: true; implicitHeight: draftLayout.implicitHeight + 24
             ColumnLayout {
                 id: draftLayout
-                anchors.fill: parent; anchors.margins: 16; spacing: 8
-                RowLayout {
-                    Text { font.family: page.theme.fontFamily; text: "Новая запись"; color: page.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
-                    Item { Layout.fillWidth: true }
+                anchors.fill: parent; anchors.margins: 12; spacing: 8
+                Flow {
+                    Layout.fillWidth: true; spacing: 12
+                    Text { font.family: page.theme.fontFamily; text: qsTranslate("Launcher", "Новая запись"); color: page.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
                     UiSwitch {
                         objectName: "autoMemorySwitch"
-                        theme: page.theme; text: "Запоминать факты"
+                        theme: page.theme; text: qsTranslate("Launcher", "Запоминать факты")
                         ToolTip.visible: hovered
-                        ToolTip.text: "Сохранять явно сказанные сведения о вас и проектах. История разговоров хранится отдельно."
+                        ToolTip.text: qsTranslate("Launcher", "Сохранять явно сказанные сведения о вас и проектах. История разговоров хранится отдельно.")
                         checked: client.autoMemoryEnabled
                         enabled: client.online && !client.memoryBusy && client.memorySettingsAvailable
                         onToggled: client.setAutoMemoryEnabled(checked)
@@ -66,7 +66,7 @@ Item {
                     Layout.fillWidth: true; implicitHeight: 40
                     enabled: !client.memoryBusy
                     color: page.ink; placeholderTextColor: page.muted
-                    placeholderText: "Что запомнить?"
+                    placeholderText: qsTranslate("Launcher", "Что запомнить?")
                     selectByMouse: true; hoverEnabled: true; leftPadding: 12; rightPadding: 12
                     selectionColor: page.accent; selectedTextColor: "white"
                     background: FieldSurface { theme: page.theme; focused: draft.activeFocus; hovered: draft.hovered; invalid: draft.text.length > 200 }
@@ -80,7 +80,7 @@ Item {
                         enabled: !client.memoryBusy && count > 0
                         palette.text: page.ink; palette.buttonText: page.ink; palette.window: page.surface
                         palette.base: page.surface; palette.highlight: page.accent; palette.highlightedText: "white"
-                        contentItem: Text { font.family: page.theme.fontFamily; text: kindBox.displayText; leftPadding: 12; rightPadding: 24; color: page.ink; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                        contentItem: Text { font.family: page.theme.fontFamily; text: qsTranslate("Launcher", kindBox.displayText); leftPadding: 12; rightPadding: 24; color: page.ink; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
                         hoverEnabled: true
                         background: FieldSurface { theme: page.theme; focused: kindBox.activeFocus || kindBox.popup.visible; hovered: kindBox.hovered }
                         indicator: NavIcon {
@@ -116,7 +116,7 @@ Item {
                     Item { Layout.fillWidth: true }
                     MemoryButton {
                         id: addButton; objectName: "addMemory"
-                        text: "Запомнить"; primary: true
+                        text: qsTranslate("Launcher", "Запомнить"); primary: true
                         enabled: client.online && !client.memoryBusy && draft.text.trim().length > 0 && draft.text.length <= 200 && kindBox.currentIndex >= 0
                         onClicked: client.addMemory(draft.text, kindBox.currentValue)
                     }
@@ -128,7 +128,7 @@ Item {
             TextField { font.family: page.theme.fontFamily;
                 id: search; objectName: "memorySearch"
                 Layout.fillWidth: true; implicitHeight: 40; selectByMouse: true
-                color: page.ink; placeholderTextColor: page.muted; placeholderText: "Найти в памяти…"
+                color: page.ink; placeholderTextColor: page.muted; placeholderText: qsTranslate("Launcher", "Найти в памяти…")
                 hoverEnabled: true; leftPadding: 38; rightPadding: 38
                 selectionColor: page.accent; selectedTextColor: "white"
                 background: FieldSurface { theme: page.theme; fill: page.surface; focused: search.activeFocus; hovered: search.hovered }
@@ -136,16 +136,16 @@ Item {
                 MemoryButton {
                     anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
                     width: 30; implicitHeight: 30; leftPadding: 0; rightPadding: 0; text: "×"
-                    Accessible.name: "Очистить поиск"; visible: search.text.length > 0
+                    Accessible.name: qsTranslate("Launcher", "Очистить поиск"); visible: search.text.length > 0
                     onClicked: { search.clear(); search.forceActiveFocus() }
                 }
             }
-            MemoryButton { text: client.memoryBusy ? "Обновление…" : "Обновить"; enabled: client.online && !client.memoryBusy; onClicked: client.refreshMemories() }
+            MemoryButton { text: client.memoryBusy ? qsTranslate("Launcher", "Обновление…") : qsTranslate("Launcher", "Обновить"); enabled: client.online && !client.memoryBusy; onClicked: client.refreshMemories() }
         }
         Flow {
             Layout.fillWidth: true; spacing: 8
             Repeater {
-                model: [{id: "", title: "Все"}].concat(client.memoryKinds)
+                model: [{id: "", title: qsTranslate("Launcher", "Все")}].concat(client.memoryKinds)
                 delegate: MemoryButton {
                     required property var modelData
                     text: modelData.title; primary: page.activeKind === modelData.id
@@ -156,22 +156,21 @@ Item {
         UiNotice {
             theme: page.theme; Layout.fillWidth: true
             error: !client.online || client.memoryError.length > 0
-            text: !client.online ? (client.memories.length > 0 ? "Нет подключения. Показаны последние загруженные записи." : "Нет подключения к Scott.") : client.memoryError.length > 0 ? client.memoryError : client.memoryNotice
+            text: !client.online ? (client.memories.length > 0 ? qsTranslate("Launcher", "Нет подключения. Показаны последние загруженные записи.") : qsTranslate("Launcher", "Нет подключения к Scott.")) : client.memoryError.length > 0 ? client.memoryError : client.memoryNotice
         }
         RowLayout {
-            Text { font.family: page.theme.fontFamily; text: "Записи · " + page.filtered.length; color: page.muted; font.pixelSize: 12 }
+            Text { font.family: page.theme.fontFamily; text: qsTranslate("Launcher", "Записи · ") + page.filtered.length; color: page.muted; font.pixelSize: 12 }
             Item { Layout.fillWidth: true }
-            Text { font.family: page.theme.fontFamily; text: "Ответов в истории · " + client.archivedTurns; visible: client.archivedTurns >= 0; color: page.muted; font.pixelSize: 12 }
-            MemoryButton { text: "Очистить историю"; enabled: client.online && !client.memoryBusy && client.archivedTurns > 0; onClicked: confirmClearHistory.open() }
+            Text { font.family: page.theme.fontFamily; text: qsTranslate("Launcher", "Ответов в истории · ") + client.archivedTurns; visible: client.archivedTurns >= 0; color: page.muted; font.pixelSize: 12 }
+            MemoryButton { text: qsTranslate("Launcher", "Очистить историю"); enabled: client.online && !client.memoryBusy && client.archivedTurns > 0; onClicked: confirmClearHistory.open() }
         }
         SurfacePanel {
-            theme: page.theme
+            theme: page.theme; flat: true
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 100
-            radius: page.theme.cardRadius; color: page.surface; border.color: page.line
             Column {
                 anchors.centerIn: parent; spacing: 10; visible: page.filtered.length === 0
-                Text { font.family: page.theme.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: client.memoryBusy ? "Загружаю память…" : !client.online ? "Подключите Scott" : client.memoryError.length > 0 ? "Не удалось загрузить записи" : client.memories.length === 0 ? "Здесь появится то, что важно вам" : "Ничего не найдено"; color: page.ink; font.pixelSize: 15 }
-                Text { font.family: page.theme.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: !client.online ? "Запустите backend на главной странице." : client.memoryError.length > 0 ? "Повторите загрузку кнопкой «Обновить»." : client.memories.length === 0 ? "Добавьте первый факт или предпочтение выше." : "Попробуйте другую категорию или запрос."; color: page.muted; font.pixelSize: 12 }
+                Text { font.family: page.theme.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: client.memoryBusy ? qsTranslate("Launcher", "Загружаю память…") : !client.online ? qsTranslate("Launcher", "Подключите Scott") : client.memoryError.length > 0 ? qsTranslate("Launcher", "Не удалось загрузить записи") : client.memories.length === 0 ? qsTranslate("Launcher", "Здесь появится то, что важно вам") : qsTranslate("Launcher", "Ничего не найдено"); color: page.ink; font.pixelSize: 15 }
+                Text { font.family: page.theme.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: !client.online ? qsTranslate("Launcher", "Запустите backend на главной странице.") : client.memoryError.length > 0 ? qsTranslate("Launcher", "Повторите загрузку кнопкой «Обновить».") : client.memories.length === 0 ? qsTranslate("Launcher", "Добавьте первый факт или предпочтение выше.") : qsTranslate("Launcher", "Попробуйте другую категорию или запрос."); color: page.muted; font.pixelSize: 12 }
             }
             ListView {
                 id: memoryList; objectName: "memoryList"
@@ -182,9 +181,9 @@ Item {
                 delegate: Rectangle {
                     id: memory
                     required property var modelData
-                    width: ListView.view.width; height: memoryBody.implicitHeight + 32
-                    radius: page.theme.controlRadius; color: memoryHover.hovered ? page.elevated : page.bg
-                    border.color: memoryHover.hovered ? Qt.alpha(page.accent, 0.45) : page.line
+                    width: ListView.view.width; height: memoryBody.implicitHeight + 24
+                    radius: 4; color: memoryHover.hovered ? page.elevated : "transparent"
+                    Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 1; color: page.line }
                     HoverHandler { id: memoryHover }
                     Behavior on color { enabled: page.theme.motion; ColorAnimation { duration: 160 } }
                     Behavior on border.color { enabled: page.theme.motion; ColorAnimation { duration: 160 } }
@@ -193,11 +192,11 @@ Item {
                         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 16; spacing: 16
                         ColumnLayout {
                             Layout.fillWidth: true; spacing: 7
-                            Text { font.family: page.theme.fontFamily; text: (memory.modelData.source === "conversation" ? "Из диалога · " : "") + page.categoryName(memory.modelData.kind) + "  ·  " + page.dateLabel(memory.modelData.updated || memory.modelData.created); color: page.accent; font.pixelSize: 11 }
+                            Text { font.family: page.theme.fontFamily; text: (memory.modelData.source === "conversation" ? qsTranslate("Launcher", "Из диалога · ") : "") + page.categoryName(memory.modelData.kind) + "  ·  " + page.dateLabel(memory.modelData.updated || memory.modelData.created); color: page.accent; font.pixelSize: 11 }
                             TextEdit { font.family: page.theme.fontFamily; Layout.fillWidth: true; text: memory.modelData.text; readOnly: true; selectByMouse: true; textFormat: TextEdit.PlainText; wrapMode: TextEdit.Wrap; color: page.ink; font.pixelSize: 14 }
                         }
                         MemoryButton {
-                            text: "Забыть"; destructive: true; enabled: client.online && !client.memoryBusy
+                            text: qsTranslate("Launcher", "Забыть"); destructive: true; enabled: client.online && !client.memoryBusy
                             onClicked: { page.pendingId = memory.modelData.id; page.pendingText = memory.modelData.text; confirmForget.open() }
                         }
                     }
@@ -213,12 +212,12 @@ Item {
         background: SurfacePanel { theme: page.theme; color: page.theme.popup }
         contentItem: ColumnLayout {
             spacing: 18
-            Text { text: "Очистить историю разговоров?"; color: page.ink; font.pixelSize: 18; font.family: page.theme.fontFamily; Layout.fillWidth: true; wrapMode: Text.Wrap }
-            Text { text: "Scott забудет прошлые диалоги. Факты и предпочтения из списка останутся."; color: page.muted; font.family: page.theme.fontFamily; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Text { text: qsTranslate("Launcher", "Очистить историю разговоров?"); color: page.ink; font.pixelSize: 18; font.family: page.theme.fontFamily; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Text { text: qsTranslate("Launcher", "Scott забудет прошлые диалоги. Факты и предпочтения из списка останутся."); color: page.muted; font.family: page.theme.fontFamily; Layout.fillWidth: true; wrapMode: Text.Wrap }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                MemoryButton { text: "Отмена"; onClicked: confirmClearHistory.close() }
-                MemoryButton { text: "Очистить"; destructive: true; onClicked: { client.clearConversationMemory(); confirmClearHistory.close() } }
+                MemoryButton { text: qsTranslate("Launcher", "Отмена"); onClicked: confirmClearHistory.close() }
+                MemoryButton { text: qsTranslate("Launcher", "Очистить"); destructive: true; onClicked: { client.clearConversationMemory(); confirmClearHistory.close() } }
             }
         }
     }
@@ -233,13 +232,13 @@ Item {
         background: SurfacePanel { theme: page.theme; color: page.theme.popup }
         contentItem: ColumnLayout {
             spacing: 18
-            Text { font.family: page.theme.fontFamily; text: "Забыть эту запись?"; color: page.ink; font.pixelSize: 21; font.weight: Font.DemiBold }
+            Text { font.family: page.theme.fontFamily; text: qsTranslate("Launcher", "Забыть эту запись?"); color: page.ink; font.pixelSize: 21; font.weight: Font.DemiBold }
             Text { font.family: page.theme.fontFamily; text: page.pendingText; color: page.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; textFormat: Text.PlainText }
-            Text { font.family: page.theme.fontFamily; text: "Факт будет удалён из памяти. Исходные диалоги очищаются отдельно кнопкой «Очистить историю»."; color: page.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 }
+            Text { font.family: page.theme.fontFamily; text: qsTranslate("Launcher", "Факт будет удалён из памяти. Исходные диалоги очищаются отдельно кнопкой «Очистить историю»."); color: page.muted; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 12 }
             RowLayout {
                 Layout.alignment: Qt.AlignRight; spacing: 10
-                MemoryButton { text: "Отмена"; onClicked: confirmForget.close() }
-                MemoryButton { text: "Забыть запись"; primary: true; destructive: true; enabled: client.online && !client.memoryBusy; onClicked: { client.forgetMemory(page.pendingId); confirmForget.close() } }
+                MemoryButton { text: qsTranslate("Launcher", "Отмена"); onClicked: confirmForget.close() }
+                MemoryButton { text: qsTranslate("Launcher", "Забыть запись"); primary: true; destructive: true; enabled: client.online && !client.memoryBusy; onClicked: { client.forgetMemory(page.pendingId); confirmForget.close() } }
             }
         }
         enter: Transition {

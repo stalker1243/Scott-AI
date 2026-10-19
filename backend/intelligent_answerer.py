@@ -234,7 +234,12 @@ except ImportError:
     import key_ring as key_ring_module
 
 
-AI_CONFIG_PATH = Path(__file__).resolve().parent / "data" / "ai_config.json"
+try:
+    from .storage_paths import backend_path, legacy_data_path
+except ImportError:
+    from storage_paths import backend_path, legacy_data_path
+
+AI_CONFIG_PATH = backend_path('ai_config.json')
 
 
 def list_groq_models(api_key: str) -> List[Dict]:
@@ -342,8 +347,8 @@ def explain_connect_error(provider: str, model: str, reason: str) -> str:
     return f"Не удалось подключиться к {provider} (модель «{model}») с этим ключом"
 
 
-CONVERSATION_PATH = Path(__file__).resolve().parent / "data" / "conversations.jsonl"
-LEGACY_CHAT_PATH = Path(__file__).resolve().parent.parent / "data" / "memory.jsonl"
+CONVERSATION_PATH = backend_path('conversations.jsonl')
+LEGACY_CHAT_PATH = legacy_data_path('memory.jsonl')
 
 
 class ConversationMemory:
@@ -724,6 +729,10 @@ class IntelligentAnswerer:
         прежнее.
         """
         основа = BRIEF_SYSTEM_PROMPT if brief else self.system_prompt
+        from assistant_identity import prompt_context
+        identity = prompt_context(query)
+        if identity:
+            основа += '\n\n' + identity
 
         try:
             try:

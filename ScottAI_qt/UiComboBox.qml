@@ -4,13 +4,14 @@ import QtQuick.Controls
 ComboBox {
     id: control
     required property QtObject theme
+    property bool translateDisplay: true
     implicitHeight: 42; hoverEnabled: true
     font.family: theme.fontFamily
     opacity: enabled ? 1 : 0.45
-    Behavior on opacity { enabled: control.theme.motion; NumberAnimation { duration: 150 } }
+    Behavior on opacity { enabled: control.theme.motion && control.visible; NumberAnimation { duration: 150 } }
     HoverHandler { cursorShape: control.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
     contentItem: Text {
-        text: control.displayText; color: control.theme.ink; font: control.font
+        text: control.translateDisplay ? qsTranslate("Launcher", control.displayText) : control.displayText; color: control.theme.ink; font: control.font
         leftPadding: 12; rightPadding: 34; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
     }
     background: FieldSurface { theme: control.theme; focused: control.activeFocus || control.popup.visible; hovered: control.hovered }
@@ -18,7 +19,7 @@ ComboBox {
         x: control.width - width - 12; y: (control.height - height) / 2
         width: 16; height: 16; symbol: 6; color: control.theme.muted
         rotation: control.popup.visible ? 180 : 0
-        Behavior on rotation { enabled: control.theme.motion; NumberAnimation { duration: 150 } }
+        Behavior on rotation { enabled: control.theme.motion && control.visible; NumberAnimation { duration: 150 } }
     }
     delegate: ItemDelegate {
         id: option
@@ -30,14 +31,14 @@ ComboBox {
         highlighted: control.highlightedIndex === index
         HoverHandler { cursorShape: Qt.PointingHandCursor }
         contentItem: Text {
-            text: control.textRole.length > 0 ? modelData[control.textRole] : modelData
+            text: control.translateDisplay ? qsTranslate("Launcher", String(control.textRole.length > 0 ? modelData[control.textRole] : modelData)) : String(control.textRole.length > 0 ? modelData[control.textRole] : modelData)
             color: option.highlighted || option.chosen ? control.theme.accent : control.theme.ink; font: control.font
             leftPadding: 8; rightPadding: 22; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
         }
         background: Rectangle {
             radius: control.theme.controlRadius
             color: option.highlighted || option.hovered ? control.theme.elevated : "transparent"
-            Behavior on color { enabled: control.theme.motion; ColorAnimation { duration: 100 } }
+            Behavior on color { enabled: control.theme.motion && control.visible; ColorAnimation { duration: 100 } }
             Rectangle { x: parent.width - 14; anchors.verticalCenter: parent.verticalCenter; width: 5; height: 5; radius: 3; color: control.theme.accent; visible: option.chosen }
         }
     }
@@ -54,7 +55,7 @@ ComboBox {
             currentIndex: control.highlightedIndex
             ScrollBar.vertical: UiScrollBar { theme: control.theme }
         }
-        enter: Transition { enabled: control.theme.motion; NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 130 } }
-        exit: Transition { enabled: control.theme.motion; NumberAnimation { property: "opacity"; to: 0; duration: 90 } }
+        enter: Transition { enabled: control.theme.motion && control.visible; NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 130 } }
+        exit: Transition { enabled: control.theme.motion && control.visible; NumberAnimation { property: "opacity"; to: 0; duration: 90 } }
     }
 }

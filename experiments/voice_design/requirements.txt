@@ -1,5 +1,13 @@
-# This environment reuses the installed CUDA torch through system-site-packages.
-# TorchAudio must match that torch build; setup.ps1 installs it from PyTorch.
-qwen-tts==0.1.1
-transformers==4.57.3
-accelerate==1.12.0
+# Headless SDK profile; keep in sync with backend/scott_voice_sdk.py.
+# setup.ps1 supplies the verified local Qwen wheel and the CUDA framework first.
+qwen-tts==0.1.1+scott.1
+transformers==5.20.1
+accelerate==1.15.0
+soundfile==0.13.1
+scipy==1.17.1
+numpy==2.3.4
+huggingface-hub==2.2.0
+idna==3.20
+hf-xet==1.7.0
+setuptools==83.0.0
+psutil==7.2.2

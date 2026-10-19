@@ -41,6 +41,8 @@ inline void runVoicePageChecks(QApplication &app, QQuickWindow *window, QObject 
             if (!window->grabWindow().save(QString("screenshots/voice/%1.png").arg(name))) fail("screenshot failed");
         };
         if (*phase == 0) {
+            auto *storage = window->findChild<QObject *>("scottVoiceStorageInfo");
+            if (!storage || !storage->property("visible").toBool() || !storage->property("text").toString().contains(QStringLiteral("3–4 ГиБ"))) { fail("component size estimate missing"); return; }
             auto *warm = window->findChild<QObject *>("warmScottVoice");
             auto *release = window->findChild<QObject *>("releaseScottVoice");
             if (!warm || !release || !warm->property("visible").toBool() || !warm->property("enabled").toBool() || release->property("visible").toBool()) { fail("manual preparation controls invalid"); return; }

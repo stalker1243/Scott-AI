@@ -67,7 +67,12 @@ def copy_python(output, archive=None):
                     resolved = posixpath.normpath(str(path.parent/PurePosixPath(member.linkname)))
                     if PurePosixPath(member.linkname).is_absolute() or not resolved.startswith('python/'):
                         raise ValueError('CPython archive contains an external link.')
-            tar.extractall(temporary, members=members, filter='data')
+            # The pinned upstream archive includes a few encodings .pyc files.
+            # Keep the distributable source-only: their cache is regenerated
+            # in a writable runtime, and AppImage rejects generated files.
+            clean = [member for member in members if '__pycache__' not in PurePosixPath(member.name).parts
+                     and PurePosixPath(member.name).suffix not in ('.pyc', '.pyo')]
+            tar.extractall(temporary, members=clean, filter='data')
         base = Path(temporary)/'python'
         if not all((base/name).is_file() for name in CORE):
             raise ValueError('CPython archive is incomplete.')

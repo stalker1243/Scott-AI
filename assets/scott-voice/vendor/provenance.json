@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "upstream_version": "0.1.1",
+  "version_local": "0.1.1+scott.1",
+  "upstream_url": "https://files.pythonhosted.org/packages/31/01/95f3ae26f5b7eb2105f69ad2c15af5a28b9ebdd1258a0b27541f5ebd6225/qwen_tts-0.1.1-py3-none-any.whl",
+  "upstream_sha256": "11a290d8dabc7ef91a90c54478c8ab19b3edb1d85c0882313721892bdc4af15d",
+  "license": "Apache-2.0",
+  "files": {
+    "qwen_tts/core/models/modeling_qwen3_tts.py": {
+      "before_sha256": "25c42656bcf810f06ef6bc1839bd7083f3c8cfedac3a147c4060b4262b1c96a0",
+      "after_sha256": "9db9eaa608ef7df25e18edc184b6545f677a8c7a5b4ae744443440254c33f120"
+    },
+    "qwen_tts/core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py": {
+      "before_sha256": "844e8dd8c0182ef9c6463c874631c22ef3c5a4fd1899dd657016164cc5379628",
+      "after_sha256": "9460eec85a6ba86c1fb54cff42159fba4bd6ac618b40f66d9f2ce2d9f3e2f68d"
+    },
+    "qwen_tts/inference/qwen3_tts_model.py": {
+      "before_sha256": "e1da450732857c1f5fe3e36ebab85db2f6dc6a48caaff6973f463384e30275e4",
+      "after_sha256": "af48d8b939d809880ce14a8b04ab762a0812c76d43656b162dd9b1337cb68714"
+    }
+  },
+  "transformers": "5.20.1",
+  "accelerate": "1.15.0",
+  "patch_sha256": "339e87a30fee823747c9f0bf5eab211243761fad8e9c7cdf485d071a4fdec2aa",
+  "wheel": "qwen_tts-0.1.1+scott.1-py3-none-any.whl",
+  "wheel_sha256": "165969d1b0774f83c9a0222f493373adddb32e5504b669cc9acc600599df5b19",
+  "license_preserved": true
+}

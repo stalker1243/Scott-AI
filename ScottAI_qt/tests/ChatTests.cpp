@@ -30,7 +30,7 @@ private slots:
                 else if (path == "/chats") response = {{"success", true}, {"chats", QJsonArray{QJsonObject{{"id", id}, {"title", title}, {"count", messages.size()}}}}};
                 else if (path.endsWith("/messages") && method == "POST") {
                     ++uploads; uploadBody = buffer->mid(split + 4, length);
-                    if (fail) { code = 400; response = {{"detail", "Unsupported attachment"}}; }
+                    if (fail) { code = 400; response = {{"message", "Unsupported attachment"}, {"hint", "Choose a supported file"}, {"code", "SCOTT-API-400"}, {"request_id", "0123456789ab"}}; }
                     else {
                         messages = QJsonArray{QJsonObject{{"role", "user"}, {"text", "Review"}, {"attachments", QJsonArray{}}}, QJsonObject{{"role", "assistant"}, {"text", "Done"}, {"attachments", QJsonArray{}}, {"model", "demo"}}};
                         response = {{"success", true}, {"chat", chat()}};
@@ -56,6 +56,7 @@ private slots:
         client.sendChatMessage("Review"); client.sendChatMessage("Duplicate"); QTRY_VERIFY(!client.busy());
         QCOMPARE(uploads, 1); QVERIFY(uploadBody.contains("document-content-123")); QVERIFY(uploadBody.contains(QStringLiteral("заметка.txt").toUtf8()));
         QCOMPARE(client.attachments().size(), 1); QVERIFY(!client.error().isEmpty()); QCOMPARE(sent.count(), 0);
+        QVERIFY(client.error().contains("Unsupported attachment"));QVERIFY(client.error().contains("Choose a supported file"));QVERIFY(client.error().contains("SCOTT-API-400 · 0123456789ab"));
         fail = false; client.sendChatMessage("Review"); QTRY_COMPARE(sent.count(), 1); QTRY_VERIFY(!client.chatsBusy());
         QCOMPARE(client.attachments().size(), 0); QCOMPARE(client.messages().size(), 2); QCOMPARE(uploads, 2);
         client.renameChat("Renamed"); QTRY_COMPARE(client.chatTitle(), "Renamed"); QTRY_VERIFY(!client.chatsBusy());

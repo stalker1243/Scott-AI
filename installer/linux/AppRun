@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+scott_appdir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# The image contains code only. run.sh selects the permanent, writable Python
+# and all installed-Linux stores use XDG paths through this immutable marker.
+exec /bin/bash "$scott_appdir/run.sh" "$@"

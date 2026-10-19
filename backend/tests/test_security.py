@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.routing import APIRoute
+from route_inventory import api_routes
 
 pytestmark = pytest.mark.unit
 
@@ -200,10 +201,13 @@ def test_dangerous_endpoints_still_guarded(app):
         "/internal/execute",
     }
 
-    for route in app.routes:
-        if isinstance(route, APIRoute) and route.path in protected:
+    checked = set()
+    for route in api_routes(app):
+        if route.path in protected:
+            checked.add(route.path)
             guards = " ".join(str(d.call) for d in route.dependant.dependencies)
             assert "require_scott_token" in guards, f"{route.path} без токена"
+    assert checked == protected, f"Не проверены защищённые маршруты: {protected - checked}"
 
 
 # ==================== Секреты ====================

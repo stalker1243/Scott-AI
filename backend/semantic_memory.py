@@ -9,7 +9,11 @@ MODEL_ID = 'intfloat/multilingual-e5-small'
 REVISION = '614241f622f53c4eeff9890bdc4f31cfecc418b3'
 MODEL_FILE = 'onnx/model_qint8_avx512_vnni.onnx'
 MODEL_KEY = f'{MODEL_ID}@{REVISION}:qint8:mean128:query-passage:v1'
-MODEL_DIR = Path(__file__).resolve().parent / 'data' / 'semantic-model' / REVISION
+try:
+    from .storage_paths import model_directory
+except ImportError:
+    from storage_paths import model_directory
+MODEL_DIR = model_directory('semantic-model') / REVISION
 DIMENSIONS = 384
 MIN_SIMILARITY = 0.80
 _lock = threading.RLock()

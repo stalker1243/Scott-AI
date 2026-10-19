@@ -15,7 +15,10 @@ ApplicationWindow {
     readonly property bool setupActive: setupController.visible
     onSetupActiveChanged: if (!setupActive) Qt.callLater(restoreFromTray)
     function raiseSetup() { setupDialog.show(); setupDialog.raise(); setupDialog.requestActivate() }
-    opacity: revealProgress
+    readonly property bool trayAvailable: desktopSupport.trayAvailable
+    readonly property bool windowPositioning: desktopSupport.windowPositioning
+    opacity: windowPositioning ? revealProgress : 1
+    contentItem.opacity: windowPositioning ? 1 : revealProgress
     title: "ScottAI"
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinMaxButtonsHint | (alwaysOnTop ? Qt.WindowStaysOnTopHint : 0)
     font.family: visual.fontFamily
@@ -23,9 +26,10 @@ ApplicationWindow {
     property bool navigationExpanded: preferences.initial.navigationExpanded
     property bool alwaysOnTop: preferences.initial.alwaysOnTop
     property bool trayNotifications: preferences.initial.trayNotifications
-    property real navigationWidth: navigationExpanded ? 164 : 64
+    property real navigationWidth: navigationExpanded ? 196 : 60
     property real moveEmphasis: windowEffects.interacting ? 1 : 0
     property string chatWarningFeature: ""
+    property bool updateDismissed: false
     readonly property string chatCapabilityWarning: chatWarningFeature.length ? CapabilityInfo.reason(backend.chatCapabilities, chatWarningFeature) : ""
     function requestChatFeature(feature) {
         const supported = CapabilityInfo.reason(backend.chatCapabilities, feature).length === 0
@@ -102,11 +106,12 @@ ApplicationWindow {
     property color ink: stylePalette.ink
     property color muted: stylePalette.muted
     property color line: stylePalette.line
-    readonly property var tabs: ["Обзор", "Диалог", "Система", "Внешний вид", "Память", "Настройки", "Профиль", "Действия", "Протоколы", "Модели"]
+    readonly property var tabs: [qsTranslate("Launcher", "Обзор"), qsTranslate("Launcher", "Диалог"), qsTranslate("Launcher", "Система"), qsTranslate("Launcher", "Внешний вид"), qsTranslate("Launcher", "Память"), qsTranslate("Launcher", "Настройки"), qsTranslate("Launcher", "Профиль"), qsTranslate("Launcher", "Действия"), qsTranslate("Launcher", "Протоколы"), qsTranslate("Launcher", "Модели"), qsTranslate("Launcher", "Логи"), qsTranslate("Launcher", "О нас")]
 
     color: "transparent"
     background: Rectangle {
         objectName: "windowSurface"
+        opacity: root.windowPositioning ? 1 : root.revealProgress
         radius: root.presentationVisibility === Window.Maximized || root.presentationVisibility === Window.FullScreen ? 0 : Math.min(16, root.styleDefinition.cardRadius)
         color: root.glassActive ? Qt.alpha(root.bg, root.glassOpacity) : root.bg
         border.color: root.moveEmphasis > 0.01 ? Qt.alpha(root.accentColor, 0.35 + root.moveEmphasis * 0.45) : root.line
@@ -115,6 +120,7 @@ ApplicationWindow {
         Behavior on radius { enabled: visual.motion; NumberAnimation { duration: 340; easing.type: Easing.InOutCubic } }
     }
     header: WindowTitleBar {
+        opacity: root.windowPositioning ? 1 : root.revealProgress
         windowHost: root; theme: visual
         pageTitle: root.tabs[root.displayedTab]; navigationExpanded: root.navigationExpanded
         statusText: backend.status; online: backend.online
@@ -146,7 +152,8 @@ ApplicationWindow {
         if (selectedTab === 1) Qt.callLater(function() { composer.forceActiveFocus() })
     }
     function hideToBackground() {
-        dismissWindow("hide")
+        if (trayAvailable) dismissWindow("hide")
+        else minimizeAnimated()
     }
     function requestQuit() {
         if (setupActive) { setupController.cancel(); Qt.quit(); return }
@@ -189,7 +196,7 @@ ApplicationWindow {
     function finishDismiss() {
         const action = dismissAction
         dismissAction = ""
-        if (action === "hide") hide()
+        if (action === "hide") { if (trayAvailable) hide(); else showMinimized() }
         else if (action === "minimize") showMinimized()
         else if (action === "close" || action === "quit") {
             closeApproved = true
@@ -200,12 +207,13 @@ ApplicationWindow {
         if (action === "quit") Qt.quit()
     }
     function moveToPosition(nextX, nextY) {
+        if (!windowPositioning) return
         dockAnimation.stop()
         if (visual.motion) { dockX.to = nextX; dockY.to = nextY; dockAnimation.start() }
         else { x = nextX; y = nextY }
     }
     function snapToScreenEdge() {
-        if (!visible || visibility !== Window.Windowed) return
+        if (!windowPositioning || !visible || visibility !== Window.Windowed) return
         const area = windowEffects.workArea
         if (area.width <= 0 || area.height <= 0) return
         let nextX = x, nextY = y
@@ -216,6 +224,7 @@ ApplicationWindow {
         if (nextX !== x || nextY !== y) moveToPosition(nextX, nextY)
     }
     function centerOnScreen() {
+        if (!windowPositioning) return
         if (visibility !== Window.Windowed) showNormal()
         const area = windowEffects.workArea
         moveToPosition(area.x + (area.width - width) / 2, area.y + (area.height - height) / 2)
@@ -278,11 +287,12 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             spacing: 12
             RowLayout {
-                Text { Layout.fillWidth: true; text: "История чата"; color: root.ink; font.pixelSize: 18; font.weight: Font.DemiBold }
-                ActionButton { text: "×"; implicitWidth: 30; implicitHeight: 30; onClicked: historyPopup.close(); ToolTip.visible: hovered; ToolTip.text: "Закрыть историю" }
+                Text { Layout.fillWidth: true; text: qsTranslate("Launcher", "История чата"); color: root.ink; font.pixelSize: 18; font.weight: Font.DemiBold }
+                ActionButton { text: "×"; implicitWidth: 30; implicitHeight: 30; onClicked: historyPopup.close(); ToolTip.visible: hovered; ToolTip.text: qsTranslate("Launcher", "Закрыть историю") }
             }
-            ActionButton { text: "+ Новый диалог"; primary: true; Layout.fillWidth: true; implicitHeight: 36; enabled: backend.online && !backend.chatsBusy && !backend.busy; onClicked: { backend.newChat(); historyPopup.close() } }
-            TextField { id: historySearch; objectName: "chatHistorySearch"; Layout.fillWidth: true; placeholderText: "Найти диалог"; color: root.ink; placeholderTextColor: root.muted; selectByMouse: true; background: FieldSurface { theme: visual } }
+            ActionButton { text: qsTranslate("Launcher", "+ Новый диалог"); primary: true; Layout.fillWidth: true; implicitHeight: 36; enabled: backend.online && !backend.chatsBusy && !backend.busy; onClicked: { backend.newChat(); historyPopup.close() } }
+            TextField { id: historySearch; objectName: "chatHistorySearch"; Layout.fillWidth: true; placeholderText: qsTranslate("Launcher", "Найти диалог"); color: root.ink; placeholderTextColor: root.muted; selectByMouse: true; background: FieldSurface { theme: visual } }
+            ChatToolButton { theme: visual; text: qsTranslate("Launcher", "Текущий диалог  ···"); Layout.fillWidth: true; enabled: backend.chatId.length > 0 && !backend.busy && !backend.chatsBusy; onClicked: { historyPopup.close(); chatMenu.open() } }
             ListView {
                 id: historyList; objectName: "chatHistoryList"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 6
                 model: backend.chats.filter(function(c) { return c.title.toLowerCase().includes(historySearch.text.toLowerCase()) })
@@ -299,21 +309,22 @@ ApplicationWindow {
                     contentItem: Column {
                         spacing: 5
                         Text { width: parent.width; text: modelData.title; color: root.ink; font.pixelSize: 13; font.weight: modelData.id === backend.chatId ? Font.DemiBold : Font.Normal; elide: Text.ElideRight }
-                        Text { text: (modelData.count || 0) + " сообщений · " + new Date(modelData.updated).toLocaleDateString(Qt.locale()); color: root.muted; font.pixelSize: 10 }
+                        Text { text: (modelData.count || 0) + qsTranslate("Launcher", " сообщений · ") + new Date(modelData.updated).toLocaleDateString(Qt.locale()); color: root.muted; font.pixelSize: 10 }
                     }
                     onClicked: { backend.openChat(modelData.id); historyPopup.close() }
                 }
             }
-            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: historyList.count === 0; text: backend.chatsBusy ? "Загрузка…" : historySearch.text.length ? "Диалоги не найдены" : "История пока пуста"; color: root.muted; font.pixelSize: 12 }
+            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; visible: historyList.count === 0; text: backend.chatsBusy ? qsTranslate("Launcher", "Загрузка…") : historySearch.text.length ? qsTranslate("Launcher", "Диалоги не найдены") : qsTranslate("Launcher", "История пока пуста"); color: root.muted; font.pixelSize: 12 }
             Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: root.line }
-            ActionButton { text: "Очистить историю…"; Layout.fillWidth: true; implicitHeight: 32; enabled: backend.chats.length > 0 && !backend.chatsBusy && !backend.busy; onClicked: { chatConfirmation.action = "all"; chatConfirmation.open(); historyPopup.close() } }
+            ActionButton { text: qsTranslate("Launcher", "Очистить историю…"); Layout.fillWidth: true; implicitHeight: 32; enabled: backend.chats.length > 0 && !backend.chatsBusy && !backend.busy; onClicked: { chatConfirmation.action = "all"; chatConfirmation.open(); historyPopup.close() } }
         }
     }
-    Menu {
-        id: chatMenu; x: root.width - width - 24; y: 135
-        MenuItem { text: "Переименовать"; onTriggered: { renameField.text = backend.chatTitle; renameDialog.open() } }
-        MenuItem { text: "Очистить диалог"; onTriggered: { chatConfirmation.action = "clear"; chatConfirmation.open() } }
-        MenuItem { text: "Удалить диалог"; onTriggered: { chatConfirmation.action = "delete"; chatConfirmation.open() } }
+    UiMenu {
+        theme: visual
+        id: chatMenu; x: 24; y: 190
+        UiMenuItem { theme: visual; text: qsTranslate("Launcher", "Переименовать"); onTriggered: { renameField.text = backend.chatTitle; renameDialog.open() } }
+        UiMenuItem { theme: visual; text: qsTranslate("Launcher", "Очистить диалог"); onTriggered: { chatConfirmation.action = "clear"; chatConfirmation.open() } }
+        UiMenuItem { theme: visual; text: qsTranslate("Launcher", "Удалить диалог"); onTriggered: { chatConfirmation.action = "delete"; chatConfirmation.open() } }
     }
     Popup {
         id: renameDialog; objectName: "renameChatDialog"; parent: Overlay.overlay
@@ -321,12 +332,12 @@ ApplicationWindow {
         modal: true; focus: true
         background: SurfacePanel { theme: visual; color: visual.popup }
         contentItem: ColumnLayout {
-            Text { text: "Название диалога"; color: root.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
+            Text { text: qsTranslate("Launcher", "Название диалога"); color: root.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
             TextField { id: renameField; Layout.fillWidth: true; maximumLength: 100; selectByMouse: true; color: root.ink; background: FieldSurface { theme: visual } onAccepted: { if (text.trim().length) { backend.renameChat(text); renameDialog.close() } } }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                ActionButton { text: "Отмена"; implicitHeight: 34; onClicked: renameDialog.close() }
-                ActionButton { text: "Сохранить"; primary: true; implicitHeight: 34; enabled: renameField.text.trim().length > 0; onClicked: { backend.renameChat(renameField.text); renameDialog.close() } }
+                ActionButton { text: qsTranslate("Launcher", "Отмена"); implicitHeight: 34; onClicked: renameDialog.close() }
+                ActionButton { text: qsTranslate("Launcher", "Сохранить"); primary: true; implicitHeight: 34; enabled: renameField.text.trim().length > 0; onClicked: { backend.renameChat(renameField.text); renameDialog.close() } }
             }
         }
     }
@@ -338,26 +349,26 @@ ApplicationWindow {
         background: SurfacePanel { theme: visual; color: visual.popup }
         contentItem: ColumnLayout {
             spacing: 12
-            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; text: chatConfirmation.action === "all" ? "Удалить всю историю?" : chatConfirmation.action === "delete" ? "Удалить диалог?" : "Очистить диалог?"; color: root.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
-            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; text: "Сообщения и вложения будут удалены. Память о вас хранится отдельно на вкладке «Память»."; color: root.muted; font.pixelSize: 13 }
+            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; text: chatConfirmation.action === "all" ? qsTranslate("Launcher", "Удалить всю историю?") : chatConfirmation.action === "delete" ? qsTranslate("Launcher", "Удалить диалог?") : qsTranslate("Launcher", "Очистить диалог?"); color: root.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
+            Text { Layout.fillWidth: true; wrapMode: Text.Wrap; text: qsTranslate("Launcher", "Сообщения и вложения будут удалены. Память о вас хранится отдельно на вкладке «Память»."); color: root.muted; font.pixelSize: 13 }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                ActionButton { text: "Отмена"; implicitHeight: 34; onClicked: chatConfirmation.close() }
-                ActionButton { text: "Удалить"; destructive: true; implicitHeight: 34; onClicked: { if (chatConfirmation.action === "clear") backend.clearSavedChat(); else backend.deleteChat(chatConfirmation.action === "all"); chatConfirmation.close() } }
+                ActionButton { text: qsTranslate("Launcher", "Отмена"); implicitHeight: 34; onClicked: chatConfirmation.close() }
+                ActionButton { text: qsTranslate("Launcher", "Удалить"); destructive: true; implicitHeight: 34; onClicked: { if (chatConfirmation.action === "clear") backend.clearSavedChat(); else backend.deleteChat(chatConfirmation.action === "all"); chatConfirmation.close() } }
             }
         }
     }
     ListModel { id: chatModel }
+    AppearancePanel { id: appearancePopup; parent: Overlay.overlay; theme: visual; host: root; companions: pets }
     function stageAction(phrase) {
         const text = phrase.trim()
         if (!text.length) return
-        composer.executeAction = true; composer.generateImage = false
         if (!composer.text.trim().length) composer.text = text
         else if (composer.text.trim() !== text) composer.text += "\n" + text
         selectedTab = 1
         Qt.callLater(function() { composer.forceActiveFocus() })
     }
-    Component.onCompleted: { sceneReady = true; settlePage(); syncMessages() }
+    Component.onCompleted: { sceneReady = true; settlePage(); syncMessages(); if (!smokeMode) pets.restore() }
     onSelectedTabChanged: {
         changePage()
         if (selectedTab === 4 && !smokeMode) backend.refreshMemories()
@@ -365,6 +376,7 @@ ApplicationWindow {
         if (selectedTab === 5 && !smokeMode) backend.refreshSettings()
         if (selectedTab === 6 && !smokeMode) backend.refreshProfile()
         if (selectedTab === 9 && !smokeMode) backend.refreshModels()
+        if (selectedTab === 10 && !smokeMode) diagnosticsController.refresh()
         if (selectedTab === 7 && !smokeMode) backend.refreshAbilities()
         if (selectedTab === 8 && !smokeMode) {
             backend.refreshProtocols()
@@ -419,11 +431,7 @@ ApplicationWindow {
         function onMemoryAdded() { memoryPage.clearDraft() }
         function onMessagesChanged() { root.syncMessages() }
         function onChatSent() { composer.clear() }
-        function onChatsChanged() {
-            const caps = backend.chatCapabilities.capabilities || ({})
-            if (!caps.image_generation) composer.generateImage = false
-            else if (caps.text === false) composer.generateImage = true
-        }
+        function onChatsChanged() { root.chatWarningFeature = "" }
     }
     onClosing: function(close) {
         if (closeApproved) return
@@ -473,8 +481,8 @@ ApplicationWindow {
         property bool dark: true
         readonly property bool chosen: root.darkMode === dark
         implicitWidth: 160; implicitHeight: 82; padding: 12; hoverEnabled: true
-        text: dark ? "Тёмная" : "Светлая"
-        Accessible.name: text + " тема"
+        text: dark ? qsTranslate("Launcher", "Тёмная") : qsTranslate("Launcher", "Светлая")
+        Accessible.name: text + qsTranslate("Launcher", " тема")
         onClicked: { root.darkMode = dark; root.persist() }
         scale: down ? 0.97 : hovered ? 1.02 : 1
         Behavior on scale { enabled: root.animationsEnabled; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
@@ -538,7 +546,7 @@ ApplicationWindow {
         readonly property var preview: Styles.palette(definition, root.darkMode)
         objectName: "styleTile-" + definition.id
         readonly property bool chosen: root.styleId === definition.id
-        text: definition.name; Accessible.name: text + " стиль"
+        text: definition.name; Accessible.name: text + qsTranslate("Launcher", " стиль")
         implicitWidth: 140; implicitHeight: 100; padding: 12; hoverEnabled: true
         scale: down ? 0.97 : 1
         Behavior on scale { enabled: visual.motion; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
@@ -577,15 +585,23 @@ ApplicationWindow {
             objectName: "navigationRail"
             Layout.preferredWidth: root.navigationWidth; Layout.minimumWidth: root.navigationWidth; Layout.maximumWidth: root.navigationWidth; Layout.fillHeight: true; clip: true
             radius: Math.min(16, visual.cardRadius); color: root.sidebar
-            border.color: Qt.alpha(root.line, 0.65)
+            border.color: "transparent"
             AppNavigation {
                 anchors.fill: parent; theme: visual; client: backend
                 titles: root.tabs; selectedTab: root.selectedTab; expanded: root.navigationExpanded
                 onActivated: function(tab) { root.selectedTab = tab }
+                onAppearanceRequested: appearancePopup.open()
             }
         }
         ColumnLayout {
             Layout.fillWidth: true; Layout.fillHeight: true; spacing: 0
+            RowLayout {
+                visible: updateController.available && !root.updateDismissed
+                Layout.fillWidth: true; Layout.leftMargin: 18; Layout.rightMargin: 12; Layout.topMargin: 8
+                Text { Layout.fillWidth: true; text: qsTranslate("Launcher", "Доступен Scott AI ") + updateController.version; color: root.ink; font.pixelSize: 12; elide: Text.ElideRight }
+                ActionButton { text: updateController.busy ? qsTranslate("Launcher", "Подождите…") : updateController.canInstall ? qsTranslate("Launcher", "Обновить") : qsTranslate("Launcher", "Открыть выпуск"); enabled: !updateController.busy; onClicked: updateController.canInstall ? updateController.install() : updateController.openRelease() }
+                ActionButton { text: qsTranslate("Launcher", "Позже"); enabled: !updateController.busy; onClicked: root.updateDismissed = true }
+            }
             StackLayout {
                 id: pages
                 objectName: "pages"
@@ -594,7 +610,11 @@ ApplicationWindow {
                 enabled: !pageOut.running
                 Layout.fillWidth: true; Layout.fillHeight: true
                 Layout.minimumHeight: 0; Layout.minimumWidth: 0
-                Layout.leftMargin: 12; Layout.rightMargin: 4; Layout.topMargin: 8; Layout.bottomMargin: 4
+                Layout.maximumWidth: root.displayedTab === 1 ? 964 : 1084
+                Layout.alignment: Qt.AlignHCenter
+                Layout.leftMargin: 24
+                Layout.rightMargin: 20
+                Layout.topMargin: 12; Layout.bottomMargin: 12
                 currentIndex: root.displayedTab
 
                 ParallelAnimation {
@@ -614,95 +634,45 @@ ApplicationWindow {
                 }
 
                 // Home
-                ScrollView {
-                    id: homeScroll
-                    contentWidth: availableWidth; clip: true; rightPadding: 12
-                    ScrollBar.vertical: UiScrollBar {
-                        theme: visual; parent: homeScroll
-                        x: homeScroll.width - width; y: homeScroll.topPadding; height: homeScroll.availableHeight
-                    }
-                    ColumnLayout {
-                        width: parent.width; spacing: 12
-                        Card {
-                            Layout.fillWidth: true; implicitHeight: 132
-                            ColumnLayout {
-                                anchors.fill: parent; anchors.margins: 18; spacing: 12
-                                RowLayout {
-                                    Text { text: "ScottAI"; color: root.ink; font.family: visual.fontFamily; font.pixelSize: 22; font.weight: Font.DemiBold }
-                                    Item { Layout.fillWidth: true }
-                                    Text { text: backend.status; color: backend.online ? visual.success : root.muted; font.family: visual.fontFamily; font.pixelSize: 12 }
-                                }
-                                RowLayout {
-                                    ActionButton { text: "Диалог"; primary: true; enabled: backend.online; onClicked: { root.selectedTab = 1; composer.forceActiveFocus() } }
-                                    ActionButton { text: "Память"; onClicked: root.selectedTab = 4 }
-                                    Item { Layout.fillWidth: true }
-                                    ActionButton { text: backend.starting ? "Запуск…" : "Запустить Scott"; visible: !backend.online; enabled: !backend.starting; onClicked: backend.startBackend() }
-                                }
-                            }
-                        }
-                        RowLayout {
-                            spacing: 12; Layout.fillWidth: true
-                            MetricCard { Layout.fillWidth: true; caption: "Процессор"; value: root.metric("cpu"); percentage: backend.metrics.cpu || 0 }
-                            MetricCard { Layout.fillWidth: true; caption: "Память"; value: root.metric("ram"); percentage: backend.metrics.ram || 0 }
-                            MetricCard { Layout.fillWidth: true; caption: "Видеокарта"; value: root.metric("gpu"); percentage: backend.metrics.gpu || 0 }
-                        }
-                        RowLayout {
-                            Layout.fillWidth: true; spacing: 8
-                            Repeater {
-                                model: ["Что ты умеешь?", "Нагрузка компьютера", "Свободная память"]
-                                ActionButton {
-                                    required property string modelData
-                                    Layout.fillWidth: true; Layout.minimumWidth: 0; text: modelData
-                                    onClicked: { root.selectedTab = 1; composer.text = modelData; composer.forceActiveFocus() }
-                                }
-                            }
-                        }
-                        UiNotice { theme: visual; text: backend.error; error: true; Layout.fillWidth: true }
-                    }
+                OverviewPage {
+                    objectName: "overviewPage"; theme: visual; client: backend
+                    onChatRequested: { root.selectedTab = 1; composer.forceActiveFocus() }
+                    onPetsRequested: { appearancePopup.section = 1; appearancePopup.open() }
                 }
 
                 // Chat
+                Item {
                 ColumnLayout {
-                    spacing: 8
+                    objectName: "chatWorkspace"
+                    width: Math.min(parent.width, 920); height: parent.height
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 12
                     RowLayout {
-                        ActionButton { objectName: "chatHistoryButton"; text: "История"; implicitHeight: 32; enabled: !backend.busy && !backend.chatsBusy; onClicked: { if (!smokeMode) backend.refreshChats(); historyPopup.open() } ToolTip.visible: hovered; ToolTip.text: "История чата" }
-                        Text { Layout.fillWidth: true; Layout.minimumWidth: 0; text: backend.chatTitle || "Новый диалог"; color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold; elide: Text.ElideRight }
-                        ActionButton { text: "+ Новый"; implicitHeight: 32; enabled: backend.online && !backend.busy && !backend.chatsBusy; onClicked: backend.newChat(); ToolTip.visible: hovered; ToolTip.text: "Новый диалог" }
-                        ActionButton { text: "···"; implicitHeight: 32; implicitWidth: 34; enabled: !backend.busy && !backend.chatsBusy && backend.chatId.length > 0; onClicked: chatMenu.open(); ToolTip.visible: hovered; ToolTip.text: "Действия с диалогом" }
-                    }
-                    RowLayout {
-                        spacing: 8
-                        Text { Layout.fillWidth: true; Layout.minimumWidth: 0; text: backend.chatCapabilities.model || "Выберите модель"; elide: Text.ElideMiddle; color: root.muted; font.pixelSize: 11 }
-                        ActionButton { text: "Модель ↗"; implicitHeight: 26; enabled: !backend.busy; onClicked: root.selectedTab = 9; ToolTip.visible: hovered; ToolTip.text: "Выбор модели и её возможности" }
+                        Layout.fillWidth: true; spacing: 12
+                        ChatToolButton { theme: visual; objectName: "chatHistoryButton"; text: qsTranslate("Launcher", "История"); enabled: !backend.busy && !backend.chatsBusy; onClicked: { if (!smokeMode) backend.refreshChats(); historyPopup.open() } }
+                        Text { Layout.fillWidth: true; Layout.minimumWidth: 0; text: backend.chatTitle || qsTranslate("Launcher", "Новый диалог"); color: root.ink; font.pixelSize: 13; elide: Text.ElideRight }
+                        Text { Layout.maximumWidth: 180; text: backend.chatCapabilities.model || ""; elide: Text.ElideMiddle; color: root.muted; font.pixelSize: 10 }
                     }
                     RowLayout {
                         visible: root.chatCapabilityWarning.length > 0
                         Layout.fillWidth: true
                         UiNotice { objectName: "chatCapabilityNotice"; theme: visual; warning: true; text: root.chatCapabilityWarning; Layout.fillWidth: true }
-                        ActionButton { objectName: "chatWarningModelsButton"; text: "Модели"; implicitHeight: 30; enabled: !backend.busy; onClicked: root.selectedTab = 9 }
-                        ActionButton { text: "×"; implicitWidth: 26; implicitHeight: 30; visible: root.chatWarningFeature.length > 0; onClicked: root.chatWarningFeature = "" }
                     }
-                    Card {
+                    UiNotice { objectName: "chatRequestError"; theme: visual; text: backend.error; error: true; Layout.fillWidth: true }
+                    Item {
                         Layout.fillWidth: true; Layout.fillHeight: true
                         Column {
                             anchors.centerIn: parent; spacing: 12; visible: backend.messages.length === 0
                             Image { anchors.horizontalCenter: parent.horizontalCenter; width: 72; height: 72; source: root.lightIcon ? "qrc:/brand/scott-logo-light.png" : "qrc:/brand/scott-logo.png" }
-                            Text { font.family: visual.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: "Напишите Scott"; color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
-                            Text { font.family: visual.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: backend.online ? "" : "Запустите Scott на вкладке «Система»."; color: root.muted; font.pixelSize: 13 }
+                            Text { font.family: visual.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: qsTranslate("Launcher", "Чем помочь?"); color: root.ink; font.pixelSize: 24; font.weight: Font.DemiBold }
+                            Text { font.family: visual.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: backend.online ? "" : qsTranslate("Launcher", "Запустите Scott на вкладке «Система»."); color: root.muted; font.pixelSize: 13 }
                         }
                         ListView {
                             id: chatList
                             objectName: "chatList"
-                            anchors.fill: parent; anchors.margins: 18; anchors.rightMargin: 28
-                            spacing: 16; clip: true; model: chatModel
+                            anchors.fill: parent; anchors.margins: 2; anchors.rightMargin: 12
+                            spacing: 22; clip: true; model: chatModel
                             ScrollBar.vertical: UiScrollBar { theme: visual }
-                            add: Transition {
-                                enabled: root.animationsEnabled && root.visible && root.displayedTab === 1
-                                ParallelAnimation {
-                                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 220; easing.type: Easing.OutCubic }
-                                    NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: 260; easing.type: Easing.OutCubic }
-                                }
-                            }
                             delegate: Item {
                                 id: message
                                 required property int index
@@ -711,22 +681,40 @@ ApplicationWindow {
                                 required property string body
                                 required property string mediaJson
                                 required property string modelName
-                                width: ListView.view.width; height: bubble.height
+                                width: ListView.view.width; implicitHeight: bubble.height; height: implicitHeight
+                                // Loader/text sizes can settle after ListView's
+                                // first layout, particularly on a Wayland surface.
+                                onHeightChanged: Qt.callLater(chatList.forceLayout)
+                                property real arrivalProgress: 1
+                                opacity: arrivalProgress
+                                scale: 0.96 + arrivalProgress * 0.04
+                                Component.onCompleted: Qt.callLater(chatList.forceLayout)
+                                ListView.onAdd: if (root.animationsEnabled && root.visible && root.displayedTab === 1 && root.revealProgress === 1) arrivalAnimation.start()
+                                NumberAnimation {
+                                    id: arrivalAnimation; target: message; property: "arrivalProgress"
+                                    from: 0; to: 1; duration: 220; easing.type: Easing.OutCubic
+                                }
+                                Connections {
+                                    target: root
+                                    function onAnimationsEnabledChanged() {
+                                        if (!root.animationsEnabled) { arrivalAnimation.stop(); message.arrivalProgress = 1 }
+                                    }
+                                }
                                 transformOrigin: speaker === "user" ? Item.BottomRight : Item.BottomLeft
                                 Rectangle {
                                     id: bubble
-                                    width: Math.min(parent.width * 0.86, 700)
-                                    height: messageContent.implicitHeight + 32
+                                    width: message.speaker === "user" ? Math.min(parent.width * 0.88, 700) : parent.width
+                                    height: messageContent.implicitHeight + 24
                                     anchors.right: message.speaker === "user" ? parent.right : undefined
                                     radius: visual.controlRadius + 2
                                     Behavior on radius { enabled: visual.motion; NumberAnimation { duration: 220 } }
-                                    color: message.speaker === "user" ? root.elevated : root.bg
-                                    border.color: message.speaker === "error" ? "#ae6653" : root.line
+                                    color: message.speaker === "user" ? root.elevated : "transparent"
+                                    border.color: message.speaker === "error" ? "#ae6653" : "transparent"
                                     ColumnLayout {
                                         id: messageContent
-                                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 16; spacing: 8
-                                        Text { font.family: visual.fontFamily; text: message.speaker === "user" ? "ВЫ" : message.speaker === "error" ? "НЕ УДАЛОСЬ ОТПРАВИТЬ" : "SCOTT"; color: root.accentColor; font.pixelSize: 10; font.weight: Font.Bold; font.letterSpacing: 1 }
-                                        CopyLabel { Layout.fillWidth: true; text: message.body }
+                                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 12; spacing: 6
+                                        Text { font.family: visual.fontFamily; text: message.speaker === "user" ? qsTranslate("Launcher", "Вы") : message.speaker === "error" ? qsTranslate("Launcher", "Не удалось отправить") : "Scott"; color: root.muted; font.pixelSize: 11; font.weight: Font.DemiBold }
+                                        ChatMessageBody { Layout.fillWidth: true; theme: visual; text: message.body; formatCode: message.speaker === "assistant"; messageIndex: message.index }
                                         Repeater {
                                             model: JSON.parse(message.mediaJson)
                                             delegate: ColumnLayout {
@@ -735,7 +723,7 @@ ApplicationWindow {
                                                 Image { Layout.fillWidth: true; Layout.preferredHeight: 180; visible: modelData.mime.indexOf("image/") === 0; source: visible ? modelData.url : ""; fillMode: Image.PreserveAspectFit; asynchronous: true }
                                                 RowLayout {
                                                     Text { Layout.fillWidth: true; Layout.minimumWidth: 0; text: modelData.name; color: root.muted; font.pixelSize: 11; elide: Text.ElideMiddle }
-                                                    ActionButton { visible: message.speaker === "assistant" && modelData.mime.indexOf("image/") === 0; text: "Сохранить"; implicitHeight: 28; onClicked: backend.saveChatImage(modelData.url) }
+                                                    ActionButton { visible: message.speaker === "assistant" && modelData.mime.indexOf("image/") === 0; text: qsTranslate("Launcher", "Сохранить"); implicitHeight: 28; onClicked: backend.saveChatImage(modelData.url) }
                                                 }
                                             }
                                         }
@@ -746,6 +734,7 @@ ApplicationWindow {
                         }
                     }
                     RowLayout {
+                        visible: backend.busy || !backend.online || backend.chatNotice.length > 0 || backend.browserState.state === "running" || backend.browserState.state === "cancelling" || backend.browserState.state === "failed"
                         spacing: 7
                         Repeater {
                             model: 3
@@ -764,17 +753,26 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        Text { Layout.fillWidth: true; wrapMode: Text.Wrap; font.family: visual.fontFamily; text: backend.busy ? (composer.generateImage ? "Scott создаёт изображение…" : "Scott готовит ответ…") : !backend.online ? "Нет подключения к Scott" : backend.chatNotice || "Enter — отправить · Shift + Enter — новая строка"; color: root.muted; font.pixelSize: 11 }
+                        Text { objectName: "chatActivity"; Layout.fillWidth: true; wrapMode: Text.Wrap; font.family: visual.fontFamily; text: backend.busy ? qsTranslate("Launcher", "Scott выполняет запрос…") : !backend.online ? qsTranslate("Launcher", "Нет подключения к Scott") : backend.browserState.state === "running" || backend.browserState.state === "cancelling" || backend.browserState.state === "failed" ? backend.browserState.message : backend.chatNotice; color: root.muted; font.pixelSize: 11 }
                     }
-                    Card {
-                        Layout.fillWidth: true; implicitHeight: backend.attachments.length ? 154 : 116
-                        border.color: composer.activeFocus ? root.accentColor : root.line
-                        Rectangle {
-                            anchors.fill: parent; anchors.margins: -3; radius: parent.radius + 3
-                            color: "transparent"; border.width: 2; border.color: root.accentColor
-                            opacity: composer.activeFocus ? 0.20 : 0
-                            Behavior on opacity { enabled: visual.motion; NumberAnimation { duration: 180 } }
+                    ScrollView {
+                        visible: (backend.browserState.candidates || []).length > 0
+                        Layout.fillWidth: true; Layout.preferredHeight: Math.min(browserResults.implicitHeight, 116)
+                        contentWidth: availableWidth; clip: true
+                        ColumnLayout {
+                            id: browserResults; width: parent.width; spacing: 5
+                            Repeater {
+                                model: backend.browserState.candidates || []
+                                Text { required property var modelData; required property int index; objectName: "chatBrowserResult" + index; Layout.fillWidth: true; text: (index + 1) + ". " + modelData.title; textFormat: Text.PlainText; wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight; color: root.ink; font.pixelSize: 12 }
+                            }
+                            Text { text: qsTranslate("Launcher", "Например: «включи второе»"); color: root.muted; font.pixelSize: 11 }
                         }
+                    }
+                    ProgressBar { visible: backend.browserState.state === "running"; Layout.fillWidth: true; implicitHeight: 3; from: 0; to: 1; value: backend.browserState.progress || 0; indeterminate: backend.browserState.stage === "starting" }
+                    Card {
+                        objectName: "chatComposerSurface"
+                        Layout.fillWidth: true; implicitHeight: Math.min(144, Math.max(44, composer.contentHeight + 4)) + 56 + (backend.attachments.length ? 42 : 0)
+                        border.color: composer.activeFocus ? Qt.alpha(root.accentColor, 0.65) : root.line
                         ColumnLayout {
                             anchors.fill: parent; anchors.margins: 10; spacing: 4
                             RowLayout {
@@ -799,37 +797,26 @@ ApplicationWindow {
                                 Layout.fillWidth: true; Layout.fillHeight: true
                                 TextArea { font.family: visual.fontFamily;
                                     id: composer; objectName: "chatComposer"
-                                    property bool generateImage: false
-                                    property bool executeAction: false
-                                    placeholderText: generateImage ? "Опишите изображение…" : executeAction ? "Команда для Scott…" : "Сообщение или вопрос о файле…"; placeholderTextColor: root.muted
+                                    placeholderText: qsTranslate("Launcher", "Спросите или поручите задачу…"); placeholderTextColor: root.muted
                                     color: root.ink; wrapMode: TextEdit.Wrap; selectByMouse: true
                                     background: null
-                                    function submit() { if (!backend.busy && !backend.chatsBusy && backend.online && (text.trim().length > 0 || backend.attachments.length > 0)) backend.sendChatMessage(text, generateImage, executeAction) }
+                                    function submit() { if (!backend.busy && !backend.chatsBusy && backend.online && (text.trim().length > 0 || backend.attachments.length > 0)) backend.sendChatMessage(text) }
                                     Keys.onReturnPressed: function(event) { if (!(event.modifiers & Qt.ShiftModifier)) { submit(); event.accepted = true } else event.accepted = false }
                                     Keys.onEnterPressed: function(event) { if (!(event.modifiers & Qt.ShiftModifier)) { submit(); event.accepted = true } else event.accepted = false }
                                 }
                             }
                             RowLayout {
                                 Layout.fillWidth: true; spacing: 6
-                                ActionButton { objectName: "attachFileButton"; text: "+ Файл"; implicitHeight: 30; enabled: !backend.busy && !composer.generateImage && !composer.executeAction; opacity: (backend.chatCapabilities.capabilities || {}).documents === true ? 1 : 0.65; onClicked: if (root.requestChatFeature("documents")) backend.chooseAttachments(false); ToolTip.visible: hovered; ToolTip.text: CapabilityInfo.description(backend.chatCapabilities.capabilities || ({}), "documents") }
-                                ActionButton { objectName: "attachPhotoButton"; text: "Фото"; implicitHeight: 30; enabled: !backend.busy && !composer.generateImage && !composer.executeAction; opacity: (backend.chatCapabilities.capabilities || {}).images === true ? 1 : 0.65; onClicked: if (root.requestChatFeature("images")) backend.chooseAttachments(true); ToolTip.visible: hovered; ToolTip.text: CapabilityInfo.description(backend.chatCapabilities.capabilities || ({}), "images") }
-                                ActionButton { text: composer.executeAction ? "Действие ✓" : "Действие"; primary: composer.executeAction; implicitHeight: 30; enabled: !backend.busy && backend.attachments.length === 0; onClicked: { composer.executeAction = !composer.executeAction; composer.generateImage = false } }
-                                ActionButton {
-                                    objectName: "generateImageButton"
-                                    text: composer.generateImage ? "Картинка ✓" : "Картинка"
-                                    primary: composer.generateImage; implicitHeight: 30
-                                    opacity: (backend.chatCapabilities.capabilities || {}).image_generation === true ? 1 : 0.65
-                                    enabled: !backend.busy && backend.attachments.length === 0
-                                    onClicked: { if (root.requestChatFeature("image_generation")) { composer.generateImage = !composer.generateImage; composer.executeAction = false } }
-                                    ToolTip.visible: hovered
-                                    ToolTip.text: CapabilityInfo.description(backend.chatCapabilities.capabilities || ({}), "image_generation")
-                                }
+                                ChatToolButton { theme: visual; objectName: "attachPhotoButton"; text: qsTranslate("Launcher", "Фото"); enabled: !backend.busy; onClicked: if (root.requestChatFeature("images")) backend.chooseAttachments(true); ToolTip.visible: hovered; ToolTip.text: CapabilityInfo.description(backend.chatCapabilities.capabilities || ({}), "images") }
+                                ChatToolButton { theme: visual; objectName: "attachFileButton"; text: qsTranslate("Launcher", "Файл"); enabled: !backend.busy; onClicked: if (root.requestChatFeature("documents")) backend.chooseAttachments(false); ToolTip.visible: hovered; ToolTip.text: CapabilityInfo.description(backend.chatCapabilities.capabilities || ({}), "documents") }
                                 Item { Layout.fillWidth: true }
-                                ActionButton { text: "↑"; primary: true; implicitWidth: 36; implicitHeight: 30; enabled: backend.online && !backend.busy && !backend.chatsBusy && (composer.text.trim().length > 0 || backend.attachments.length > 0); onClicked: composer.submit(); ToolTip.visible: hovered; ToolTip.text: "Отправить" }
+                                ActionButton { text: "↑"; primary: true; implicitWidth: 36; implicitHeight: 30; enabled: backend.online && !backend.busy && !backend.chatsBusy && (composer.text.trim().length > 0 || backend.attachments.length > 0); onClicked: composer.submit(); ToolTip.visible: hovered; ToolTip.text: qsTranslate("Launcher", "Отправить") }
                             }
                         }
-                        DropArea { anchors.fill: parent; onDropped: function(drop) { if (drop.hasUrls && !composer.generateImage && !composer.executeAction) { backend.stageAttachments(drop.urls); drop.acceptProposedAction() } } }
+                        DropArea { anchors.fill: parent; onDropped: function(drop) { if (drop.hasUrls) { backend.stageAttachments(drop.urls); drop.acceptProposedAction() } } }
                     }
+                    Shortcut { sequence: "Escape"; enabled: root.selectedTab === 1 && backend.online && backend.browserState.state === "running" && !historyPopup.visible && !appearancePopup.visible && !renameDialog.visible && !chatConfirmation.visible && !chatMenu.visible; onActivated: backend.cancelBrowser() }
+                }
                 }
 
                 // System
@@ -838,7 +825,7 @@ ApplicationWindow {
                     GridLayout {
                         Layout.fillWidth: true; columns: 2; columnSpacing: 16; rowSpacing: 16
                         Repeater {
-                            model: [{name:"Процессор", key:"cpu"}, {name:"Оперативная память", key:"ram"}, {name:"Видеокарта", key:"gpu"}, {name:"Нагрузка на диск", key:"disk"}]
+                            model: [{name:qsTranslate("Launcher", "Процессор"), key:"cpu"}, {name:qsTranslate("Launcher", "Оперативная память"), key:"ram"}, {name:qsTranslate("Launcher", "Видеокарта"), key:"gpu"}, {name:qsTranslate("Launcher", "Нагрузка на диск"), key:"disk"}]
                             delegate: MetricCard { required property var modelData; Layout.fillWidth: true; caption: modelData.name; value: root.metric(modelData.key); percentage: backend.metrics[modelData.key] || 0 }
                         }
                     }
@@ -846,12 +833,12 @@ ApplicationWindow {
                         Layout.fillWidth: true; implicitHeight: 106
                         ColumnLayout {
                             anchors.fill: parent; anchors.margins: 16; spacing: 10
-                            Text { font.family: visual.fontFamily; text: "Подключение"; color: root.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
+                            Text { font.family: visual.fontFamily; text: qsTranslate("Launcher", "Подключение"); color: root.ink; font.pixelSize: 17; font.weight: Font.DemiBold }
                             RowLayout {
-                                Text { font.family: visual.fontFamily; text: backend.status; color: root.muted; Layout.fillWidth: true }
-                                ActionButton { text: "Обновить"; onClicked: backend.refresh() }
-                                ActionButton { text: "Запустить"; enabled: !backend.online && !backend.starting; onClicked: backend.startBackend() }
-                                ActionButton { text: "Остановить"; visible: backend.ownsBackend; onClicked: backend.stopBackend() }
+                                Text { font.family: visual.fontFamily; text: qsTranslate("Launcher", backend.status); color: root.muted; Layout.fillWidth: true }
+                                ActionButton { text: qsTranslate("Launcher", "Обновить"); onClicked: backend.refresh() }
+                                ActionButton { text: qsTranslate("Launcher", "Запустить"); enabled: !backend.online && !backend.starting; onClicked: backend.startBackend() }
+                                ActionButton { text: qsTranslate("Launcher", "Остановить"); visible: backend.ownsBackend; onClicked: backend.stopBackend() }
                             }
                         }
                     }
@@ -874,7 +861,7 @@ ApplicationWindow {
                             Layout.fillWidth: true; implicitHeight: 146
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 16; spacing: 12
-                                Text { font.family: visual.fontFamily; text: "Тема окна"; color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
+                                Text { font.family: visual.fontFamily; text: qsTranslate("Launcher", "Тема окна"); color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
                                 RowLayout {
                                     spacing: 12
                                     ThemeTile { dark: true }
@@ -888,7 +875,7 @@ ApplicationWindow {
                             Layout.fillWidth: true; implicitHeight: styleGrid.implicitHeight + 62
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 16; spacing: 12
-                                Text { font.family: visual.fontFamily; text: "Стиль интерфейса"; color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
+                                Text { font.family: visual.fontFamily; text: qsTranslate("Launcher", "Стиль интерфейса"); color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
                                 GridLayout {
                                     id: styleGrid
                                     Layout.fillWidth: true; columns: 3; columnSpacing: 12; rowSpacing: 12
@@ -903,7 +890,7 @@ ApplicationWindow {
                             Layout.fillWidth: true; implicitHeight: 116
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 16; spacing: 12
-                                Text { font.family: visual.fontFamily; text: "Акцентный цвет"; color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
+                                Text { font.family: visual.fontFamily; text: qsTranslate("Launcher", "Акцентный цвет"); color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
                                 RowLayout {
                                     spacing: 14
                                     Repeater {
@@ -916,7 +903,7 @@ ApplicationWindow {
                                             scale: down ? 0.94 : hovered ? 1.12 : 1
                                             Behavior on scale { enabled: root.animationsEnabled; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                                             HoverHandler { cursorShape: Qt.PointingHandCursor }
-                                            Accessible.name: "Акцент " + modelData
+                                            Accessible.name: qsTranslate("Launcher", "Акцент ") + modelData
                                             background: Rectangle {
                                                 radius: 20; color: modelData
                                                 border.width: root.accentOverride === modelData || swatch.activeFocus ? 3 : 0; border.color: root.ink
@@ -925,7 +912,7 @@ ApplicationWindow {
                                             onClicked: { root.accentOverride = modelData; root.persist() }
                                         }
                                     }
-                                    ActionButton { text: "По стилю"; primary: root.accentOverride.length === 0; onClicked: { root.accentOverride = ""; root.persist() } }
+                                    ActionButton { text: qsTranslate("Launcher", "По стилю"); primary: root.accentOverride.length === 0; onClicked: { root.accentOverride = ""; root.persist() } }
                                 }
                             }
                         }
@@ -936,19 +923,19 @@ ApplicationWindow {
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 16; spacing: 8
                                 RowLayout {
-                                    Text { text: "Матовость стекла"; color: root.ink; font.family: visual.fontFamily; font.pixelSize: 15; font.weight: Font.DemiBold }
+                                    Text { text: qsTranslate("Launcher", "Матовость стекла"); color: root.ink; font.family: visual.fontFamily; font.pixelSize: 15; font.weight: Font.DemiBold }
                                     Item { Layout.fillWidth: true }
                                     Text { text: root.glassFrost + "%"; color: root.accentColor; font.family: visual.fontFamily; font.pixelSize: 15 }
                                 }
                                 UiSlider {
                                     objectName: "glassFrostSlider"
                                     theme: visual; Layout.fillWidth: true; value: root.glassFrost
-                                    Accessible.name: "Матовость стекла в процентах"
+                                    Accessible.name: qsTranslate("Launcher", "Матовость стекла в процентах")
                                     onMoved: { root.glassFrost = Math.round(value); glassFrostSave.restart() }
                                 }
                                 Text { text: windowEffects.available
-                                    ? "0% — прозрачное · 100% — матовое"
-                                    : "Размытие недоступно: меняется плотность фона.";
+                                    ? qsTranslate("Launcher", "0% — прозрачное · 100% — матовое")
+                                    : qsTranslate("Launcher", "Размытие недоступно: меняется плотность фона.");
                                     color: root.muted; font.family: visual.fontFamily; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
                             }
                             Timer { id: glassFrostSave; interval: 300; onTriggered: root.persist() }
@@ -959,19 +946,19 @@ ApplicationWindow {
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 16; spacing: 8
                                 RowLayout {
-                                    Text { font.family: visual.fontFamily; text: "Прозрачность панелей"; color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
+                                    Text { font.family: visual.fontFamily; text: qsTranslate("Launcher", "Прозрачность панелей"); color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
                                     Item { Layout.fillWidth: true }
                                     Text { font.family: visual.fontFamily; text: root.panelTransparency + "%"; color: root.accentColor; font.pixelSize: 15 }
                                 }
                                 UiSlider {
                                     id: transparencySlider; objectName: "transparencySlider"
                                     theme: visual; Layout.fillWidth: true; value: root.panelTransparency
-                                    Accessible.name: "Прозрачность панелей в процентах"
+                                    Accessible.name: qsTranslate("Launcher", "Прозрачность панелей в процентах")
                                     onMoved: { root.setPanelTransparency(value); transparencySave.restart() }
                                 }
                                 RowLayout {
-                                    Text { font.family: visual.fontFamily; text: "0% — непрозрачные · 100% — виден фон окна"; color: root.muted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                                    ActionButton { text: "По стилю"; implicitHeight: 34; onClicked: { const values = Object.assign({}, root.transparencyByStyle); delete values[root.styleDefinition.id]; root.transparencyByStyle = values; root.persist() } }
+                                    Text { font.family: visual.fontFamily; text: qsTranslate("Launcher", "0% — непрозрачные · 100% — виден фон окна"); color: root.muted; font.pixelSize: 12; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                                    ActionButton { text: qsTranslate("Launcher", "По стилю"); implicitHeight: 34; onClicked: { const values = Object.assign({}, root.transparencyByStyle); delete values[root.styleDefinition.id]; root.transparencyByStyle = values; root.persist() } }
                                 }
                             }
                             Timer { id: transparencySave; interval: 300; onTriggered: root.persist() }
@@ -980,20 +967,20 @@ ApplicationWindow {
                             Layout.fillWidth: true; implicitHeight: 112
                             ColumnLayout {
                                 anchors.fill: parent; anchors.margins: 16; spacing: 12
-                                Text { font.family: visual.fontFamily; text: "Значок приложения"; color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
+                                Text { font.family: visual.fontFamily; text: qsTranslate("Launcher", "Значок приложения"); color: root.ink; font.pixelSize: 15; font.weight: Font.DemiBold }
                                 RowLayout {
                                     spacing: 12
-                                    ActionButton { text: "Тёмный значок"; primary: !root.lightIcon; onClicked: { root.lightIcon = false; root.persist() } }
-                                    ActionButton { text: "Светлый значок"; primary: root.lightIcon; onClicked: { root.lightIcon = true; root.persist() } }
+                                    ActionButton { text: qsTranslate("Launcher", "Тёмный значок"); primary: !root.lightIcon; onClicked: { root.lightIcon = false; root.persist() } }
+                                    ActionButton { text: qsTranslate("Launcher", "Светлый значок"); primary: root.lightIcon; onClicked: { root.lightIcon = true; root.persist() } }
                                 }
                             }
                         }
                         PreferenceSwitch {
-                            text: "Плавные анимации"; checked: root.animationsEnabled
+                            text: qsTranslate("Launcher", "Плавные анимации"); checked: root.animationsEnabled
                             onToggled: { root.animationsEnabled = checked; root.persist() }
                         }
                         PreferenceSwitch {
-                            text: "Закрывать в трей"; checked: root.hideToTray; enabled: trayAvailable
+                            text: qsTranslate("Launcher", "Закрывать в трей"); checked: root.hideToTray; enabled: trayAvailable
                             onToggled: { root.hideToTray = checked; root.persist() }
                         }
                     }
@@ -1009,6 +996,7 @@ ApplicationWindow {
                     ink: root.ink; muted: root.muted; line: root.line; accent: root.accentColor
                 }
                 SettingsPage {
+                    updater: updateController
                     objectName: "settingsPage"; client: backend; theme: visual
                     backgroundAllowed: trayAvailable; backgroundEnabled: root.hideToTray
                     notificationsEnabled: root.trayNotifications
@@ -1029,6 +1017,8 @@ ApplicationWindow {
                 ModelsPage {
                     objectName: "modelsPage"; client: backend; theme: visual
                 }
+                LogsPage { objectName: "logsPage"; controller: diagnosticsController; theme: visual }
+                AboutPage { objectName: "aboutPage"; theme: visual }
             }
         }
     }

@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import io
 import mimetypes
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -55,6 +56,7 @@ MAX_BYTES = 20 * 1024 * 1024
 # равно рассматривает его в уменьшенном виде. Полторы тысячи — предел, после
 # которого мелкий текст на снимке ещё читается, а вес уже приемлем.
 MAX_IMAGE_SIDE = 1568
+MAX_DOCX_EXPANDED = 64 * 1024 * 1024
 
 # Сколько текста брать из документа.
 #
@@ -141,8 +143,8 @@ def read(path: str | Path, data: Optional[bytes] = None) -> Attachment:
             name=name, kind="refused",
             error=f"Не знаю, что делать с файлами «{suffix or 'без расширения'}». "
                   "Понимаю картинки, PDF, документы Word и текстовые файлы")
-    except Exception as e:
-        return Attachment(name=name, kind="refused", error=f"Не удалось прочитать: {e}")
+    except Exception:
+        return Attachment(name=name, kind="refused", error="Не удалось прочитать файл. Проверьте его формат и попробуйте сохранить заново.")
 
 
 def _read_image(name: str, data: bytes) -> Attachment:
@@ -244,6 +246,10 @@ def _read_docx(name: str, data: bytes, suffix: str) -> Attachment:
                           error="Чтение документов Word недоступно: "
                                 "не установлена библиотека python-docx")
 
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        entries = archive.infolist()
+        if len(entries) > 2048 or sum(item.file_size for item in entries) > MAX_DOCX_EXPANDED or any(item.flag_bits & 1 for item in entries):
+            return Attachment(name=name, kind='refused', error='Документ слишком сложный или защищён. Сохраните нужную часть в новый DOCX или TXT.')
     document = python_docx.Document(io.BytesIO(data))
     parts = [p.text.strip() for p in document.paragraphs if p.text.strip()]
 

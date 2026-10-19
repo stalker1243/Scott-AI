@@ -16,10 +16,14 @@ ScottAI при старте, а импортировать main.py роутер�
 import asyncio
 import os
 import threading
+import secrets
 from typing import Dict
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+import bounded_work
+from api_boundary import error_response
+from security import require_scott_token, check_rate_limit
 
 try:
     from . import runtime as scott_runtime
@@ -131,22 +135,29 @@ async def ai_execute(request: Dict, http_request: Request):
     allowed = False
     if client_host in ('127.0.0.1', '::1', 'localhost'):
         allowed = True
-    if secret and header_key and secret == header_key:
+    if secret and header_key and secrets.compare_digest(secret.encode('utf-8'), header_key.encode('utf-8')):
         allowed = True
 
     if not allowed:
         return JSONResponse(status_code=403, content={"success": False, "message": "Доступ запрещён"})
 
     command_type = request.get('command_type')
-    params = request.get('params', {}) or {}
+    params = request.get('params', {})
+    if params is None:
+        params = {}
     announce = bool(request.get('announce', False))
 
     if not command_type:
         return JSONResponse(status_code=400, content={"success": False, "message": "Не указана команда"})
+    if not isinstance(command_type, str) or not isinstance(params, dict):
+        return error_response(422, http_request.scope)
+    if command_type in {'powershell', 'run_script', 'file_operation', 'system_command', 'delete_file', 'kill_process'} or (command_type in {'open_app', 'open_program'} and params.get('args')):
+        require_scott_token(http_request)
+        check_rate_limit(http_request)
 
     try:
         executor = get_command_executor()
-        result = executor.execute(command_type, **params)
+        result = await bounded_work.actions.run(lambda: executor.execute(command_type, **params), timeout=45)
 
         # Озвучивание результата, если требуется и голос доступен.
         # to_thread по той же причине, что и в /speak — генерация речи занимает
@@ -159,8 +170,12 @@ async def ai_execute(request: Dict, http_request: Request):
 
         return JSONResponse(status_code=200, content={"success": True, "result": result})
     except Exception as e:
-        print(f"❌ Ошибка выполнения команды через /ai/execute: {e}")
-        return JSONResponse(status_code=500, content={"success": False, "message": str(e)})
+        if isinstance(e, bounded_work.WorkBusy):
+            return error_response(503, http_request.scope)
+        if isinstance(e, bounded_work.WorkTimeout):
+            return error_response(504, http_request.scope)
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500) from e
 
 @router.post("/ai/toggle")
 async def toggle_ai_mode(enabled: bool):

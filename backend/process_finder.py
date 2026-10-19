@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+import os
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -43,7 +44,7 @@ PROTECTED = {
 
 # Сам Scott и его backend: закрывать себя по просьбе «закрой скотт» — верный
 # способ оборвать разговор на полуслове.
-OWN = {"scottai", "scottai.avalonia", "python", "python3", "pythonw"}
+OWN = {"scottai", "scottai.avalonia", "scottaiqt", "scottaipet", "scottaiupdater", "scottsystem", "python", "python3", "pythonw"}
 
 
 @dataclass
@@ -64,42 +65,17 @@ def _window_titles() -> dict:
     «Яндекс Браузер» — это `browser.exe`, а «Диспетчер задач» — `Taskmgr.exe`.
     Без окон такие просьбы не выполнить.
     """
-    titles: dict = {}
-
+    if os.environ.get('SCOTT_DESKTOP_DISABLED') == '1':
+        return {}
     try:
-        import ctypes
-        from ctypes import wintypes
-    except Exception:
+        from desktop_control import _worker, own_pids
+        snapshot = _worker(dict(operation='list', exclude_pids=own_pids()))
+        titles = {}
+        for window in snapshot.get('windows', []):
+            titles.setdefault(window['pid'], window['title'])
         return titles
-
-    if not hasattr(ctypes, "windll"):
-        return titles
-
-    user32 = ctypes.windll.user32
-    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-
-    def collect(hwnd, _):
-        if not user32.IsWindowVisible(hwnd):
-            return True
-
-        length = user32.GetWindowTextLengthW(hwnd)
-        if length <= 0:
-            return True
-
-        buffer = ctypes.create_unicode_buffer(length + 1)
-        user32.GetWindowTextW(hwnd, buffer, length + 1)
-
-        pid = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        titles.setdefault(pid.value, buffer.value)
-        return True
-
-    try:
-        user32.EnumWindows(callback_type(collect), 0)
     except Exception:
-        pass
-
-    return titles
+        return {}
 
 
 def _match_score(query: str, name: str, title: str) -> float:
@@ -143,6 +119,15 @@ def _match_score(query: str, name: str, title: str) -> float:
     return 0.0
 
 
+def _protected_pids():
+    result = {os.getpid()}
+    try:
+        result.update(parent.pid for parent in psutil.Process(os.getpid()).parents())
+    except Exception:
+        pass
+    return result
+
+
 def find_running(query: str, limit: int = 5) -> List[RunningApp]:
     """
     Найти работающие программы, похожие на запрос.
@@ -177,6 +162,7 @@ def find_running(query: str, limit: int = 5) -> List[RunningApp]:
             variants.add(re.sub(r"(а|у|ом|ы|и|е|я)$", "", variant))
 
     titles = _window_titles()
+    protected_pids = _protected_pids()
     found: List[RunningApp] = []
 
     for process in psutil.process_iter(["pid", "name"]):
@@ -184,7 +170,7 @@ def find_running(query: str, limit: int = 5) -> List[RunningApp]:
             name = (process.info.get("name") or "")
             base = name.lower().removesuffix(".exe")
 
-            if base in PROTECTED or base in OWN:
+            if base in PROTECTED or base in OWN or process.info['pid'] in protected_pids:
                 continue
 
             title = titles.get(process.info["pid"], "")
@@ -219,6 +205,13 @@ def close_running(query: str) -> dict:
 
     Возвращает {success, message, name, killed}.
     """
+    if os.name == 'nt' and os.environ.get('SCOTT_DESKTOP_DISABLED') != '1':
+        from desktop_control import execute
+        graceful = execute(dict(operation='close_app', query=query))
+        if graceful['success']:
+            return dict(success=True, message=graceful['response'], killed=0, requested=graceful.get('requested',0))
+        if graceful.get('code') != 'not_found':
+            return dict(success=False, message=graceful['response'], killed=0)
     if not PSUTIL_AVAILABLE:
         return {"success": False, "message": "psutil недоступен — закрывать нечем", "killed": 0}
 
@@ -234,10 +227,11 @@ def close_running(query: str) -> dict:
     target_name = target.name.lower()
     killed = 0
     denied = 0
+    protected_pids = _protected_pids()
 
     for process in psutil.process_iter(["pid", "name"]):
         try:
-            if (process.info.get("name") or "").lower() != target_name:
+            if process.info['pid'] in protected_pids or (process.info.get("name") or "").lower() != target_name:
                 continue
 
             process.terminate()

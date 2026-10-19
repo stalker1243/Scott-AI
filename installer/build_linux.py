@@ -40,14 +40,24 @@ def build(output: Path, qt_root: Path, jobs: int) -> Path:
     shared.copy_extras(output)
     shutil.copytree(ROOT/'assets/brand', output/'assets/brand', dirs_exist_ok=True)
     shared.copy_licenses(output, qt_root)
-    for name in ('install.py', 'install.sh', 'uninstall.sh', 'run.sh', 'python-environment.sh'):
+    for name in ('install.py', 'install.sh', 'uninstall.sh', 'run.sh', 'python-environment.sh', 'check_appimage.py'):
         target = output/name
         shutil.copy2(ROOT/'installer/linux'/name, target)
         target.chmod(0o755)
     if not (output/'launcher/ScottAIQt').is_file():
         raise RuntimeError('Qt executable is missing.')
+    if (not (output/'launcher/ScottAIUpdater').is_file()
+            or not all((output/'backend'/name).is_file() for name in ('update_package.py', 'update_appimage.py'))):
+        raise RuntimeError('The standalone updater or Linux update helper was not deployed.')
+    if not (output/'launcher/qt.conf').is_file():
+        raise RuntimeError('Qt runtime configuration must be deployed beside the launcher.')
     if not list((output/'lib').glob('libQt6Core.so*')):
         raise RuntimeError('Qt libraries were not deployed.')
+    platforms=output/'plugins/platforms'
+    if not (platforms/'libqxcb.so').is_file():
+        raise RuntimeError('The XCB platform plugin was not deployed.')
+    if not any((platforms/name).is_file() for name in ('libqwayland.so','libqwayland-generic.so')):
+        raise RuntimeError('The Wayland platform plugin was not deployed. Check the Qt WaylandClient SDK and deployment settings.')
     return output
 
 

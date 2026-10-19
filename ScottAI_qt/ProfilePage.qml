@@ -38,7 +38,7 @@ ColumnLayout {
         if (!addInterest()) return
         localNotice = ""
         if (dirty) client.saveProfile(nameField.text, aboutField.text, draftStyle, draftInterests)
-        else if (avatar.save()) localNotice = "Фото сохранено."
+        else if (avatar.save()) localNotice = qsTranslate("Launcher", "Фото сохранено.")
     }
     Component.onCompleted: syncDraft()
     Connections {
@@ -59,16 +59,17 @@ ColumnLayout {
     }
     component Card: SurfacePanel {
         theme: page.theme; Layout.fillWidth: true
+        flat: true
         default property alias content: body.data
         implicitHeight: body.implicitHeight + 32
         data: ColumnLayout { id: body; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 16; spacing: 10 }
     }
     RowLayout {
-        Text { text: page.changed ? "Изменения не сохранены" : client.profileBusy ? "Загрузка…" : ""; color: page.theme.muted; font.family: page.theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true }
-        UiButton { theme: page.theme; text: "Обновить"; enabled: client.online && !client.profileBusy; onClicked: client.refreshProfile() }
+        Text { text: page.changed ? qsTranslate("Launcher", "Изменения не сохранены") : client.profileBusy ? qsTranslate("Launcher", "Загрузка…") : ""; color: page.theme.muted; font.family: page.theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true }
+        UiButton { theme: page.theme; text: qsTranslate("Launcher", "Обновить"); enabled: client.online && !client.profileBusy; onClicked: client.refreshProfile() }
     }
     UiNotice { theme: page.theme; text: client.profileError || avatar.error; error: true; Layout.fillWidth: true }
-    UiNotice { theme: page.theme; text: !client.online ? "Scott недоступен. Изменения останутся в черновике." : ""; Layout.fillWidth: true }
+    UiNotice { theme: page.theme; text: !client.online ? qsTranslate("Launcher", "Scott недоступен. Изменения останутся в черновике.") : ""; Layout.fillWidth: true }
     ScrollView {
         id: scroll
         objectName: "profileScroll"
@@ -88,37 +89,37 @@ ColumnLayout {
                     }
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 8
-                        Label { text: "Имя" }
+                        Label { text: qsTranslate("Launcher", "Имя") }
                         Field {
                             id: nameField; objectName: "profileName"; Layout.fillWidth: true; maximumLength: 60
-                            placeholderText: "Как к вам обращаться?"
+                            placeholderText: qsTranslate("Launcher", "Как к вам обращаться?")
                             onTextEdited: { page.dirty = true; page.localNotice = "" }
                         }
                         RowLayout {
-                            UiButton { theme: page.theme; text: "Фото"; implicitHeight: 32; enabled: !client.profileBusy; onClicked: { page.avatar.beginCrop(); if (page.avatar.choose()) cropDialog.open(); else page.avatar.finishCrop(false) } }
-                            UiButton { theme: page.theme; text: "Кадр"; implicitHeight: 32; visible: page.avatar.hasAvatar; enabled: !client.profileBusy; onClicked: { page.avatar.beginCrop(); cropDialog.open() } }
-                            UiButton { theme: page.theme; text: "Удалить"; implicitHeight: 32; destructive: true; visible: page.avatar.hasAvatar; enabled: !client.profileBusy; onClicked: page.avatar.remove() }
+                            UiButton { theme: page.theme; text: qsTranslate("Launcher", "Фото"); implicitHeight: 32; enabled: !client.profileBusy; onClicked: { page.avatar.beginCrop(); if (page.avatar.choose()) cropDialog.open(); else page.avatar.finishCrop(false) } }
+                            UiButton { theme: page.theme; text: qsTranslate("Launcher", "Кадр"); implicitHeight: 32; visible: page.avatar.hasAvatar; enabled: !client.profileBusy; onClicked: { page.avatar.beginCrop(); cropDialog.open() } }
+                            UiButton { theme: page.theme; text: qsTranslate("Launcher", "Удалить"); implicitHeight: 32; destructive: true; visible: page.avatar.hasAvatar; enabled: !client.profileBusy; onClicked: page.avatar.remove() }
                         }
                     }
                 }
             }
             Card {
                 RowLayout {
-                    Label { text: "О себе"; Layout.fillWidth: true }
+                    Label { text: qsTranslate("Launcher", "О себе"); Layout.fillWidth: true }
                     Text { text: aboutField.text.length + " / 300"; color: aboutField.text.length > 300 ? page.theme.danger : page.theme.muted; font.pixelSize: 12 }
                 }
                 TextArea {
                     id: aboutField; objectName: "profileAbout"
                     Layout.fillWidth: true; Layout.preferredHeight: Math.max(76, contentHeight + 24); padding: 12
                     enabled: !client.profileBusy; color: page.theme.ink; font.family: page.theme.fontFamily
-                    placeholderText: "Что Scott стоит знать о вас?"; placeholderTextColor: page.theme.muted
+                    placeholderText: qsTranslate("Launcher", "Что Scott стоит знать о вас?"); placeholderTextColor: page.theme.muted
                     wrapMode: TextEdit.Wrap; selectByMouse: true; textFormat: TextEdit.PlainText
                     selectionColor: page.theme.accent; selectedTextColor: page.theme.accentText
                     background: FieldSurface { theme: page.theme; focused: aboutField.activeFocus; hovered: false; invalid: aboutField.text.length > 300 }
                     onTextChanged: if (!page.syncing) { page.dirty = true; page.localNotice = "" }
                 }
                 RowLayout {
-                    Label { text: "Характер ответов" }
+                    Label { text: qsTranslate("Launcher", "Характер ответов") }
                     UiComboBox {
                         id: styleBox; objectName: "profileStyle"
                         theme: page.theme; Layout.fillWidth: true; model: client.profile.styles || []
@@ -132,7 +133,7 @@ ColumnLayout {
             }
             Card {
                 RowLayout {
-                    Label { text: "Интересы"; Layout.fillWidth: true }
+                    Label { text: qsTranslate("Launcher", "Интересы"); Layout.fillWidth: true }
                     Text { text: page.draftInterests.length + " / 12"; color: page.theme.muted; font.pixelSize: 12 }
                 }
                 Flow {
@@ -143,7 +144,7 @@ ColumnLayout {
                             required property string modelData
                             theme: page.theme; text: modelData + "  ×"; implicitHeight: 32
                             width: Math.min(implicitWidth, interestsFlow.width)
-                            Accessible.name: "Убрать интерес: " + modelData; enabled: !client.profileBusy
+                            Accessible.name: qsTranslate("Launcher", "Убрать интерес: ") + modelData; enabled: !client.profileBusy
                             onClicked: { page.draftInterests = page.draftInterests.filter(function(v) { return v !== modelData }); page.dirty = true; page.localNotice = "" }
                         }
                     }
@@ -151,28 +152,28 @@ ColumnLayout {
                 RowLayout {
                     Field {
                         id: interestField; objectName: "profileInterest"
-                        Layout.fillWidth: true; maximumLength: 40; placeholderText: "Новый интерес"
+                        Layout.fillWidth: true; maximumLength: 40; placeholderText: qsTranslate("Launcher", "Новый интерес")
                         onAccepted: page.addInterest()
                     }
-                    UiButton { theme: page.theme; text: "Добавить"; enabled: !client.profileBusy && interestField.text.trim().length > 0 && page.draftInterests.length < 12; onClicked: page.addInterest() }
+                    UiButton { theme: page.theme; text: qsTranslate("Launcher", "Добавить"); enabled: !client.profileBusy && interestField.text.trim().length > 0 && page.draftInterests.length < 12; onClicked: page.addInterest() }
                 }
             }
         }
     }
     RowLayout {
         UiButton {
-            theme: page.theme; text: "Сохранить"; primary: true; objectName: "saveProfile"
+            theme: page.theme; text: qsTranslate("Launcher", "Сохранить"); primary: true; objectName: "saveProfile"
             enabled: page.changed && !client.profileBusy && (interestField.text.trim().length === 0 || page.draftInterests.indexOf(interestField.text.trim()) >= 0 || page.draftInterests.length < 12)
                 && (page.dirty || interestField.text.trim().length > 0 ? client.online && client.profileReady && page.valid : true)
             onClicked: page.save()
         }
-        UiButton { theme: page.theme; text: "Отменить"; enabled: page.changed && !client.profileBusy; onClicked: { page.dirty = false; page.syncDraft(true); interestField.text = ""; page.avatar.revert(); page.localNotice = "" } }
+        UiButton { theme: page.theme; text: qsTranslate("Launcher", "Отменить"); enabled: page.changed && !client.profileBusy; onClicked: { page.dirty = false; page.syncDraft(true); interestField.text = ""; page.avatar.revert(); page.localNotice = "" } }
         Text { text: page.changed ? "" : page.localNotice || client.profileNotice; color: page.theme.success; font.family: page.theme.fontFamily; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
     }
     Dialog {
         id: cropDialog; objectName: "avatarCropDialog"
         parent: Overlay.overlay; anchors.centerIn: parent; modal: true; padding: 18
-        width: Math.min(480, parent.width - 32); title: "Фото профиля"; closePolicy: Popup.CloseOnEscape
+        width: Math.min(480, parent.width - 32); title: qsTranslate("Launcher", "Фото профиля"); closePolicy: Popup.CloseOnEscape
         background: SurfacePanel { theme: page.theme; color: page.theme.popup }
         header: Text { text: cropDialog.title; color: page.theme.ink; font.family: page.theme.fontFamily; font.pixelSize: 15; font.weight: Font.DemiBold; leftPadding: 18; topPadding: 16; bottomPadding: 6 }
         onOpened: page.avatar.beginCrop()
@@ -221,16 +222,16 @@ ColumnLayout {
                 Keys.onUpPressed: page.avatar.setCrop(page.avatar.crop.zoom, page.avatar.crop.x, page.avatar.crop.y - 5)
                 Keys.onDownPressed: page.avatar.setCrop(page.avatar.crop.zoom, page.avatar.crop.x, page.avatar.crop.y + 5)
             }
-            Text { text: "Перетащите фото · колесо мыши — масштаб"; color: page.theme.muted; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter }
+            Text { text: qsTranslate("Launcher", "Перетащите фото · колесо мыши — масштаб"); color: page.theme.muted; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter }
             RowLayout {
-                UiSlider { theme: page.theme; Layout.fillWidth: true; from: 1; to: 4; stepSize: 0.05; value: page.avatar.crop.zoom; Accessible.name: "Приближение фото"; onMoved: page.avatar.zoomAt(value, 0, 0) }
+                UiSlider { theme: page.theme; Layout.fillWidth: true; from: 1; to: 4; stepSize: 0.05; value: page.avatar.crop.zoom; Accessible.name: qsTranslate("Launcher", "Приближение фото"); onMoved: page.avatar.zoomAt(value, 0, 0) }
                 Text { text: Math.round(page.avatar.crop.zoom * 100) + "%"; color: page.theme.ink; font.pixelSize: 12 }
             }
             RowLayout {
-                UiButton { theme: page.theme; text: "Сбросить"; onClicked: page.avatar.resetCrop() }
+                UiButton { theme: page.theme; text: qsTranslate("Launcher", "Сбросить"); onClicked: page.avatar.resetCrop() }
                 Item { Layout.fillWidth: true }
-                UiButton { theme: page.theme; text: "Отмена"; onClicked: cropDialog.reject() }
-                UiButton { theme: page.theme; text: "Готово"; primary: true; onClicked: cropDialog.accept() }
+                UiButton { theme: page.theme; text: qsTranslate("Launcher", "Отмена"); onClicked: cropDialog.reject() }
+                UiButton { theme: page.theme; text: qsTranslate("Launcher", "Готово"); primary: true; onClicked: cropDialog.accept() }
             }
         }
     }

@@ -1,6 +1,10 @@
 #include "BackendClient.h"
+#include "ChatContent.h"
+#include "CodeHighlighter.h"
 #include "ScottVersion.h"
 #include "SetupController.h"
+#include "DiagnosticsController.h"
+#include "AppLog.h"
 #include "WindowEffects.h"
 #include "WindowMotion.h"
 #include "../tests/ModelPageChecks.h"
@@ -8,11 +12,19 @@
 #include "../tests/VoicePageChecks.h"
 #include "TrayController.h"
 #include "ProfileAvatar.h"
+#include "AppPaths.h"
+#include "UpdateController.h"
+#include "PetController.h"
+#include "PetBackendSession.h"
+#include "../tests/PersonalityChecks.h"
+#include "../tests/LanguagePageChecks.h"
+#include "DesktopSupport.h"
 #include "ProtocolFiles.h"
 #include "../tests/BackdropFixture.h"
 #include "../tests/WindowLifecycleChecks.h"
 #include "../tests/WindowStateChecks.h"
 #include <QApplication>
+#include "AppLanguage.h"
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlComponent>
@@ -38,6 +50,7 @@
 #include <QPalette>
 #include <QPainter>
 #include <QJSValue>
+#include <QScopeGuard>
 #include <cstdio>
 #include <memory>
 #include <cmath>
@@ -73,7 +86,7 @@ public:
                 {"styleId", m_temporary ? "classic" : m_settings.value("styleId", legacyStyles[qBound(0, m_settings.value("surfaceStyle", 0).toInt(), 2)])},
                 {"transparencyByStyle", m_temporary ? QVariantMap{} : m_settings.value("transparencyByStyle", QVariantMap{})},
                 {"glassFrost", m_temporary ? 40 : qBound(0, m_settings.value("glassFrost", m_settings.value("glassTransparency", 40)).toInt(), 100)},
-                {"navigationExpanded", m_temporary ? false : m_settings.value("navigationExpanded", false)},
+                {"navigationExpanded", m_temporary ? false : m_settings.value("navigationExpanded", true)},
                 {"alwaysOnTop", m_temporary ? false : m_settings.value("alwaysOnTop", false)},
                 {"trayNotifications", m_temporary ? true : m_settings.value("trayNotifications", true)}};
     }
@@ -105,23 +118,38 @@ private:
 };
 
 int main(int argc, char **argv) {
-    qInstallMessageHandler([](QtMsgType, const QMessageLogContext &, const QString &message) {
+    const auto previousMessageHandler = qInstallMessageHandler([](QtMsgType, const QMessageLogContext &, const QString &message) {
         const auto bytes = message.toUtf8();
         std::fprintf(stderr, "%s\n", bytes.constData());
-        QFile log("qt-launcher.log");
-        if (log.open(QIODevice::WriteOnly | QIODevice::Append)) { log.write(bytes); log.write("\n"); }
+        AppLog::append("qt-launcher.log", message);
+    });
+    // Qt can unload plugins during static teardown, after AppLog's globals.
+    // Keep logging through QApplication destruction, then restore its owner.
+    const auto restoreMessageHandler = qScopeGuard([previousMessageHandler] {
+        qInstallMessageHandler(previousMessageHandler);
     });
     QElapsedTimer startup; startup.start();
     QApplication app(argc, argv);
+    qmlRegisterType<CodeHighlighter>("Scott.Chat", 1, 0, "CodeHighlighter");
+    ChatContent chatContent;
     QQuickWindow::setDefaultAlphaBuffer(true);
     // Keep the existing data-directory identity so profile photos survive the release.
     app.setApplicationName("Scott AI · Qt Preview");
     app.setApplicationDisplayName("Scott AI");
     app.setApplicationVersion(SCOTT_APP_VERSION);
     app.setOrganizationName("ScottAI");
+#ifdef Q_OS_LINUX
+    app.setDesktopFileName("com.scottai.launcher");
+#endif
     QQuickStyle::setStyle("Basic");
     QCommandLineParser parser;
     parser.addHelpOption();
+    parser.addOption({"desktop-pet", "Run the independent desktop companion; backend starts only when mini chat is opened."});
+    parser.addOption({"ui-language", "Preview an interface language: ru, en, de or es.", "code"});
+    parser.addOption({"pet-backend", "Run a background backend for an existing desktop companion."});
+    parser.addOption({"pet-state", "Private desktop companion profile directory.", "directory"});
+    parser.addOption({"smoke-personality", "Check overview, themed menus, about page and pet previews without launching a desktop companion."});
+    parser.addOption({"smoke-localization", "Check four interface languages and compact pages with synthetic data; no backend requests or settings writes."});
     parser.addOption({"smoke-test", "Render all pages, save screenshots, then exit. No backend requests or settings writes."});
     parser.addOption({"smoke-glass", "Run only the Glass compositor part of the visual test. No backend requests or settings writes."});
     parser.addOption({"smoke-profile", "Run only the profile visual checks using synthetic data and a temporary photo."});
@@ -131,15 +159,27 @@ int main(int argc, char **argv) {
     parser.addOption({"smoke-states", "Check animated maximize, full screen, minimize and restore using synthetic data."});
     parser.addOption({"smoke-models", "Check model settings with synthetic providers and tokens."});
     parser.addOption({"smoke-chat", "Check chat history, attachments and generation UI with synthetic data."});
+    parser.addOption({"smoke-chat-layout", "Check initial chat message geometry with synthetic data."});
     parser.addOption({"smoke-setup", "Check first-launch preparation UI with synthetic progress."});
+    parser.addOption({"smoke-logs", "Check offline diagnostics UI with synthetic technical logs."});
     parser.addOption({"smoke-voice", "Check optional voice settings with synthetic data. No synthesis or playback."});
     parser.addOption({"check-backend", "Check real backend health, metrics and a harmless memory question; save the chat screenshot and exit."});
     parser.addOption({"start-backend", "Start the backend if it is not already running."});
-    parser.addOption({"tab", "Initial page: home, chat, system, appearance, memory, settings, profile, actions, protocols or models.", "name", "home"});
+    parser.addOption({"tab", "Initial page: home, chat, system, appearance, memory, settings, profile, actions, protocols, models, logs or about.", "name", "home"});
     parser.addOption({"surface-style", "Preview a style: classic, glass or terminal-pro. Saved selection is used when omitted.", "name"});
     parser.addOption({"python", "Python 3.13 executable for the backend.", "path"});
     parser.addOption({"backend-dir", "Directory containing main.py.", "path", SCOTT_BACKEND_DIR});
     parser.process(app);
+    bool languagePreview=parser.isSet("check-backend")||parser.isSet("ui-language");
+    for(const auto &argument:app.arguments())languagePreview=languagePreview||argument.startsWith("--smoke-");
+    AppLanguage language(languagePreview);
+    app.setProperty("appLanguage",QVariant::fromValue<QObject *>(&language));
+    if(parser.isSet("ui-language")&&!language.setLanguage(parser.value("ui-language")))return 2;
+    if(parser.isSet("desktop-pet")) {
+        const auto state=parser.value("pet-state");
+        AppLog::directory=(state.isEmpty()?PetController::defaultStateRoot():state)+"/logs";
+        return runDesktopPet(app,state);
+    }
     const bool glassOnly = parser.isSet("smoke-glass");
     const bool profileOnly = parser.isSet("smoke-profile");
     const bool actionsOnly = parser.isSet("smoke-actions");
@@ -147,11 +187,15 @@ int main(int argc, char **argv) {
     const bool windowOnly = parser.isSet("smoke-window");
     const bool statesOnly = parser.isSet("smoke-states");
     const bool modelsOnly = parser.isSet("smoke-models");
-    const bool chatOnly = parser.isSet("smoke-chat");
+    const bool chatOnly = parser.isSet("smoke-chat") || parser.isSet("smoke-chat-layout");
     const bool setupOnly = parser.isSet("smoke-setup");
+    const bool logsOnly = parser.isSet("smoke-logs");
     const bool voiceOnly = parser.isSet("smoke-voice");
-    const bool smoke = parser.isSet("smoke-test") || glassOnly || profileOnly || actionsOnly || protocolsOnly || windowOnly || statesOnly || modelsOnly || chatOnly || setupOnly || voiceOnly;
+    const bool personalityOnly=parser.isSet("smoke-personality");
+    const bool localizationOnly=parser.isSet("smoke-localization");
+    const bool smoke = parser.isSet("smoke-test") || glassOnly || profileOnly || actionsOnly || protocolsOnly || windowOnly || statesOnly || modelsOnly || chatOnly || setupOnly || voiceOnly || logsOnly || personalityOnly || localizationOnly;
     const bool integration = parser.isSet("check-backend");
+    AppLog::directory = smoke || integration ? QDir::currentPath() + "/test-logs" : AppLog::defaultDirectory();
     BackendClient client;
     const auto installedRoot = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("..");
 #ifdef Q_OS_WIN
@@ -163,12 +207,37 @@ int main(int argc, char **argv) {
     const auto backendDirectory = installed && !parser.isSet("backend-dir") ? installedRoot + "/backend" : parser.value("backend-dir");
     const auto pythonExecutable = installed && !parser.isSet("python") ? installedPython : parser.value("python");
     client.configureProcess(backendDirectory, pythonExecutable);
+    if(parser.isSet("pet-backend")) {
+        // AppImage can remount its code without opening a launcher or setup UI.
+        app.setQuitOnLastWindowClosed(false);
+        const auto root=parser.value("pet-state");
+        if(root.isEmpty())return 54;
+        AppLog::directory=root+"/logs";
+        PetBackendSession session(client,root,[&]{app.quit();});
+        if(!session.start())return 0;
+        return app.exec();
+    }
+    UpdateController updater(installedRoot,pythonExecutable,smoke||integration);
     SetupController setup;
+    DiagnosticsController diagnostics;
+    diagnostics.configure(pythonExecutable, backendDirectory);
     QObject::connect(&setup, &SetupController::ready, &client, &BackendClient::startBackend);
     Preferences prefs(smoke || integration);
+    PetController pets(smoke || integration,parser.value("pet-state"));
+    pets.configureChat(backendDirectory,pythonExecutable);
     ProtocolFiles protocolFiles;
-    ProfileAvatar avatar(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/profile", smoke || integration,
-                         qEnvironmentVariable("APPDATA") + "/ScottAI");
+    const auto previousAvatar = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/profile";
+#ifdef Q_OS_LINUX
+    const auto avatarDirectory = AppPaths::avatarDirectory(installedRoot, previousAvatar, "linux");
+#else
+    const auto avatarDirectory = previousAvatar;
+#endif
+    ProfileAvatar avatar(avatarDirectory, smoke || integration, qEnvironmentVariable("APPDATA") + "/ScottAI",
+                         avatarDirectory != previousAvatar ? previousAvatar : QString());
+    DesktopSupport::TrayProbe trayProbe;
+    const bool lifecyclePreview = windowOnly || statesOnly || parser.isSet("smoke-test");
+    if (smoke || integration) trayProbe = [=] { return lifecyclePreview; };
+    DesktopSupport desktop(QGuiApplication::platformName(), trayProbe);
     WindowEffects windowEffects;
     WindowMotion windowMotion;
     QSystemTrayIcon tray;
@@ -182,6 +251,8 @@ int main(int argc, char **argv) {
     std::unique_ptr<QObject> previewData;
     bool qmlErrors = false;
     QQmlApplicationEngine engine;
+    QObject::connect(&language,&AppLanguage::languageChanged,&engine,&QQmlEngine::retranslate);
+    engine.rootContext()->setContextProperty("appLanguage",&language);
     engine.addImageProvider("avatar", new AvatarProvider(&avatar));
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
                      [&](const QList<QQmlError> &) { qmlErrors = true; });
@@ -194,13 +265,19 @@ int main(int argc, char **argv) {
         }
     }
     engine.rootContext()->setContextProperty("backend", smoke ? previewData.get() : &client);
+    engine.rootContext()->setContextProperty("updateController", &updater);
     engine.rootContext()->setContextProperty("setupController", setupOnly ? previewData->property("setupPreview").value<QObject *>() : &setup);
+    engine.rootContext()->setContextProperty("diagnosticsController", logsOnly ? previewData->property("logsPreview").value<QObject *>() : &diagnostics);
     engine.rootContext()->setContextProperty("preferences", &prefs);
+    engine.rootContext()->setContextProperty("pets", &pets);
+    engine.rootContext()->setContextProperty("appVersion", app.applicationVersion());
+    engine.rootContext()->setContextProperty("appBuild", SCOTT_BUILD_NUMBER);
     engine.rootContext()->setContextProperty("profileAvatar", &avatar);
     engine.rootContext()->setContextProperty("protocolFiles", &protocolFiles);
+    engine.rootContext()->setContextProperty("chatContent", &chatContent);
     engine.rootContext()->setContextProperty("windowEffects", &windowEffects);
     engine.rootContext()->setContextProperty("windowMotion", &windowMotion);
-    engine.rootContext()->setContextProperty("trayAvailable", windowOnly || statesOnly || (!smoke && !integration && QSystemTrayIcon::isSystemTrayAvailable()));
+    engine.rootContext()->setContextProperty("desktopSupport", &desktop);
     engine.rootContext()->setContextProperty("qtVersion", qVersion());
     engine.rootContext()->setContextProperty("smokeMode", smoke);
     // Start the check before QML so the main window cannot flash behind setup.
@@ -212,16 +289,50 @@ int main(int argc, char **argv) {
     windowEffects.attach(window);
     windowMotion.attach(window);
     if (!smoke && !integration) {
-        const QStringList tabs{"home", "chat", "system", "appearance", "memory", "settings", "profile", "actions", "protocols", "models"};
+        const QStringList tabs{"home", "chat", "system", "appearance", "memory", "settings", "profile", "actions", "protocols", "models", "logs", "about"};
         const int tab = tabs.indexOf(parser.value("tab"));
         window->setProperty("selectedTab", tab < 0 ? 0 : tab);
         const QString requestedStyle = parser.value("surface-style");
         if (QStringList{"classic", "glass", "terminal-pro"}.contains(requestedStyle)) window->setProperty("styleId", requestedStyle);
     }
     TrayController trayController(&tray, &client, window, smoke || integration);
+    QObject::connect(&language,SIGNAL(languageChanged()),&trayController,SLOT(sync()));
+    QObject::connect(&updater,&UpdateController::handoffReady,window,[window]{QMetaObject::invokeMethod(window,"requestQuit");});
+    if(!smoke && !integration)QTimer::singleShot(15000,&updater,&UpdateController::check);
+    QObject::connect(&desktop, &DesktopSupport::trayAvailableChanged, &trayController, &TrayController::availabilityChanged);
     QObject::connect(&windowMotion, &WindowMotion::minimizedRestoreRequested, &trayController, &TrayController::restoreWindow);
     if (modelsOnly) window->setProperty("selectedTab", 9);
-    if (chatOnly) { window->setProperty("selectedTab", 1); startChatPageChecks(app, window, previewData.get(), qmlErrors); }
+    if (personalityOnly) startPersonalityChecks(app,window,pets,previewData.get(),qmlErrors);
+    if (localizationOnly) startLanguageChecks(app,window,previewData.get(),language,qmlErrors);
+    if (chatOnly) { window->setProperty("selectedTab", 1); startChatPageChecks(app, window, previewData.get(), qmlErrors, parser.isSet("smoke-chat-layout")); }
+    if (logsOnly) {
+        window->setProperty("animationsEnabled", false); window->setProperty("selectedTab", 10); window->resize(800, 560);
+        previewData->setProperty("online", false);
+        auto *fixture = previewData->property("logsPreview").value<QObject *>();
+        QTimer::singleShot(250, &app, [&] {
+            if (auto *more = visualItem(window->contentItem(), "navigationMore"))
+                QMetaObject::invokeMethod(more, "clicked");
+        });
+        QTimer::singleShot(700, &app, [&, fixture] {
+            auto *button = visualItem(window->contentItem(), "exportLogsButton");
+            auto *navigation = visualItem(window->contentItem(), "navTab10");
+            auto *text = visualItem(window->contentItem(), "logText");
+            if (qmlErrors || !button || !navigation || !text || !button->isEnabled() || !button->isVisible() || !text->property("text").toString().contains("synthetic network")) { app.exit(44); return; }
+            const auto position = navigation->mapToItem(window->contentItem(), QPointF(0, 0));
+            if (!navigation->isVisible() || position.y() < 0 || position.y() + navigation->height() > window->height()) { app.exit(44); return; }
+            QMetaObject::invokeMethod(navigation, "triggered");
+            if (window->property("selectedTab").toInt() != 10) { app.exit(44); return; }
+            if (auto *menu = window->findChild<QObject *>("navigationMoreMenu")) QMetaObject::invokeMethod(menu, "close");
+            QDir().mkpath("screenshots"); window->grabWindow().save("screenshots/logs-offline.png");
+            QMetaObject::invokeMethod(button, "clicked");
+            if (fixture->property("exports").toInt() != 1) { app.exit(44); return; }
+            fixture->setProperty("busy", true);
+            QTimer::singleShot(100, &app, [&, button] {
+                if (qmlErrors || button->isEnabled()) { app.exit(44); return; }
+                qInfo("Logs UI: offline export, bounded navigation and busy state passed"); app.exit(0);
+            });
+        });
+    }
     if (setupOnly) {
         auto *fixture = previewData->property("setupPreview").value<QObject *>();
         auto phase = std::make_shared<int>(0); auto *timer = new QTimer(&app); timer->setInterval(350);
@@ -230,17 +341,32 @@ int main(int argc, char **argv) {
             if (!setupWindow || !setupWindow->isVisible()) { app.exit(43); return; }
             auto *button = window->findChild<QObject *>("prepareScottButton");
             if (!fixture || !button || qmlErrors || window->isVisible()) { qWarning("Setup UI warning, missing controls or visible main window"); app.exit(43); return; }
+            if (!fixture->property("checking").toBool()) {
+                for (const char *name : {"setupStorageInfo", "prepareScottButton", "cancelSetupButton", "setupLogsButton"}) {
+                    auto *item = window->findChild<QQuickItem *>(name);
+                    if (!item || !item->isVisible()) continue;
+                    const auto point = item->mapToItem(setupWindow->contentItem(), QPointF());
+                    if (point.y() < 0 || point.y()+item->height() > setupWindow->height() || point.x() < 0 || point.x()+item->width() > setupWindow->width()) {
+                        qWarning("Setup control outside window: %s", name); app.exit(43); return;
+                    }
+                }
+            }
             trayController.restoreWindow();
             if (window->isVisible()) { app.exit(43); return; }
             QDir().mkpath("screenshots"); setupWindow->grabWindow().save(QString("screenshots/setup-%1.png").arg(*phase));
-            if (*phase == 0) { fixture->setProperty("busy", true); fixture->setProperty("progress", 0.65); fixture->setProperty("message", QStringLiteral("Загружаем модели речи…")); }
-            else if (*phase == 1) { if (button->property("enabled").toBool()) { app.exit(43); return; } fixture->setProperty("busy", false); fixture->setProperty("error", QStringLiteral("Нет подключения к интернету. Проверьте сеть и повторите попытку.")); }
+            if (*phase == 0) { fixture->setProperty("checking", true); fixture->setProperty("busy", true); fixture->setProperty("message", QStringLiteral("Проверяем готовность…")); }
+            else if (*phase == 1) {
+                auto *option = window->findChild<QObject *>("compactSetupOption");
+                if (setupWindow->height() != 220 || button->property("visible").toBool() || !option || option->property("visible").toBool()) { app.exit(43); return; }
+                fixture->setProperty("checking", false); fixture->setProperty("progress", 0.65); fixture->setProperty("message", QStringLiteral("Загружаем модели речи…"));
+            }
+            else if (*phase == 2) { if (button->property("enabled").toBool() || setupWindow->height() != 490) { app.exit(43); return; } fixture->setProperty("busy", false); fixture->setProperty("error", QStringLiteral("Сервис загрузки не отвечает. Скачанные части сохранены.")); }
             else { if (!button->property("enabled").toBool()) { app.exit(43); return; }
                 timer->stop(); fixture->setProperty("visible", false);
                 QTimer::singleShot(500, &app, [&] {
                     auto *setupWindow = window->findChild<QQuickWindow *>("setupDialog");
                     if (!window->isVisible() || !setupWindow || setupWindow->isVisible() || qmlErrors) { app.exit(43); return; }
-                    qInfo("Setup UI: standalone initial state, progress, retry, tray guard and main reveal passed"); app.exit(0);
+                    qInfo("Setup UI: compact startup, installation, progress, retry, tray guard and main reveal passed"); app.exit(0);
                 }); return; }
             ++*phase;
         });
@@ -261,7 +387,7 @@ int main(int argc, char **argv) {
     if (statesOnly) runWindowStateChecks(app, window, windowMotion, windowEffects, trayController, qmlErrors, stateChecksPassed);
     if (modelsOnly) runModelPageChecks(app, window, previewData.get(), qmlErrors, modelChecksPassed);
     if (voiceOnly) runVoicePageChecks(app, window, previewData.get(), qmlErrors, voiceChecksPassed);
-    if (smoke && !windowOnly && !statesOnly && !modelsOnly && !chatOnly && !setupOnly && !voiceOnly) {
+    if (smoke && !windowOnly && !statesOnly && !modelsOnly && !chatOnly && !setupOnly && !voiceOnly && !logsOnly && !personalityOnly && !localizationOnly) {
         // Capture the actual Qt scene, including each loaded page and a light theme.
         auto step = std::make_shared<int>(protocolsOnly ? 100 : actionsOnly ? 74 : profileOnly ? 67 : glassOnly ? 51 : 0);
         if (protocolsOnly) {
@@ -490,10 +616,22 @@ int main(int argc, char **argv) {
                 window->setProperty("styleId", "classic");
                 window->setProperty("darkMode", true);
                 window->setProperty("transparencyByStyle", QVariantMap{});
-                for (int tab : {4, 2, 5, 3, 1, 0}) {
+                for (int tab : {0, 4, 9, 5, 6, 1}) {
                     auto *button = visualItem(window->contentItem(), QString("navTab%1").arg(tab));
                     if (!button || !QMetaObject::invokeMethod(button, "clicked") || window->property("displayedTab").toInt() != tab) { qWarning("Grouped navigation opened the wrong page"); app.exit(17); return; }
                 }
+                for (int tab : {2, 7, 10, 11}) {
+                    auto *more = visualItem(window->contentItem(), "navigationMore");
+                    if (!more || !QMetaObject::invokeMethod(more, "clicked")) { app.exit(17); return; }
+                    QCoreApplication::processEvents();
+                    auto *button = visualItem(window->contentItem(), QString("navTab%1").arg(tab));
+                    if (!button || !button->isVisible() || !QMetaObject::invokeMethod(button, "triggered") || window->property("displayedTab").toInt() != tab) { qWarning("More menu opened the wrong page"); app.exit(17); return; }
+                    QMetaObject::invokeMethod(window->findChild<QObject *>("navigationMoreMenu"), "close");
+                }
+                QMetaObject::invokeMethod(visualItem(window->contentItem(), "appearanceButton"), "clicked");
+                auto *appearance = window->findChild<QObject *>("appearancePopup");
+                if (!appearance || !appearance->property("visible").toBool()) { app.exit(17); return; }
+                QMetaObject::invokeMethod(appearance, "close");
                 window->setProperty("selectedTab", 4); // Memory at the minimum window size.
             }
             if (current == 48) {
@@ -629,12 +767,12 @@ int main(int argc, char **argv) {
             if (current == 61) {
                 auto *rail = visualItem(window->contentItem(), "navigationRail");
                 auto *toggle = visualItem(window->contentItem(), "navigationToggle");
-                if (!rail || qAbs(rail->width() - 64) > 0.5 || !toggle) { qWarning("Compact rail has wrong geometry"); app.exit(19); return; }
+                if (!rail || qAbs(rail->width() - 60) > 0.5 || !toggle) { qWarning("Compact rail has wrong geometry"); app.exit(19); return; }
                 QMetaObject::invokeMethod(toggle, "clicked");
             }
             if (current == 62) {
                 auto *rail = visualItem(window->contentItem(), "navigationRail");
-                if (!rail || qAbs(rail->width() - 164) > 0.5) { qWarning("Expanded rail has wrong geometry"); app.exit(19); return; }
+                if (!rail || qAbs(rail->width() - 196) > 0.5) { qWarning("Expanded rail has wrong geometry"); app.exit(19); return; }
                 window->setProperty("alwaysOnTop", true);
                 if (!(window->flags() & Qt::WindowStaysOnTopHint)) { qWarning("Topmost preference did not update window flags"); app.exit(19); return; }
                 window->setProperty("navigationExpanded", false);
@@ -730,8 +868,11 @@ int main(int argc, char **argv) {
                 const auto fail = [&](const char *message) { qWarning("Actions: %s at step %d", message, current); app.exit(21); };
                 if (!actions || !search || !composer || !category) { fail("page controls missing"); return; }
                 if (current == 74) {
+                    QMetaObject::invokeMethod(visualItem(window->contentItem(), "navigationMore"), "clicked");
+                    QCoreApplication::processEvents();
                     auto *nav = visualItem(window->contentItem(), "navTab7");
                     if (actions->property("resultCount").toInt() != 4 || !nav || !nav->isVisible() || nav->mapToItem(window->contentItem(), QPointF()).y() < 0) { fail("catalog or navigation missing"); return; }
+                    QMetaObject::invokeMethod(window->findChild<QObject *>("navigationMoreMenu"), "close");
                     search->setProperty("text", QStringLiteral("МИКРОФОНОВ"));
                 }
                 if (current == 75) {

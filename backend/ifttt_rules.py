@@ -10,6 +10,11 @@ from datetime import datetime
 from enum import Enum
 
 
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
 class Condition:
     """Одно условие (триггер) в правиле"""
     
@@ -149,8 +154,8 @@ class Rule:
 class IFTTTManager:
     """Управляет правилами IFTTT"""
     
-    def __init__(self, db_path: str = 'data/ifttt_rules.json'):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        self.db_path = Path(db_path) if db_path is not None else backend_path('ifttt_rules.json')
         self.rules: Dict[str, Rule] = {}
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.load_rules()
@@ -345,6 +350,6 @@ class IFTTTManager:
         return f"IFTTTManager({len(self.rules)} правил)"
 
 
-def get_ifttt_manager(db_path: str = 'data/ifttt_rules.json') -> IFTTTManager:
+def get_ifttt_manager(db_path: str | None = None) -> IFTTTManager:
     """Factory функция"""
     return IFTTTManager(db_path)

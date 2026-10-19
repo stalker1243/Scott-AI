@@ -13,7 +13,8 @@ def assets(tmp_path):
     source=tmp_path/'source';home=tmp_path/'runtime'
     source.mkdir(); home.mkdir()
     files={}
-    for name in ('backend/client.py','voice/worker.py','voice/reference.wav'):
+    for name in ('backend/client.py','voice/worker.py','voice/reference.wav',
+                 'experiments/voice_design/robotic_profiles.json'):
         path=source/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'original')
         files[name]=path
     update.sync_assets(home,files)
@@ -47,13 +48,46 @@ def test_reference_is_never_replaced_as_a_code_upgrade(assets):
     assert (home/'voice/reference.wav').read_bytes()==b'original'
 
 
-def test_failed_commit_rolls_back_changed_files_and_manifest(assets,monkeypatch):
+def test_owned_bundled_colour_profile_upgrades_without_touching_other_json(assets):
+    home,files=assets
+    name='experiments/voice_design/robotic_profiles.json'
+    (home/'voice/reference.json').write_bytes(b'protected reference metadata')
+    files[name].write_bytes(b'{"selected":"B"}')
+    assert update.sync_assets(home,files)==1
+    assert (home/name).read_bytes()==b'{"selected":"B"}'
+    assert (home/'voice/reference.json').read_bytes()==b'protected reference metadata'
+    assert update.sync_assets(home,files)==0
+
+
+def test_foreign_colour_profile_blocks_all_updates(assets):
+    home,files=assets;name='experiments/voice_design/robotic_profiles.json'
+    files['backend/client.py'].write_bytes(b'new code')
+    files[name].write_bytes(b'new bundled profile')
+    (home/name).write_bytes(b'custom profile')
+    with pytest.raises(ValueError,match='другая версия'):update.sync_assets(home,files)
+    assert (home/'backend/client.py').read_bytes()==b'original'
+    assert (home/name).read_bytes()==b'custom profile'
+
+
+@pytest.mark.parametrize('name',['voice/reference.json','voice/robotic_profiles.json'])
+def test_other_json_is_not_replaceable_even_with_matching_receipt(assets,name):
+    home,files=assets;source=next(iter(files.values())).parents[1]/name
+    source.parent.mkdir(parents=True,exist_ok=True);source.write_bytes(b'original JSON')
+    files[name]=source;update.sync_assets(home,files)
+    source.write_bytes(b'new JSON')
+    with pytest.raises(ValueError,match='другая версия'):update.sync_assets(home,files)
+    assert (home/name).read_bytes()==b'original JSON'
+
+
+@pytest.mark.parametrize('blocked',['voice/worker.py','experiments/voice_design/robotic_profiles.json'])
+def test_failed_commit_rolls_back_changed_files_and_manifest(assets,monkeypatch,blocked):
     home,files=assets
     previous=(home/'scott-assets.json').read_bytes()
-    for name in ('backend/client.py','voice/worker.py'): files[name].write_bytes(b'new code')
+    for name in ('backend/client.py','voice/worker.py','experiments/voice_design/robotic_profiles.json'):
+        files[name].write_bytes(b'new code')
     replace=update.os.replace
     def fail(source,target):
-        if Path(source).parts[-3:]==('new','voice','worker.py'):
+        if Path(source).as_posix().endswith('/new/'+blocked):
             raise OSError('synthetic commit failure')
         replace(source,target)
     monkeypatch.setattr(update.os,'replace',fail)

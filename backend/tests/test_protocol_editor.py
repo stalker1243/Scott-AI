@@ -84,7 +84,7 @@ async def test_id_endpoints_and_result(tmp_path, monkeypatch):
         return result
     monkeypatch.setattr(endpoints.scott_runtime, "run_protocol", runner)
     app = FastAPI(); app.include_router(endpoints.router)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
         result = (await client.post("/protocols", json={"name": "A / B? #", "steps": ["first"], "repeat_count": 2})).json()
         protocol_id = result["protocol"]["id"]
         result = (await client.patch(f"/protocols/id/{protocol_id}", json={"name": "Renamed / &", "steps": ["edited"]})).json()

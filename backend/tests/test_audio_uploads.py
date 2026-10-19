@@ -41,7 +41,7 @@ def test_parallel_uploads_with_same_filename_keep_their_own_contents(main_module
         return Path(path).read_text(encoding='utf-8')
     monkeypatch.setattr(main_module, '_transcribe_audio_file', transcribe)
     async def check():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             responses = await asyncio.gather(*(client.post('/speech_to_text',
                 files={'file': ('same.wav', text.encode(), 'audio/wav')}) for text in ('first', 'second')))
             assert [r.status_code for r in responses] == [200, 200]
@@ -60,7 +60,7 @@ def test_slow_audio_decoder_does_not_block_health(main_module, monkeypatch):
     monkeypatch.setitem(sys.modules, 'pydub', SimpleNamespace(AudioSegment=SimpleNamespace(from_file=decode)))
     monkeypatch.setattr(main_module, '_transcribe_audio_file', lambda _: 'ok')
     async def check():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             task = asyncio.create_task(client.post('/speech_to_text', files={'file': ('file.mp3', b'fake', 'audio/mpeg')}))
             try:
                 while not started.is_set():
@@ -104,7 +104,7 @@ def test_cancelled_request_leaves_cleanup_to_the_running_worker(main_module, mon
     monkeypatch.setattr(main_module, '_transcribe_audio_file', transcribe)
     monkeypatch.setattr(audio_uploads, 'transcribe_upload', worker)
     async def check():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             task = asyncio.create_task(client.post('/speech_to_text', files={'file': ('same.wav', b'original', 'audio/wav')}))
             try:
                 assert await asyncio.to_thread(started.wait, 1)

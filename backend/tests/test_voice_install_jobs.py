@@ -42,6 +42,26 @@ def test_check_is_async_and_refreshes_catalog(manager):
     assert manager.refreshed == [True]
     assert not manager.home.exists()
 
+def test_worker_progress_and_timeout_message_reach_ui_without_token(manager, monkeypatch):
+    monkeypatch.setenv('FIXTURE_API_TOKEN', 'opaque-job-test-credential')
+    script = manager.root/'backend/scott_voice_install.py'
+    script.write_text('import json,sys,time\n'
+        'print(json.dumps(dict(type="progress",stage="libraries",message="Downloading opaque-job-test-credential",fraction=.42)),flush=True)\n'
+        'time.sleep(.5)\n'
+        'print(json.dumps(dict(type="error",code="timeout",message="Time limit reached. Downloaded files kept.")),flush=True)\n'
+        'sys.exit(1)\n', encoding='utf-8')
+    manager.start('check')
+    deadline = time.monotonic()+3
+    while manager.snapshot()['stage'] != 'libraries' and time.monotonic() < deadline:
+        time.sleep(.01)
+    progress = manager.snapshot()
+    assert progress['progress'] == .42
+    assert 'opaque-job-test-credential' not in progress['message']
+    manager._thread.join(timeout=5)
+    state = manager.snapshot()
+    assert state['state'] == 'failed' and state['error'] == 'timeout'
+    assert state['message'] == 'Time limit reached. Downloaded files kept.'
+
 
 @pytest.mark.skipif(jobs.os.name != 'nt', reason='Windows installation')
 def test_update_quiesces_voice_before_starting_installer_but_check_does_not(manager):

@@ -15,6 +15,16 @@ def colour_voice(audio, rate, profile):
     values = np.asarray(audio, dtype=np.float64)
     if values.ndim != 1 or not values.size or rate < 16000 or not np.isfinite(values).all():
         raise ValueError('Expected finite mono speech at 16 kHz or higher')
+    processor = profile.get('processor', 'legacy')
+    if processor == 'soft-v2':
+        # Approved B: keep pitch/timing and the upper band intact. No delayed
+        # copy, resonance or presence boost; match the listening preview exactly.
+        clean = sosfilt(butter(2, profile['highpass_hz'], btype='highpass', fs=rate, output='sos'), values)
+        body = sosfilt(butter(2, profile['body_cutoff_hz'], btype='lowpass', fs=rate, output='sos'), clean)
+        carrier = np.cos(2*np.pi*profile['carrier_hz']*np.arange(len(values))/rate)
+        return (clean + profile['body_mix']*body*(carrier-1)).astype(np.float32)
+    if processor != 'legacy':
+        raise ValueError('Unknown voice colour processor')
     clean = sosfilt(butter(2, [65, min(7200, rate*.45)], btype='bandpass', fs=rate, output='sos'), values)
     body = sosfilt(butter(2, 1400, btype='lowpass', fs=rate, output='sos'), clean)
     consonants = clean-body
@@ -43,7 +53,7 @@ def main():
         from benchmark_base import Backend
         backend = Backend(args.backend_url)
         backend.get('/health')
-    result = dict(name='Scott Voice', processor_version=1, profiles=profiles,
+    result = dict(name='Scott Voice', processor_version=2, profiles=profiles,
                   reference_sha256=base['reference_sha256'], source_model=base['model'], results=[],
                   note='Colouring only: no pitch shifting or time stretching. Frame count is preserved; human listening is required.')
     selected = ('status', 'reference', 'technical')

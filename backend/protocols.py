@@ -47,7 +47,12 @@ try:
 except ImportError:
     import protocol_schedule
 
-STORE_PATH = Path(__file__).resolve().parent / "data" / "protocols.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+STORE_PATH = backend_path('protocols.json')
 
 # Слова, которыми человек зовёт протокол: «запусти протокол уборка»,
 # «выполни сценарий вечер». Само слово «протокол» тоже считается: «протокол

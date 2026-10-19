@@ -8,6 +8,8 @@
 """
 
 import json
+import os
+from pathlib import Path
 import zipfile
 
 import pytest
@@ -248,4 +250,6 @@ def test_launcher_log_collected():
     import diagnostics
 
     assert "launcher.log" in diagnostics.LOG_FILES
-    assert "ScottAI" in str(diagnostics.LOG_FILES["launcher.log"])
+    expected=(Path.home()/"AppData"/"Local"/"ScottAI"/"logs" if os.name=='nt'
+              else diagnostics.support_logs.log_directory())/'launcher.log'
+    assert diagnostics.LOG_FILES['launcher.log']==expected

@@ -12,12 +12,26 @@ import scott_voice_install as setup
 
 pytestmark = pytest.mark.unit
 
+def test_unavailable_nvidia_driver_is_reported_before_download(monkeypatch):
+    monkeypatch.setattr(setup.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=1, stdout=''))
+    with pytest.raises(setup.InstallationError) as caught:
+        setup.preflight_nvidia()
+    assert caught.value.code == 'cuda_unavailable' and 'драйвер' in str(caught.value).lower()
+
+def test_verified_model_files_need_no_repeat_download(tmp_path, fake_hub):
+    setup.download_model(tmp_path)
+    fake_hub.calls.clear()
+    fake_hub.hub.HfApi = lambda **kw: pytest.fail('Verified files must not require network metadata')
+    setup.download_model(tmp_path)
+    assert fake_hub.calls == []
+
 
 @pytest.fixture
 def source(tmp_path, monkeypatch):
     root = tmp_path/'source'
     reference = b'synthetic reference fixture'
     monkeypatch.setattr(setup, 'REFERENCE_SHA', hashlib.sha256(reference).hexdigest())
+    monkeypatch.setattr(setup, 'WHEEL_SHA256', hashlib.sha256(b'fixture').hexdigest())
     for name in (*setup.ASSETS, *setup.CLIENT_FILES):
         path = root/name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,7 +56,7 @@ def test_plan_does_not_touch_disk_or_global_packages(tmp_path):
 def test_bundle_whitelist_and_reference_are_sealed(source, tmp_path):
     target = tmp_path/'bundle'
     result = setup.bundle_assets(target, source)
-    assert result['files'] == 9
+    assert result['files'] == 12
     assert not (target/'personal.txt').exists()
     assert not (target/'backend').exists()
     manifest = json.loads((target/'assets.json').read_text())
@@ -70,7 +84,7 @@ def test_built_package_rejects_modified_scripts(source):
 
 def test_rebundling_preserves_checked_legacy_upgrade_manifest(source,tmp_path):
     legacy=source/'assets/scott-voice/legacy-assets-v1.json'
-    legacy.parent.mkdir(parents=True)
+    legacy.parent.mkdir(parents=True,exist_ok=True)
     legacy.write_text(json.dumps(dict(version=1,files={setup.ASSETS[0]:'a'*64})),encoding='utf-8')
     setup.bundle_assets(source/'voice-assets',source)
     setup.bundle_assets(tmp_path/'rebundled',source)
@@ -85,7 +99,7 @@ def test_public_reference_resources_make_reports_optional(source, tmp_path):
         (public/original.name).write_bytes(original.read_bytes())
         original.unlink()
     assert setup.asset_sources(source)[setup.ASSETS[-1]].parent == public
-    assert setup.bundle_assets(tmp_path/'bundle', source)['files'] == 9
+    assert setup.bundle_assets(tmp_path/'bundle', source)['files'] == 12
 
 
 def test_completed_optional_install_takes_priority_without_moving_cache(tmp_path, monkeypatch):
@@ -135,10 +149,15 @@ def test_deep_check_detects_changed_weight(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_processes(monkeypatch):
+    import torch_download
+    monkeypatch.setattr(torch_download,'selected',lambda backend:None)
+    monkeypatch.setattr(setup, 'preflight_nvidia', lambda: None)
     calls = []
     def run(command, **kwargs):
         calls.append(command)
         if '-c' in command:
+            if 'import importlib.metadata' in command[-1]:
+                raise setup.subprocess.CalledProcessError(1, command)
             return SimpleNamespace(stdout='(3, 13):8\n')
         if 'venv' in command:
             venv = Path(command[-1])
@@ -152,6 +171,31 @@ def fake_processes(monkeypatch):
     return calls
 
 
+def test_broken_compatibility_wheel_is_rejected_before_install(source):
+    (source/setup.WHEEL).write_bytes(b'changed')
+    with pytest.raises(ValueError,match='пакет совместимости'):
+        setup.asset_sources(source)
+
+
+@pytest.mark.skipif(setup.os.name != 'nt',reason='Windows installer')
+def test_retry_after_sdk_failure_keeps_verified_framework(source,tmp_path,fake_processes,monkeypatch):
+    home=tmp_path/'optional'
+    assert setup.install(home,'python.exe',source)['available']
+    setup.write_json(home/'scott-install.json',dict(version=1,model=setup.MODEL,revision=setup.REVISION,ready=False))
+    fake_processes.clear()
+    original=setup.subprocess.run
+    def run(command,**kwargs):
+        if '-c' in command and command[-1].startswith('import importlib.metadata') and 'qwen_tts' not in command[-1]:
+            return SimpleNamespace(stdout='ok')
+        return original(command,**kwargs)
+    monkeypatch.setattr(setup.subprocess,'run',run)
+    import torch_download
+    monkeypatch.setattr(torch_download,'selected',lambda *a:pytest.fail('Ready framework must not be downloaded again'))
+    assert setup.install(home,'python.exe',source)['available']
+    assert not any('torch=='+setup.TORCH in call for call in fake_processes)
+    assert any(str(home/setup.WHEEL) in call for call in fake_processes)
+
+
 @pytest.mark.skipif(setup.os.name != 'nt', reason='Windows installer')
 def test_install_isolated_and_idempotent(source, tmp_path, fake_processes):
     home = tmp_path/'optional'
@@ -162,6 +206,29 @@ def test_install_isolated_and_idempotent(source, tmp_path, fake_processes):
     fake_processes.clear()
     assert setup.install(home, 'python.exe', source)['available']
     assert len(fake_processes) == 1  # Only base Python preflight; no pip/download.
+
+
+@pytest.mark.skipif(setup.os.name != 'nt', reason='Windows installer')
+def test_new_install_checks_capacity_before_creating_environment(source, tmp_path, fake_processes, monkeypatch):
+    import installation_space
+    monkeypatch.setattr(installation_space, 'free_bytes', lambda path: 0)
+    home = tmp_path/'no-space'
+    with pytest.raises(installation_space.InsufficientSpace):
+        setup.install(home, 'python.exe', source)
+    assert fake_processes == []
+    assert not setup.python_path(home).exists()
+    assert not (home/'installation.lock').exists()
+
+
+@pytest.mark.skipif(setup.os.name != 'nt', reason='Windows installer')
+def test_complete_install_does_not_apply_fresh_capacity_budget(source, tmp_path, fake_processes, monkeypatch):
+    import installation_space
+    home = tmp_path/'ready'
+    assert setup.install(home, 'python.exe', source)['available']
+    fake_processes.clear()
+    monkeypatch.setattr(installation_space, 'require_space', lambda *a: pytest.fail('A complete runtime needs no full budget'))
+    assert setup.install(home, 'python.exe', source)['available']
+    assert len(fake_processes) == 1
 
 
 @pytest.mark.skipif(setup.os.name != 'nt', reason='Windows installer')
@@ -293,8 +360,9 @@ def test_download_reuses_only_verified_files_and_replaces_corrupt_partial(tmp_pa
     (model/'config.json').write_bytes(b'bad configuration')
     (model/'model.safetensors').write_bytes(b'bad checkpoint')
     setup.download_model(tmp_path)
-    assert ('config.json', True) in fake_hub.calls
-    assert ('model.safetensors', True) in fake_hub.calls
+    assert ('config.json', False) in fake_hub.calls
+    assert ('model.safetensors', False) in fake_hub.calls
+    assert not list(model.rglob('*.corrupt-*'))
     manifest = json.loads((model/'scott-model.json').read_text())
     assert manifest['revision'] == setup.REVISION
     assert set(setup.MODEL_FILES).issubset(manifest['sha256'])
@@ -310,3 +378,112 @@ def test_incorrect_official_hash_never_publishes_model_manifest(tmp_path, fake_h
     with pytest.raises(ValueError, match='Контрольная сумма'):
         setup.download_model(tmp_path)
     assert not (tmp_path/'experiments/voice_design/models/base/scott-model.json').exists()
+
+
+def test_metadata_timeout_and_bounded_retry(tmp_path, fake_hub, monkeypatch):
+    original = fake_hub.hub.HfApi
+    attempts, waits, updates = [], [], []
+    def info(*args, **kwargs):
+        attempts.append(kwargs)
+        if len(attempts) < 3:
+            raise TimeoutError('read timed out')
+        return original().model_info(*args, **kwargs)
+    fake_hub.hub.HfApi = lambda **kw: SimpleNamespace(model_info=info)
+    monkeypatch.setattr(setup.time, 'sleep', waits.append)
+    setup.download_model(tmp_path, progress=lambda *event: updates.append(event))
+    assert len(attempts) == 3 and all(a['timeout'] == 30 for a in attempts)
+    assert waits == [1, 2] and any('3/3' in event[1] for event in updates)
+
+
+def test_transient_file_failure_keeps_preceding_downloads(tmp_path, fake_hub, monkeypatch):
+    original = fake_hub.hub.hf_hub_download
+    attempts = []
+    def fetch(repo, name, **kwargs):
+        if name == 'model.safetensors':
+            attempts.append(kwargs)
+            if len(attempts) < 3:
+                raise ConnectionResetError('connection aborted')
+        return original(repo, name, **kwargs)
+    fake_hub.hub.hf_hub_download = fetch
+    monkeypatch.setattr(setup.time, 'sleep', lambda _: None)
+    setup.download_model(tmp_path)
+    assert len(attempts) == 3 and fake_hub.calls.count(('config.json', False)) == 1
+    assert all(not a['force_download'] for a in attempts)
+
+
+def test_persistent_download_failure_is_classified_and_bounded(tmp_path, fake_hub, monkeypatch):
+    attempts = []
+    def fetch(*args, **kw):
+        attempts.append(True)
+        raise TimeoutError('read timed out')
+    fake_hub.hub.hf_hub_download = fetch
+    monkeypatch.setattr(setup.time, 'sleep', lambda _: None)
+    with pytest.raises(setup.InstallationError) as caught:
+        setup.download_model(tmp_path)
+    assert caught.value.code == 'download_timeout' and len(attempts) == 3
+    assert not (tmp_path/'experiments/voice_design/models/base/scott-model.json').exists()
+
+
+@pytest.mark.parametrize('status', [403, 404])
+def test_denied_download_is_not_retried(tmp_path, fake_hub, monkeypatch, status):
+    def fetch(*args, **kw):
+        error = RuntimeError('service refused request')
+        error.response = SimpleNamespace(status_code=status)
+        raise error
+    fake_hub.hub.hf_hub_download = fetch
+    monkeypatch.setattr(setup.time, 'sleep', lambda _: pytest.fail('Access failures must not loop'))
+    with pytest.raises(setup.InstallationError) as caught:
+        setup.download_model(tmp_path)
+    assert caught.value.code == 'download_access'
+
+
+def test_corrupt_completed_model_requires_official_metadata_again(tmp_path, fake_hub):
+    setup.download_model(tmp_path)
+    fake_hub.calls.clear()
+    (tmp_path/'experiments/voice_design/models/base/config.json').write_bytes(b'corrupt')
+    setup.download_model(tmp_path)
+    assert fake_hub.calls == [('config.json', False)]
+
+
+def test_incomplete_manifest_is_repaired_instead_of_reused_forever(tmp_path, fake_hub):
+    setup.download_model(tmp_path)
+    path = tmp_path/'experiments/voice_design/models/base/scott-model.json'
+    manifest = json.loads(path.read_text())
+    manifest['files'] = []
+    path.write_text(json.dumps(manifest))
+    setup.download_model(tmp_path)
+    assert set(setup.MODEL_FILES).issubset(json.loads(path.read_text())['files'])
+
+
+def test_failed_repair_restores_previous_file_and_keeps_download_partial(tmp_path, fake_hub, monkeypatch):
+    setup.download_model(tmp_path)
+    model = tmp_path/'experiments/voice_design/models/base'
+    target = model/'model.safetensors'
+    target.write_bytes(b'previous invalid file')
+    original = fake_hub.hub.hf_hub_download
+    def broken(repo, name, **kw):
+        if name != 'model.safetensors':
+            return original(repo, name, **kw)
+        assert not target.exists() and kw['force_download'] is False
+        (model/'sdk.incomplete').write_bytes(b'reusable partial')
+        raise ConnectionResetError('connection aborted')
+    fake_hub.hub.hf_hub_download = broken
+    monkeypatch.setattr(setup.time, 'sleep', lambda _: None)
+    with pytest.raises(setup.InstallationError):
+        setup.download_model(tmp_path)
+    assert target.read_bytes() == b'previous invalid file'
+    assert (model/'sdk.incomplete').read_bytes() == b'reusable partial'
+    assert not list(model.glob('*.corrupt-*'))
+
+
+def test_directory_instead_of_model_file_is_preserved(tmp_path, fake_hub):
+    model = tmp_path/'experiments/voice_design/models/base'
+    (model/'config.json').mkdir(parents=True)
+    with pytest.raises(ValueError, match='папка'):
+        setup.download_model(tmp_path)
+    assert (model/'config.json').is_dir() and fake_hub.calls == []
+
+
+def test_download_timeouts_are_set_before_optional_interpreter_imports_hub():
+    env = setup.clean_environment()
+    assert env['HF_HUB_DOWNLOAD_TIMEOUT'] == '60' and env['HF_HUB_ETAG_TIMEOUT'] == '30'

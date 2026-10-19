@@ -35,6 +35,7 @@ NOISY = (
     "asyncio",
     "PIL",
     "matplotlib",
+    "comtypes",      # SAPI/COM enumeration otherwise floods startup diagnostics.
 )
 
 

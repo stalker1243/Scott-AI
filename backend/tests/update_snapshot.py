@@ -20,14 +20,14 @@ os.chdir(BACKEND_DIR)
 os.environ.setdefault("WARMUP_MODELS", "0")
 
 from fastapi.routing import APIRoute  # noqa: E402
+from route_inventory import api_routes
 
 import main  # noqa: E402
 
 rows = set()
-for route in main.app.routes:
-    if isinstance(route, APIRoute):
-        for method in route.methods - {"HEAD", "OPTIONS"}:
-            rows.add(f"{method} {route.path}")
+for route in api_routes(main.app):
+    for method in route.methods - {"HEAD", "OPTIONS"}:
+        rows.add(f"{method} {route.path}")
 
 snapshot = Path(__file__).parent / "routes_snapshot.txt"
 snapshot.write_text("\n".join(sorted(rows)) + "\n", encoding="utf-8")

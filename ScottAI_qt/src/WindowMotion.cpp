@@ -1,4 +1,6 @@
 #include "WindowMotion.h"
+#include "DesktopSupport.h"
+#include <QGuiApplication>
 #include <QCoreApplication>
 #include <QEvent>
 #include <QPlatformSurfaceEvent>
@@ -107,6 +109,18 @@ void WindowMotion::leaveFullScreen() {
 
 void WindowMotion::transition(QWindow::Visibility target) {
     if (!m_window || !m_window->screen()) return;
+    if (!DesktopSupport::supportsWindowPositioning(QGuiApplication::platformName())) {
+        // Wayland owns top-level placement and state transitions. Client-side
+        // geometry animation would resize the surface without moving it.
+        m_animation.stop(); m_running = false; m_target = target;
+        m_applying = true;
+        if (target == QWindow::FullScreen) m_window->showFullScreen();
+        else if (target == QWindow::Maximized) m_window->showMaximized();
+        else m_window->showNormal();
+        m_applying = false;
+        emit changed();
+        return;
+    }
     const bool interrupted = m_running;
     const auto current = m_window->visibility();
     const auto source = m_window->geometry();

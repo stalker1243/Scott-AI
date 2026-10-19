@@ -8,8 +8,15 @@ class ColourStream:
     def __init__(self, rate, profile=None):
         self.rate, self.profile, self.offset = rate, profile, 0
         if profile is not None:
-            self.band = butter(2,[65,min(7200,rate*.45)],btype='bandpass',fs=rate,output='sos')
-            self.low = butter(2,1400,btype='lowpass',fs=rate,output='sos')
+            self.processor = profile.get('processor', 'legacy')
+            if self.processor == 'soft-v2':
+                self.band = butter(2,profile['highpass_hz'],btype='highpass',fs=rate,output='sos')
+                self.low = butter(2,profile['body_cutoff_hz'],btype='lowpass',fs=rate,output='sos')
+            elif self.processor == 'legacy':
+                self.band = butter(2,[65,min(7200,rate*.45)],btype='bandpass',fs=rate,output='sos')
+                self.low = butter(2,1400,btype='lowpass',fs=rate,output='sos')
+            else:
+                raise ValueError('Unknown voice colour processor')
             self.band_state = np.zeros((len(self.band),2))
             self.low_state = np.zeros((len(self.low),2))
             self.delay = np.zeros(max(1,round(rate*profile['delay_ms']/1000)))
@@ -22,8 +29,11 @@ class ColourStream:
             return values.astype(np.float32)
         clean,self.band_state=sosfilt(self.band,values,zi=self.band_state)
         body,self.low_state=sosfilt(self.low,clean,zi=self.low_state)
-        consonants=clean-body
         carrier=np.cos(2*np.pi*self.profile['carrier_hz']*(self.offset+np.arange(len(values)))/self.rate)
+        if self.processor == 'soft-v2':
+            self.offset+=len(values)
+            return (clean+self.profile['body_mix']*body*(carrier-1)).astype(np.float32)
+        consonants=clean-body
         metallic=body*carrier
         delayed=np.concatenate([self.delay,metallic])
         self.delay=delayed[-len(self.delay):].copy()

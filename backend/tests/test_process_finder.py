@@ -16,12 +16,15 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def finder():
+def finder(monkeypatch):
     try:
         import process_finder
     except ImportError:
         from backend import process_finder
 
+    # PIDs 1..4 below are fake identifiers, not the test runner's real ancestors.
+    # Ancestor protection is exercised explicitly in its own regression below.
+    monkeypatch.setattr(process_finder,'_protected_pids',lambda:set())
     return process_finder
 
 
@@ -176,3 +179,32 @@ def test_scott_does_not_close_itself(finder, monkeypatch):
 
     assert finder.find_running("scottai") == []
     assert closed == []
+
+
+def test_ancestor_with_same_executable_is_protected(finder,monkeypatch):
+    closed=[]
+    monkeypatch.setattr(finder,'_protected_pids',lambda:{501})
+    monkeypatch.setattr(finder,'_window_titles',lambda:{})
+    monkeypatch.setattr(finder.psutil,'process_iter',lambda *args:[FakeProcess(501,'Fixture.exe',closed),FakeProcess(502,'Fixture.exe',closed)])
+    assert finder.find_running('Fixture')[0].pid==502
+    assert finder.close_running('Fixture')['killed']==1
+    assert closed==['Fixture.exe']
+
+
+@pytest.mark.parametrize('code',['timeout','ambiguous','worker_failed'])
+def test_graceful_failure_does_not_force_terminate(finder,monkeypatch,code):
+    import desktop_control
+    from types import SimpleNamespace
+    monkeypatch.setattr(finder,'os',SimpleNamespace(name='nt',environ={}))
+    monkeypatch.setattr(desktop_control,'execute',lambda _:dict(success=False,code=code,response='fixture failure'))
+    monkeypatch.setattr(finder,'find_running',lambda _:pytest.fail('Must not terminate after uncertain close'))
+    assert finder.close_running('Fixture')['killed']==0
+
+
+def test_graceful_close_does_not_claim_process_termination(finder,monkeypatch):
+    import desktop_control
+    from types import SimpleNamespace
+    monkeypatch.setattr(finder,'os',SimpleNamespace(name='nt',environ={}))
+    monkeypatch.setattr(desktop_control,'execute',lambda _:dict(success=True,response='requested',requested=2))
+    monkeypatch.setattr(finder,'find_running',lambda _:pytest.fail('No termination after graceful close'))
+    assert finder.close_running('Fixture')==dict(success=True,message='requested',killed=0,requested=2)

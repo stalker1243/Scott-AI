@@ -27,6 +27,8 @@ import platform
 import re
 import shutil
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
@@ -50,14 +52,23 @@ else:
 # Куда Linux складывает описания установленных приложений. Flatpak и snap
 # добавляют свои каталоги — без них половина программ на современном рабочем
 # столе оказалась бы невидимой.
-DESKTOP_DIRS = [
-    "/usr/share/applications",
-    "/usr/local/share/applications",
-    os.path.expanduser("~/.local/share/applications"),
-    "/var/lib/flatpak/exports/share/applications",
-    os.path.expanduser("~/.local/share/flatpak/exports/share/applications"),
-    "/var/lib/snapd/desktop/applications",
-]
+def _linux_desktop_dirs(env=None, home=None):
+    env = os.environ if env is None else env
+    home = os.path.expanduser('~') if home is None else str(home)
+    data_home = env.get('XDG_DATA_HOME', '')
+    if not os.path.isabs(data_home):
+        data_home = os.path.join(home, '.local', 'share')
+    raw = env.get('XDG_DATA_DIRS', '')
+    data_dirs = raw.split(os.pathsep) if raw else ['/usr/local/share', '/usr/share']
+    directories = [os.path.join(data_home, 'applications')]
+    directories += [os.path.join(path, 'applications') for path in data_dirs if os.path.isabs(path)]
+    directories += ['/var/lib/flatpak/exports/share/applications',
+                    os.path.join(data_home, 'flatpak/exports/share/applications'),
+                    '/var/lib/snapd/desktop/applications']
+    return list(dict.fromkeys(directories))
+
+
+DESKTOP_DIRS = _linux_desktop_dirs()
 
 # Где macOS держит приложения. Программы там — не файлы, а папки с суффиксом
 # .app: внутри лежит всё сразу, от исполняемого файла до значка.
@@ -211,9 +222,9 @@ def _normalize(s: str) -> str:
     score — приложение считалось "не найдено" даже когда оно точно
     установлено. Теперь снимается любая внешняя пунктуация/пробелы.
     """
-    s = s.strip().lower()
+    s = s.strip().lower().strip(" .,!?:;—-«»“”\"'")
     s = re.sub(r"\.(exe|lnk)$", "", s)
-    s = s.strip(" .,!?:;—-")
+    s = s.strip(" .,!?:;—-«»“”\"'")
     return s
 
 
@@ -289,18 +300,22 @@ def _build_startapps_index() -> Dict[str, str]:
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
              "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
              "Get-StartApps | ConvertTo-Json -Compress"],
-            capture_output=True, text=True, timeout=20, encoding="utf-8", errors="replace",
+            capture_output=True, text=True, timeout=8, encoding="utf-8", errors="replace",
+            **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}),
         )
         if result.returncode != 0 or not result.stdout.strip():
             return {}
         data = json.loads(result.stdout)
         if isinstance(data, dict):
             data = [data]
+        if not isinstance(data, list):
+            return {}
         index: Dict[str, str] = {}
         for item in data:
-            name = (item or {}).get("Name", "")
-            app_id = (item or {}).get("AppID", "")
-            if name and app_id:
+            if not isinstance(item, dict):
+                continue
+            name, app_id = item.get('Name', ''), item.get('AppID', '')
+            if isinstance(name, str) and isinstance(app_id, str) and name and app_id:
                 index[_normalize(name)] = app_id
         return index
     except Exception:
@@ -321,6 +336,27 @@ def _build_shortcut_index() -> Dict[str, str]:
 
 _startapps_index_cache: Optional[Dict[str, str]] = None
 _shortcut_index_cache: Optional[Dict[str, str]] = None
+_index_lock = threading.RLock()
+_index_metadata = {}
+_last_miss_refresh = 0.
+INDEX_TTL = 120.
+
+
+def _cached_index(name, builder, force=False):
+    variable = '_' + name + '_index_cache'
+    with _index_lock:
+        cached = globals().get(variable)
+        identity, built = _index_metadata.get(name, (None, 0.))
+        now = time.monotonic()
+        if cached is not None and identity != id(cached):
+            built = now  # Explicitly supplied/replaced snapshots are fresh too.
+        if force or cached is None or now-built >= INDEX_TTL:
+            candidate = builder()
+            cached = candidate if candidate or cached is None else cached
+            globals()[variable] = cached
+            built = time.monotonic()
+        _index_metadata[name] = (id(cached), built)
+        return dict(cached)
 
 
 def _build_desktop_index() -> Dict[str, str]:
@@ -334,17 +370,24 @@ def _build_desktop_index() -> Dict[str, str]:
     """
     index: Dict[str, str] = {}
 
+    seen_ids = set()
     for directory in DESKTOP_DIRS:
         if not os.path.isdir(directory):
             continue
-        for path in glob.glob(os.path.join(directory, "**", "*.desktop"), recursive=True):
+        for path in sorted(glob.glob(os.path.join(directory, "**", "*.desktop"), recursive=True)):
             try:
+                identifier = os.path.relpath(path, directory).replace(os.sep, '-')
+                if identifier in seen_ids:
+                    continue
                 parser = configparser.ConfigParser(interpolation=None, strict=False)
                 parser.read(path, encoding="utf-8")
                 if not parser.has_section("Desktop Entry"):
                     continue
                 entry = parser["Desktop Entry"]
 
+                seen_ids.add(identifier)
+                if entry.get('Hidden', 'false').strip().lower() == 'true':
+                    continue
                 if entry.get("NoDisplay", "false").strip().lower() == "true":
                     continue
                 if entry.get("Type", "Application").strip() != "Application":
@@ -366,10 +409,7 @@ _desktop_index_cache: Optional[Dict[str, str]] = None
 
 
 def _get_desktop_index() -> Dict[str, str]:
-    global _desktop_index_cache
-    if _desktop_index_cache is None:
-        _desktop_index_cache = _build_desktop_index()
-    return _desktop_index_cache
+    return _cached_index('desktop', _build_desktop_index)
 
 
 def _build_bundle_index() -> Dict[str, str]:
@@ -431,10 +471,7 @@ _bundle_index_cache: Optional[Dict[str, str]] = None
 
 
 def _get_bundle_index() -> Dict[str, str]:
-    global _bundle_index_cache
-    if _bundle_index_cache is None:
-        _bundle_index_cache = _build_bundle_index()
-    return _bundle_index_cache
+    return _cached_index('bundle', _build_bundle_index)
 
 
 def _spotlight_lookup(name: str) -> Optional[str]:
@@ -543,17 +580,11 @@ def _launch_desktop_entry(path: str) -> None:
 
 
 def _get_startapps_index() -> Dict[str, str]:
-    global _startapps_index_cache
-    if _startapps_index_cache is None:
-        _startapps_index_cache = _build_startapps_index()
-    return _startapps_index_cache
+    return _cached_index('startapps', _build_startapps_index)
 
 
 def _get_shortcut_index() -> Dict[str, str]:
-    global _shortcut_index_cache
-    if _shortcut_index_cache is None:
-        _shortcut_index_cache = _build_shortcut_index()
-    return _shortcut_index_cache
+    return _cached_index('shortcut', _build_shortcut_index)
 
 
 def refresh_index() -> Dict[str, int]:
@@ -567,15 +598,15 @@ def refresh_index() -> Dict[str, int]:
     global _startapps_index_cache, _shortcut_index_cache, _bundle_index_cache, _desktop_index_cache
 
     if IS_MACOS:
-        _bundle_index_cache = _build_bundle_index()
+        _bundle_index_cache = _cached_index('bundle', _build_bundle_index, True)
         return {"applications": len(_bundle_index_cache)}
 
     if not IS_WINDOWS:
-        _desktop_index_cache = _build_desktop_index()
+        _desktop_index_cache = _cached_index('desktop', _build_desktop_index, True)
         return {"desktop": len(_desktop_index_cache)}
 
-    _startapps_index_cache = _build_startapps_index()
-    _shortcut_index_cache = _build_shortcut_index()
+    _startapps_index_cache = _cached_index('startapps', _build_startapps_index, True)
+    _shortcut_index_cache = _cached_index('shortcut', _build_shortcut_index, True)
     return {"startapps": len(_startapps_index_cache), "shortcuts": len(_shortcut_index_cache)}
 
 
@@ -607,7 +638,7 @@ def _resolve_linux(search_name: str) -> Optional[ResolvedApp]:
     return None
 
 
-def resolve_app(name: str) -> Optional[ResolvedApp]:
+def _resolve_cached_app(name: str) -> Optional[ResolvedApp]:
     """Найти приложение по произвольному имени пользователя (любой установленный софт)."""
     normalized = _normalize(name)
     if not normalized:
@@ -631,7 +662,12 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
     if path:
         return ResolvedApp(matched_name=search_name, target=path, kind="path",
                             source="app_paths" if not alias else "alias_app_paths")
-
+    # Execution aliases and PATH-installed applications need no hand-written alias.
+    raw_name = name.strip().strip('«»“”\"\'')
+    if not any(char.isspace() for char in raw_name):
+        executable = shutil.which(raw_name)
+        if executable and executable.lower().endswith(('.exe', '.com')):
+            return ResolvedApp(matched_name=normalized, target=executable, kind='path', source='path')
     startapps = _get_startapps_index()
     shortcuts = _get_shortcut_index()
 
@@ -684,11 +720,40 @@ def resolve_app(name: str) -> Optional[ResolvedApp]:
         for word in reversed(words):
             if len(word) < 3:
                 continue
-            found = resolve_app(word)
+            found = _resolve_cached_app(word)
             if found:
                 return found
 
     return None
+
+
+def resolve_app(name: str) -> Optional[ResolvedApp]:
+    if not isinstance(name, str) or not name.strip() or len(name) > 256 or any(char in name for char in '\x00\r\n'):
+        return None
+    result = _resolve_cached_app(name)
+    if result:
+        return result
+    # Discover programs installed after the initial snapshot, without rescanning
+    # PowerShell on every failed lookup or once per word in the query.
+    global _last_miss_refresh
+    with _index_lock:
+        now = time.monotonic()
+        newest = max((row[1] for row in _index_metadata.values()), default=now)
+        if now-newest < 3 or now-_last_miss_refresh < 20:
+            return None
+        _last_miss_refresh = now
+        refresh_index()
+    return _resolve_cached_app(name)
+
+
+def installed_names():
+    if IS_MACOS:
+        index = _get_bundle_index()
+    elif IS_WINDOWS:
+        index = {**_get_shortcut_index(), **_get_startapps_index()}
+    else:
+        index = _get_desktop_index()
+    return sorted(index, key=str.casefold)
 
 
 def _not_found_message(name: str) -> str:

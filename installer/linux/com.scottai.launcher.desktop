@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ScottAI
+Comment=ScottAI desktop assistant
+Exec=AppRun
+Icon=scottai
+Terminal=false
+Categories=Utility;
+StartupWMClass=com.scottai.launcher

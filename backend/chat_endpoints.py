@@ -1,6 +1,7 @@
 """Named chat API; parsing, persistence and model requests run on workers."""
 import asyncio
 import base64
+import re
 import io
 import threading
 import json
@@ -9,6 +10,10 @@ from functools import lru_cache
 from typing import Optional, List
 
 import requests
+try:
+    from . import bounded_work
+except ImportError:
+    import bounded_work
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image
@@ -28,7 +33,9 @@ except ImportError:
 router = APIRouter(prefix='/chats', tags=['chats'])
 _operations = threading.RLock()
 _busy_chats = set()
+_busy_lock = threading.Lock()
 command_handler = None
+auto_command_handler = None
 MAX_FILES = 4
 MAX_TOTAL_BYTES = attachments.MAX_BYTES
 VIDEO_TYPES = {'.mp4': 'video/mp4', '.mpeg': 'video/mpeg', '.mov': 'video/mov', '.webm': 'video/webm'}
@@ -50,15 +57,16 @@ def operation(function, *args, **kwargs):
 
 
 def delete_saved(chat_id=None, clear=False):
-    if (chat_id and chat_id in _busy_chats) or (not chat_id and _busy_chats):
-        raise HTTPException(409, 'Дождитесь завершения действия')
+    with _busy_lock:
+        if (chat_id and chat_id in _busy_chats) or (not chat_id and _busy_chats):
+            raise HTTPException(409, 'Дождитесь завершения действия')
     ia = get_intelligent_answerer()
     memory = getattr(ia, 'memory', None)
     archive = getattr(memory, 'archive', None)
     if chat_id:
         store().get(chat_id)
     if callable(getattr(archive, 'delete_chats', None)):
-        with ia._state_lock(), memory._lock:
+        with memory._lock:
             candidate = list(memory.conversations)
             def clear_recent(pairs):
                 nonlocal candidate
@@ -233,15 +241,18 @@ def generate(ia, question):
     return data
 
 
-def send(chat_id, question, mode, files):
-    if chat_id in _busy_chats:
-        raise HTTPException(409, 'В этом диалоге ещё выполняется действие')
+def send(chat_id, question, mode, files, *, reserved=False, cancelled=None):
+    with _busy_lock:
+        if chat_id in _busy_chats and not reserved:
+            raise HTTPException(409, 'В этом диалоге ещё выполняется действие')
     database = store()
-    snapshot = database.get(chat_id)
+    snapshot = operation(database.get, chat_id)
     ia = get_intelligent_answerer()
     if not ia or not ia.enabled:
         raise ValueError('Выберите и настройте модель на вкладке «Модели»')
     with ia._state_lock():
+        if cancelled is not None and cancelled.is_set():
+            raise HTTPException(504, 'Время ожидания модели истекло. Сообщение не сохранено.')
         caps = model_capabilities.capabilities(ia.api_provider, ia.model, refresh=True)
         media, notes, text_parts, content = [], [], [], []
         if mode == 'image':
@@ -255,7 +266,7 @@ def send(chat_id, question, mode, files):
             answer, saved_content = 'Изображение готово.', question
         else:
             if not caps['text']:
-                raise ValueError('Эта модель создаёт изображения. Выберите режим «Картинка» или разговорную модель')
+                raise ValueError('Эта модель создаёт изображения. Напишите «Нарисуй…» или выберите разговорную модель')
             for name, data in files:
                 suffix = Path(name).suffix.lower()
                 if suffix in VIDEO_TYPES:
@@ -310,20 +321,28 @@ def send(chat_id, question, mode, files):
                     recalled = archive.recall(question, excluded)
                 except Exception:
                     pass
-            answer = complete(ia, recalled + history + [dict(role='user', content=content)], ia.instructions(query=question))
+            instructions = ia.instructions(query=question) + '\nПримеры кода оформляй отдельными блоками Markdown с тройными обратными кавычками и именем языка. Объяснение пиши вне блока. Не утверждай, что запустил код или выполнил действие на компьютере: этот ответ создаёт разговорная модель.'
+            answer = complete(ia, recalled + history + [dict(role='user', content=content)], instructions)
             if not answer:
                 raise ValueError('Модель вернула пустой ответ. Попробуйте ещё раз')
-        chat = database.commit_turn(chat_id, question, saved_content, answer, ia.api_provider + ' · ' + ia.model, media)
-        remember(ia, chat, question, answer, notes)
-        try:
-            from . import memories
-        except ImportError:
-            import memories
-        try:
-            memories.observe(question)
-        except Exception:
-            pass  # A fact-storage failure must not duplicate a committed chat turn.
-        return dict(success=True, chat=chat, notes=notes)
+        model_label = ia.api_provider + ' · ' + ia.model
+    # Release the provider lock before acquiring the history lock.
+    # Network work holds no history lock.
+    def commit():
+        if cancelled is not None and cancelled.is_set():
+            raise HTTPException(504, 'Время ожидания модели истекло. Сообщение не сохранено.')
+        return database.commit_turn(chat_id, question, saved_content, answer, model_label, media)
+    chat = operation(commit)
+    remember(ia, chat, question, answer, notes)
+    try:
+        from . import memories
+    except ImportError:
+        import memories
+    try:
+        memories.observe(question)
+    except Exception:
+        pass  # A fact-storage failure must not duplicate a committed chat turn.
+    return dict(success=True, chat=chat, notes=notes)
 
 
 @router.post('/{chat_id}/messages')
@@ -345,36 +364,35 @@ async def send_message(chat_id: str, question: str = Form(''), mode: str = Form(
     finally:
         for upload in files:
             await upload.close()
-    if mode == 'command':
-        if not question.strip() or files:
-            raise HTTPException(400, 'Для действия нужен текст без вложений')
-        if command_handler is None:
-            raise HTTPException(503, 'Исполнитель команд недоступен')
-        def reserve():
-            store().get(chat_id)
-            if chat_id in _busy_chats:
-                raise HTTPException(409, 'Дождитесь завершения предыдущего действия')
-            _busy_chats.add(chat_id)
-        await asyncio.to_thread(operation, reserve)
-        try:
-            result = await command_handler(question.strip(), quiet_mode=True)
-            answer = result.get('response', '')
-            if not answer:
-                raise HTTPException(502, 'Команда не вернула ответ')
-            def commit():
-                chat = store().commit_turn(chat_id, question.strip(), question.strip(), answer, 'Scott · действие', [])
-                ia = get_intelligent_answerer()
-                if ia:
-                    remember(ia, chat, question.strip(), answer, [], True)
-                return chat
-            chat = await asyncio.to_thread(operation, commit)
+    if mode == 'chat' and not files and requests_image(question):
+        mode = 'image'
+    if mode == 'chat' and not files and question.strip():
+        def introduce():
+            from assistant_identity import reply
+            database = store()
+            snapshot = database.get(chat_id)
+            previous = snapshot['messages'][-1:] or [{}]
+            last = previous[0]
+            answer = reply(question, last.get('text') if last.get('role') == 'assistant' else None)
+            if answer is None:
+                return None
+            with _busy_lock:
+                if chat_id in _busy_chats:
+                    raise HTTPException(409, 'Дождитесь завершения предыдущего действия')
+            chat = database.commit_turn(chat_id, question.strip(), question.strip(), answer, 'Scott · знакомство', [])
             return dict(success=True, chat=chat, notes=[])
-        finally:
-            with _operations:
-                _busy_chats.discard(chat_id)
-    def work():
+        introduction = await asyncio.to_thread(operation, introduce)
+        if introduction is not None:
+            return introduction
+    cancelled = threading.Event()
+    def work(reserved=False):
         try:
-            return operation(send, chat_id, question.strip(), mode, payload)
+            try:
+                return send(chat_id, question.strip(), mode, payload, reserved=reserved, cancelled=cancelled)
+            except KeyError as error:
+                raise HTTPException(404, str(error.args[0])) from error
+            except ValueError as error:
+                raise HTTPException(400, str(error)) from error
         except HTTPException:
             raise
         except Exception as error:
@@ -387,4 +405,65 @@ async def send_message(chat_id: str, question: str = Form(''), mode: str = Form(
                 if isinstance(key, str) and key:
                     reason = reason.replace(key, '[скрыто]')
             raise HTTPException(502, reason) from error
-    return await asyncio.to_thread(work)
+    automatic = mode == 'chat' and not files and bool(question.strip()) and auto_command_handler is not None
+    def reserve():
+        store().get(chat_id)
+        with _busy_lock:
+            if chat_id in _busy_chats:
+                raise HTTPException(409, 'Дождитесь завершения предыдущего действия')
+            _busy_chats.add(chat_id)
+    def release():
+        with _busy_lock:
+            _busy_chats.discard(chat_id)
+    async def model_reply():
+        try:
+            return await bounded_work.models.run(work, True, timeout=200 if mode=='image' else 110,
+                                                 cancelled=cancelled, completion=release)
+        except bounded_work.WorkBusy as error:
+            raise HTTPException(503, str(error)) from None
+        except bounded_work.WorkTimeout:
+            raise HTTPException(504, 'Модель не ответила вовремя. Незавершённый ответ не добавлен в историю.') from None
+    if mode == 'command' or automatic:
+        if not question.strip() or files:
+            raise HTTPException(400, 'Для действия нужен текст без вложений')
+        handler = auto_command_handler if automatic else command_handler
+        if handler is None:
+            raise HTTPException(503, 'Исполнитель команд недоступен')
+        await asyncio.to_thread(operation, reserve)
+        handed_off = False
+        try:
+            result = await handler(question.strip(), quiet_mode=True)
+            if result is None and automatic:
+                handed_off = True
+                return await model_reply()
+            answer = result.get('response', '')
+            if not answer:
+                raise HTTPException(502, 'Команда не вернула ответ')
+            def commit():
+                return store().commit_turn(chat_id, question.strip(), question.strip(), answer, 'Scott · действие', [])
+            chat = await asyncio.to_thread(operation, commit)
+            notes = []
+            ia = get_intelligent_answerer()
+            if ia:
+                try:
+                    await bounded_work.memory.run(remember, ia, chat, question.strip(), answer, notes, True, timeout=3)
+                except Exception:
+                    notes.append('Диалог сохранён, но пока недоступен для поиска в памяти.')
+            return dict(success=True, chat=chat, notes=notes)
+        finally:
+            if not handed_off:
+                release()
+    await asyncio.to_thread(operation, reserve)
+    return await model_reply()
+
+
+def requests_image(text):
+    """Explicit image creation only; discussing an image must remain a question."""
+    from understanding import strip_command_wrapper
+    value = strip_command_wrapper(text).strip()
+    if '\n' in value or '`' in value:
+        return False
+    return re.fullmatch(
+        r'(?is)(?:нарисуй|нарисовать|сгенерируй(?: мне)?(?: изображение| картинку| фото| фотографию)?|'
+        r'создай(?: мне)? (?:изображение|картинку|фото|фотографию)|'
+        r'(?:generate|draw|create) (?:an? )?(?:image|picture|photo)(?: of)?)\s+\S.*', value) is not None

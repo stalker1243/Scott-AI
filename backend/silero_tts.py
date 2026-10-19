@@ -10,7 +10,7 @@ Silero работает локально на той же RTX 3060: модель
 синтез короткой фразы занимает около 15 мс. Скачивается один раз через
 torch.hub, дальше работает офлайн.
 
-Голоса модели v4_ru: aidar, eugene (мужские), baya, kseniya, xenia (женские).
+В ScottAI доступны мужские голоса модели v4_ru: aidar и eugene.
 """
 
 import os
@@ -22,21 +22,16 @@ from typing import Optional
 SILERO_VOICES = {
     "aidar": "Айдар (муж., Silero, локальный)",
     "eugene": "Евгений (муж., Silero, локальный)",
-    "baya": "Бая (жен., Silero, локальный)",
-    "kseniya": "Ксения (жен., Silero, локальный)",
-    "xenia": "Ксения X (жен., Silero, локальный)",
 }
 
 # Пол голоса — нужен, чтобы лаунчер мог показывать, например, только мужские.
 SILERO_VOICE_GENDERS = {
     "aidar": "male",
     "eugene": "male",
-    "baya": "female",
-    "kseniya": "female",
-    "xenia": "female",
 }
 
-DEFAULT_SILERO_VOICE = os.getenv("SILERO_VOICE", "aidar")
+_ENV_VOICE = os.getenv("SILERO_VOICE", "aidar").strip()
+DEFAULT_SILERO_VOICE = _ENV_VOICE if _ENV_VOICE in SILERO_VOICES else "aidar"
 # 48000 — максимальное качество модели; 24000 звучит чуть глуше, но файл вдвое меньше.
 SAMPLE_RATE = int(os.getenv("SILERO_SAMPLE_RATE", "48000"))
 

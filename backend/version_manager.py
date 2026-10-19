@@ -8,6 +8,11 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
 class Version:
     """Одна версия команды или правила"""
     
@@ -123,8 +128,8 @@ class VersionHistory:
 class VersionManager:
     """Управляет версионированием всех элементов"""
     
-    def __init__(self, db_path: str = 'data/versions.json'):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        self.db_path = Path(db_path) if db_path is not None else backend_path('versions.json')
         self.histories: Dict[str, VersionHistory] = {}
         self.version_history = self.histories  # Alias для совместимости с тестами
         self.data_dir = str(self.db_path.parent)  # Для совместимости с тестами
@@ -267,6 +272,6 @@ class VersionManager:
         return f"VersionManager({len(self.histories)} элементов отслеживается)"
 
 
-def get_version_manager(db_path: str = 'data/versions.json') -> VersionManager:
+def get_version_manager(db_path: str | None = None) -> VersionManager:
     """Factory функция"""
     return VersionManager(db_path)

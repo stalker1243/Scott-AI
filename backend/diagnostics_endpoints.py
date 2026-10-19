@@ -79,14 +79,7 @@ async def read_log(name: str = "backend_errors.log", lines: int = 200) -> Dict:
 @router.get("/logs/available")
 async def available_logs() -> Dict:
     """Какие логи вообще есть и насколько они велики."""
-    files = []
-    for name, path in diagnostics.LOG_FILES.items():
-        files.append({
-            "name": name,
-            "exists": path.exists(),
-            "size_bytes": path.stat().st_size if path.exists() else 0,
-        })
-    return {"success": True, "logs": files}
+    return {"success": True, "logs": diagnostics.available_logs()}
 
 
 @router.post("/report")

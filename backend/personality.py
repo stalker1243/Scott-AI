@@ -29,7 +29,12 @@ import os
 from pathlib import Path
 from typing import Dict, List
 
-CONFIG_PATH = Path(__file__).resolve().parent / "data" / "personality.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+CONFIG_PATH = backend_path('personality.json')
 
 # Сколько знаков о себе уходит в каждый запрос.
 #

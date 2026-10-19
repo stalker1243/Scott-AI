@@ -23,10 +23,64 @@ def boot():
     return bootstrap
 
 
+@pytest.mark.parametrize('success',[True,False])
+def test_managed_wheel_is_installed_locally_and_removed_only_on_success(boot,tmp_path,monkeypatch,success):
+    import torch_download
+    import hashlib
+    payload=b'verified fixture wheel'
+    wheel=torch_download.Wheel('torch-fixture.whl',len(payload),hashlib.sha256(payload).hexdigest(),'cpu')
+    monkeypatch.setattr(torch_download,'selected',lambda backend:wheel)
+    def fetch(spec,directory,**kwargs):
+        directory.mkdir(parents=True);path=directory/spec.filename;path.write_bytes(payload);return path
+    monkeypatch.setattr(torch_download,'fetch',fetch)
+    calls=[]
+    monkeypatch.setattr(boot,'_run_pip',lambda executable,args,*a,**k:calls.append(args) or (success,'result'))
+    executable=str(tmp_path/'runtime/python.exe')
+    result=boot._install_torch(executable,['--index-url',boot.CPU_INDEX,boot.TORCH_CPU_PIN],None,True)
+    path=tmp_path/'runtime/.scott-downloads'/wheel.filename
+    assert result==(success,'result') and str(path) in calls[0] and boot.TORCH_CPU_PIN not in calls[0]
+    assert path.exists() is not success
+
+
+def test_provisioning_does_not_forward_provider_credentials(boot,monkeypatch):
+    monkeypatch.setenv('PROVIDER_API_KEY','private-fixture')
+    monkeypatch.setenv('HF_TOKEN','private-fixture')
+    monkeypatch.setenv('AWS_SECRET_ACCESS_KEY','private-fixture')
+    monkeypatch.setenv('SCOTT_TORCH_BACKEND','cpu')
+    env=boot.provisioning_environment()
+    assert not any(name in env for name in ('PROVIDER_API_KEY','HF_TOKEN','AWS_SECRET_ACCESS_KEY'))
+    assert env['SCOTT_TORCH_BACKEND']=='cpu'
+
+
 def with_gpu(boot, monkeypatch, present: bool):
     """Притвориться машиной с видеокартой или без неё."""
     monkeypatch.setattr(boot, "has_nvidia_gpu", lambda: present)
     monkeypatch.setattr(boot, "gpu_name", lambda: "NVIDIA GeForce RTX 3060" if present else None)
+
+
+def test_fresh_bundled_runtime_checks_space_before_pip(boot, monkeypatch, tmp_path):
+    import installation_space
+    monkeypatch.setattr(boot, '__file__', str(tmp_path/'backend/bootstrap.py'))
+    monkeypatch.setattr(boot, 'torch_requirement', lambda: (['--index-url', boot.CPU_INDEX, boot.TORCH_CPU_PIN], 'CPU'))
+    monkeypatch.setattr(installation_space, 'free_bytes', lambda path: 0)
+    monkeypatch.setattr(boot, 'ensure_pip', lambda *a: pytest.fail('Disk preflight must run before pip'))
+    executable=tmp_path/('runtime/python.exe' if boot.os.name=='nt' else 'runtime/bin/python')
+    result = boot.install_dependencies(str(executable))
+    assert not result.done and 'Недостаточно места' in result.error
+
+
+def test_existing_runtime_repair_does_not_require_a_full_install_budget(boot, monkeypatch, tmp_path):
+    import installation_space
+    import sys
+    monkeypatch.setattr(boot, '__file__', str(tmp_path/'backend/bootstrap.py'))
+    monkeypatch.setattr(boot, 'torch_requirement', lambda: (['--index-url', boot.CPU_INDEX, boot.TORCH_CPU_PIN], 'CPU'))
+    site = tmp_path/'runtime'/('Lib/site-packages' if boot.os.name == 'nt' else f'lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages')
+    (site/'torch').mkdir(parents=True)
+    monkeypatch.setattr(installation_space, 'require_space', lambda *a: pytest.fail('Repair must not need full budget'))
+    monkeypatch.setattr(boot, 'ensure_pip', lambda *a: 'fixture stops before pip')
+    executable=tmp_path/('runtime/python.exe' if boot.os.name=='nt' else 'runtime/bin/python')
+    result = boot.install_dependencies(str(executable))
+    assert result.error == 'fixture stops before pip'
 
 
 def test_gpu_machine_gets_cuda_build(boot, monkeypatch):
@@ -219,6 +273,7 @@ def test_models_counted_as_readiness(boot, monkeypatch, tmp_path):
     качать 700 МБ, и человек будет ждать молча, не понимая, что происходит.
     """
     import model_setup
+    monkeypatch.setenv('WHISPER_ENGINE', 'openai')
     import hashlib
     import zipfile
     target = tmp_path / 'whisper/small.pt'
@@ -381,6 +436,15 @@ def test_install_does_not_keep_a_second_wheel_in_global_cache(boot, monkeypatch,
     assert wheel.read_bytes() == b'previous unrelated package'
 
 
+def test_package_deadline_does_not_claim_internet_is_broken(boot, monkeypatch):
+    import subprocess
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired('pip', 1800)
+    monkeypatch.setattr(boot, '_stream_process', timeout)
+    ok, message = boot._run_pip('python', ['example'], None, 'install', 0, 1)
+    assert not ok and 'setup.log' in message and 'сеть' not in message
+
+
 def test_install_stops_without_pip(boot, monkeypatch):
     """
     Установка зависимостей не начинается, пока нет pip.
@@ -397,6 +461,55 @@ def test_install_stops_without_pip(boot, monkeypatch):
     step = boot.install_dependencies("python")
     assert not step.done
     assert "get-pip" in step.error
+
+
+@pytest.mark.parametrize('version,keep', [('2.9.1+cu126',False), ('2.12.0',False),
+    ('2.13.0+rocm10.0.0',True), ('2.14.1+cu126',True), ('2.14.1+cpu',True)])
+def test_upgrade_old_torch_before_requirements_without_losing_gpu_profile(boot, monkeypatch, version, keep):
+    import contextlib
+    import io
+    import sys
+    from types import SimpleNamespace
+    monkeypatch.setenv('SCOTT_TORCH_BACKEND','auto')
+    monkeypatch.setitem(sys.modules,'torch',SimpleNamespace(__version__=version))
+    monkeypatch.setattr(boot,'ensure_pip',lambda *a,**k:None)
+    chosen=['--index-url',boot.CUDA_INDEX,boot.TORCH_CUDA]
+    monkeypatch.setattr(boot,'torch_requirement',lambda:(chosen,'fixture'))
+    def probe(command,**kwargs):
+        output=io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output):
+                exec(command[2],{})
+            return SimpleNamespace(returncode=0,stdout=output.getvalue())
+        except AssertionError:
+            return SimpleNamespace(returncode=1,stdout='')
+    monkeypatch.setattr(boot.subprocess,'run',probe)
+    installs=[]
+    monkeypatch.setattr(boot,'_run_pip',lambda executable,args,*a,**k:(installs.append(args) or True,''))
+    assert boot.install_dependencies('fixture-python').done
+    assert len(installs)==(1 if keep else 2)
+    if not keep:
+        assert installs[0]==chosen
+    assert installs[-1][0]=='-r'
+
+
+def test_old_managed_torch_is_preserved_if_upgrade_has_insufficient_space(boot, monkeypatch, tmp_path):
+    import installation_space
+    import sys
+    from types import SimpleNamespace
+    root=tmp_path/'application'
+    executable=root/'runtime'/('python.exe' if boot.os.name=='nt' else 'bin/python')
+    site=root/'runtime'/('Lib/site-packages' if boot.os.name=='nt' else f'lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages')
+    (site/'torch').mkdir(parents=True)
+    monkeypatch.setattr(boot,'__file__',str(root/'backend/bootstrap.py'))
+    monkeypatch.setattr(boot,'ensure_pip',lambda *a,**k:None)
+    monkeypatch.setattr(boot.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=1,stdout=''))
+    monkeypatch.setattr(boot,'torch_requirement',lambda:(['--index-url',boot.CUDA_INDEX,boot.TORCH_CUDA],'fixture'))
+    monkeypatch.setattr(installation_space,'free_bytes',lambda path:0)
+    monkeypatch.setattr(boot,'_run_pip',lambda *a,**k:pytest.fail('Existing runtime must remain intact'))
+    result=boot.install_dependencies(str(executable))
+    assert not result.done and 'Недостаточно места' in result.error
+    assert (site/'torch').is_dir()
 
 # ==================== Зависимости моделей ====================
 

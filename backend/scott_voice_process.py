@@ -15,8 +15,10 @@ import wave
 import psutil
 try:
     from .voice_cache import touch as touch_cache, prune as prune_cache
+    from .voice_shared_runtime import config_fingerprint, SharedRuntimeError
 except ImportError:
     from voice_cache import touch as touch_cache, prune as prune_cache
+    from voice_shared_runtime import config_fingerprint, SharedRuntimeError
 
 PROTOCOL = 1
 MAX_TEXT = 1200
@@ -139,7 +141,7 @@ def recipe_id(config):
                       if (config.worker.parent/'stream_voice.py').is_file() else None,
                   formatter=checksum(Path(__file__).with_name('speech_text.py')),
                   device=config.device, cpu_threads=config.cpu_threads, rms_norm=config.rms_norm,
-                  python=str(config.python.resolve()), seed=20261006, language='Russian',
+                  python=str(config.python.resolve()), shared_runtime=config_fingerprint(config), seed=20261006, language='Russian',
                   max_new_tokens=768, temperature=.7, top_p=.95, subtalker_temperature=.7)
     return hashlib.sha256(json.dumps(recipe,sort_keys=True).encode()).hexdigest()
 
@@ -308,6 +310,10 @@ class ScottVoiceProcess:
             return value
 
     def _start(self, generation):
+        try:
+            config_fingerprint(self.config)
+        except SharedRuntimeError:
+            raise VoiceProcessError('runtime_update_required') from None
         with self._state_lock:
             self._check_generation(generation)
             if self._worker and self._worker[0].poll() is None:
@@ -402,6 +408,21 @@ class ScottVoiceProcess:
             raise ValueError('Expected stream callbacks')
         return self.synthesize(text,profile,on_audio=on_audio,on_abort=on_abort)
 
+    def _prepare_worker(self, worker, generation):
+        """Prepare within the active request, using a separate cold-load budget."""
+        if 'prepare_v1' not in self._features:
+            raise VoiceProcessError('prepare_unavailable')
+        request = uuid.uuid4().hex
+        packet = dict(id=request, action='prepare', recipe=self.recipe)
+        worker[0].stdin.write(json.dumps(packet)+'\n')
+        worker[0].stdin.flush()
+        reply = self._wait(worker,generation,self.prepare_timeout)
+        if reply.get('event')!='prepared' or reply.get('id')!=request or reply.get('recipe')!=self.recipe:
+            raise VoiceProcessError('invalid_protocol')
+        with self._state_lock:
+            self._check_generation(generation)
+            self._prepared = True
+
     def prepare(self):
         """Load the model and accepted prompt, without generating or playing speech."""
         with self._state_lock:
@@ -416,18 +437,7 @@ class ScottVoiceProcess:
                     self._idle_timer = None
             try:
                 worker = self._start(generation)
-                if 'prepare_v1' not in self._features:
-                    raise VoiceProcessError('prepare_unavailable')
-                request = uuid.uuid4().hex
-                packet = dict(id=request, action='prepare', recipe=self.recipe)
-                worker[0].stdin.write(json.dumps(packet)+'\n')
-                worker[0].stdin.flush()
-                reply = self._wait(worker,generation,self.prepare_timeout)
-                if reply.get('event')!='prepared' or reply.get('id')!=request or reply.get('recipe')!=self.recipe:
-                    raise VoiceProcessError('invalid_protocol')
-                with self._state_lock:
-                    self._check_generation(generation)
-                    self._prepared = True
+                self._prepare_worker(worker,generation)
             except Exception as error:
                 with self._state_lock:
                     failed = self._worker if self._generation==generation else None
@@ -485,6 +495,11 @@ class ScottVoiceProcess:
                 worker = self._start(generation)
                 if on_audio is not None and 'stream_v1' not in self._features:
                     raise VoiceProcessError('stream_unavailable')
+                # Imports, weight loading and the accepted clone prompt can take
+                # longer than generation itself. Keep their existing preparation
+                # deadline separate, including after an idle worker was released.
+                if 'prepare_v1' in self._features and not self._prepared:
+                    self._prepare_worker(worker,generation)
                 packet = dict(id=request,action='stream' if on_audio is not None else 'synthesize',text=prepared,profile=profile,key=key)
                 worker[0].stdin.write(json.dumps(packet,ensure_ascii=False)+'\n')
                 worker[0].stdin.flush()

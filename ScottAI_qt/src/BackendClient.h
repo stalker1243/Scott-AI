@@ -26,6 +26,8 @@ class BackendClient : public QObject {
     Q_PROPERTY(QVariantMap chatCapabilities READ chatCapabilities NOTIFY chatsChanged)
     Q_PROPERTY(QVariantList attachments READ attachments NOTIFY attachmentsChanged)
     Q_PROPERTY(QString chatNotice READ chatNotice NOTIFY chatsChanged)
+    Q_PROPERTY(QVariantMap browserState READ browserState NOTIFY browserChanged)
+    Q_PROPERTY(bool browserReady READ browserReady NOTIFY browserChanged)
     Q_PROPERTY(QVariantList memories READ memories NOTIFY memoriesChanged)
     Q_PROPERTY(QVariantList memoryKinds READ memoryKinds NOTIFY memoriesChanged)
     Q_PROPERTY(bool memoryBusy READ memoryBusy NOTIFY memoryStateChanged)
@@ -97,6 +99,8 @@ public:
     QVariantMap chatCapabilities() const { return m_chatCapabilities; }
     QVariantList attachments() const { return m_attachments; }
     QString chatNotice() const { return m_chatNotice; }
+    QVariantMap browserState() const { return m_browserState; }
+    bool browserReady() const { return m_browserReady; }
     QVariantList memories() const { return m_memories; }
     QVariantList memoryKinds() const { return m_memoryKinds; }
     bool memoryBusy() const { return m_memoryBusy; }
@@ -170,6 +174,10 @@ public:
     Q_INVOKABLE void applySetting(const QString &group, const QVariantMap &changes);
     Q_INVOKABLE void previewVoice();
     Q_INVOKABLE void refreshVoiceInstall();
+    Q_INVOKABLE void refreshBrowser();
+    Q_INVOKABLE void startBrowser(const QString &action, const QString &query = {}, int index = -1);
+    Q_INVOKABLE void cancelBrowser();
+    Q_INVOKABLE void setBrowserEnabled(bool enabled);
     Q_INVOKABLE void prepareScottVoice(bool checkOnly = false);
     Q_INVOKABLE void cancelScottVoice();
     Q_INVOKABLE void refreshVoicePreparation();
@@ -188,6 +196,7 @@ public:
     Q_INVOKABLE void cancelProtocol();
     Q_INVOKABLE void saveProfile(const QString &name, const QString &about, const QString &style, const QStringList &interests);
 signals:
+    void browserChanged();
     void voiceInstallChanged();
     void voicePreparationChanged();
     void stateChanged();
@@ -217,6 +226,8 @@ signals:
     void protocolDeleted(const QString &id);
     void protocolJobChanged();
 private:
+    void acceptBrowser(const QJsonObject &data);
+    void browserMutation(const QString &path, const QJsonObject &body);
     void acceptVoiceInstall(const QJsonObject &job);
     using Callback = std::function<void(const QJsonObject &, const QString &)>;
     void request(const QString &path, const QJsonObject *body, int timeout, Callback callback, bool remove = false, bool form = false, bool patch = false);
@@ -234,6 +245,10 @@ private:
     QUrl m_base;
     QNetworkAccessManager m_network;
     QTimer m_poll;
+    QTimer m_browserPoll;
+    QVariantMap m_browserState;
+    bool m_browserReady = false, m_browserFetching = false, m_browserPending = false;
+    quint64 m_browserRevision = 0;
     QTimer m_voiceInstallPoll;
     QVariantMap m_voiceInstall;
     bool m_voiceInstallReady = false, m_voiceInstallFetching = false, m_voiceInstallPending = false;
@@ -244,6 +259,7 @@ private:
     quint64 m_voicePreparationRevision = 0;
     bool acceptVoicePreparation(const QJsonObject &data);
     QProcess m_process;
+    QByteArray m_outputLog, m_errorLog;
     QString m_directory, m_python, m_error;
     bool m_online = false, m_busy = false, m_starting = false, m_refreshing = false;
     QVariantMap m_metrics;

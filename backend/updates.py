@@ -36,7 +36,11 @@ API_URL = "https://api.github.com/repos/{repo}/releases/latest"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = PROJECT_ROOT / "VERSION.json"
-CACHE_FILE = Path(__file__).resolve().parent / "data" / "update_check.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+CACHE_FILE = backend_path('update_check.json')
 
 # Как часто ходить на GitHub. Без токена он разрешает 60 запросов в час на
 # адрес, а проверять чаще раза в сутки нет смысла: выпуски выходят не чаще.

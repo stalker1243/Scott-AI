@@ -26,12 +26,17 @@ for name in ('python', 'python3'):
 install_env = dict(os.environ, PATH=str(denied)+os.pathsep+os.environ['PATH'])
 
 def runtime_check():
+    metadata=json.loads((prefix/'.scott-linux-install.json').read_text())
+    base=Path(metadata['runtime_home'])/'python-runtime'
     code = ('import sys,ssl,sqlite3,bz2,lzma,ctypes,json; '
             'assert sys.version_info[:2] == (3,13); '
-            f'assert sys.base_prefix == {str(prefix/"python-runtime")!r}; '
+            f'assert sys.base_prefix == {str(base)!r}; '
             'assert ssl.create_default_context().cert_store_stats()["x509_ca"] > 0; '
             'print(json.dumps({"version":sys.version.split()[0],"base":sys.base_prefix}))')
-    subprocess.run([str(prefix/'runtime/bin/python'), '-I', '-c', code], check=True)
+    # The launcher sources this environment before starting Python. A shell
+    # launched by install.sh cannot update this parent validator's environment.
+    subprocess.run(['/bin/bash','-c','source "$1/python-environment.sh"; exec "$2" -I -c "$3"',
+                    'scott-runtime-check',str(prefix),str(prefix/'runtime/bin/python'),code],check=True)
 def install():
     subprocess.run(['/bin/bash', str(source/'install.sh'), '--prefix', str(prefix), '--no-shortcut'],
                    check=True, env=install_env)

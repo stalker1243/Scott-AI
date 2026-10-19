@@ -64,3 +64,16 @@ def test_creates_receipt_for_exact_core(tmp_path, monkeypatch):
                for name, sha in receipt['core'].items())
     with pytest.raises(ValueError, match='already exists'):
         builder.copy_python(tmp_path, path)
+
+
+def test_upstream_bytecode_is_not_published_with_the_runtime(tmp_path,monkeypatch):
+    entries=[('python/'+name,b'synthetic '+name.encode()) for name in builder.CORE]
+    entries += [('python/lib/python3.13/encodings/__init__.py',b'# source stays'),
+        ('python/lib/python3.13/encodings/__pycache__/__init__.cpython-313.pyc',b'upstream cache'),
+        ('python/lib/python3.13/other.pyc',b'upstream bytecode'),
+        ('python/lib/python3.13/other.pyo',b'upstream optimized bytecode')]
+    path=archive(tmp_path,entries);monkeypatch.setattr(builder,'SHA256',builder.digest(path))
+    target=builder.copy_python(tmp_path,path)
+    assert (target/'lib/python3.13/encodings/__init__.py').read_bytes()==b'# source stays'
+    assert not any('__pycache__' in path.parts or path.suffix in ('.pyc','.pyo') for path in target.rglob('*'))
+    assert all((target/name).is_file() for name in builder.CORE)

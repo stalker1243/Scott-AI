@@ -18,6 +18,20 @@ from question_answerer import get_question_answerer
 pytestmark = pytest.mark.unit
 
 
+def test_voice_introduction_precedes_model_memory_and_command_routing(main_module, monkeypatch):
+    from assistant_identity import VoiceIntroduction, CREATOR, HOW_IT_WORKS
+    scott = main_module.scott_ai
+    monkeypatch.setattr(scott, '_identity_dialogue', VoiceIntroduction())
+    def unexpected(*args, **kwargs): pytest.fail('Introduction reached another command/model handler')
+    monkeypatch.setattr(scott, '_browser_decision', unexpected)
+    async def conversation():
+        first = await scott._process_command_impl('А кто твой создатель?', by_voice=True)
+        second = await scott._process_command_impl('Да, расскажи подробнее', by_voice=True)
+        assert first['type'] == second['type'] == 'introduction'
+        assert first['response'] == CREATOR and second['response'] == HOW_IT_WORKS
+    asyncio.run(conversation())
+
+
 def decision(text):
     return understanding.understand(text, intent_engine=get_fast_intent_engine(),
         parser=CommandParser(), answerer=get_question_answerer())
@@ -145,6 +159,59 @@ def test_learned_answer_does_not_override_current_question(main_module, monkeypa
     assert asyncio.run(main.scott_ai.process_command('сколько времени'))['response'] == '12:00'
 
 
+def test_automatic_chat_passes_one_decision_to_executor(main_module, monkeypatch):
+    calls = []
+    async def command(text, quiet_mode=True, decision=None):
+        calls.append((text, quiet_mode, decision))
+        return {'response': 'Готово'}
+    monkeypatch.setattr(main_module.scott_ai, 'process_command', command)
+    assert asyncio.run(main_module.scott_ai.try_chat_action('Скотт, можешь открыть блокнот?')) == {'response': 'Готово'}
+    assert len(calls) == 1 and calls[0][1] is True
+    assert calls[0][2].action == 'open_app'
+    assert calls[0][2].parsed.main_param == 'блокнот'
+    assert asyncio.run(main_module.scott_ai.try_chat_action('Напиши код для запуска блокнота')) is None
+    assert asyncio.run(main_module.scott_ai.try_chat_action('Как открыть блокнот?')) is None
+    assert len(calls) == 1
+
+
+def test_chat_classifier_failure_keeps_model_path_and_never_executes(main_module, monkeypatch):
+    def failure(*args, **kwargs):
+        raise ValueError('bad parser state')
+    async def unexpected(*args, **kwargs):
+        pytest.fail('Classification failure cannot execute a command')
+    monkeypatch.setattr(main_module.understanding, 'chat_action', failure)
+    monkeypatch.setattr(main_module.scott_ai, 'process_command', unexpected)
+    assert asyncio.run(main_module.scott_ai.try_chat_action('Вопрос')) is None
+
+
+def test_chat_api_uses_real_recognition_and_saves_one_turn(main_module, monkeypatch, tmp_path):
+    from chat_store import ChatStore
+    main = main_module
+    database = ChatStore(tmp_path / 'chat-api')
+    calls = []
+    async def execute(parsed, text):
+        calls.append((parsed.command_type, parsed.main_param))
+        return 'Блокнот открыт'
+    monkeypatch.setattr(main.chat_api, 'store', lambda: database)
+    monkeypatch.setattr(main.chat_api, 'get_intelligent_answerer', lambda: None)
+    monkeypatch.setattr(main, 'intelligent_answerer', None)
+    monkeypatch.setattr(main, 'HAS_V32_FEATURES', False)
+    monkeypatch.setattr(main, 'knowledge_base', SimpleNamespace(add_conversation=lambda *args: None))
+    monkeypatch.setattr(main.memories_module, 'observe', lambda text: [])
+    monkeypatch.setattr(main.scott_ai, '_execute_parsed_command', execute)
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url='http://localhost') as client:
+            ident = (await client.post('/chats')).json()['chat']['id']
+            response = await client.post(f'/chats/{ident}/messages', data={'question': 'Скотт, можешь открыть блокнот?'})
+            assert response.status_code == 200
+            chat = response.json()['chat']
+            assert len(chat['messages']) == 2
+            assert chat['messages'][-1]['text'] == 'Блокнот открыт'
+            assert ident not in main.chat_api._busy_chats
+    asyncio.run(check())
+    assert calls == [('open_app', 'блокнот')]
+
+
 @pytest.mark.parametrize('path', ['/diagnostics/checks', '/diagnostics/system', '/audio/settings'])
 def test_device_checks_do_not_block_health(main_module, monkeypatch, path):
     import audio_settings
@@ -160,7 +227,7 @@ def test_device_checks_do_not_block_health(main_module, monkeypatch, path):
         '/audio/settings': (audio_settings, 'describe')}[path]
     monkeypatch.setattr(module, attribute, slow_result)
     async def check():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             task = asyncio.create_task(client.get(path))
             try:
                 while not started.is_set():

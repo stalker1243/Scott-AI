@@ -13,6 +13,45 @@ import voice_install_runtime as runtime
 
 pytestmark = pytest.mark.unit
 
+def test_runner_retains_failure_output_and_masks_log(tmp_path, monkeypatch):
+    monkeypatch.setenv('SCOTT_LOG_DIR', str(tmp_path/'logs'))
+    monkeypatch.setenv('FIXTURE_API_KEY', 'opaque-fixture-credential')
+    runner = runtime.CancellableRunner(None)
+    with pytest.raises(subprocess.CalledProcessError) as caught:
+        runner([sys.executable, '-c', 'import sys; print("network failed opaque-fixture-credential",file=sys.stderr); sys.exit(1)'], timeout=5)
+    assert 'network failed' in caught.value.stderr
+    assert 'opaque-fixture-credential' not in caught.value.stderr
+    log = (tmp_path/'logs/scott-voice-install.log').read_text(encoding='utf-8')
+    assert 'network failed' in log and 'opaque-fixture-credential' not in log
+
+def test_runner_times_out_silent_process_and_keeps_stdout():
+    runner = runtime.CancellableRunner(None)
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner([sys.executable, '-c', 'import time; time.sleep(30)'], timeout=.25)
+    result = runner([sys.executable, '-c', 'import sys; print("probe"); print("warning",file=sys.stderr)'], capture_output=True, timeout=5)
+    assert result.stdout.strip() == 'probe' and result.stderr.strip() == 'warning'
+
+
+def test_runner_forwards_model_progress_on_its_own_thread():
+    updates = []
+    owner = threading.get_ident()
+    runner = runtime.CancellableRunner(lambda *event: updates.append((threading.get_ident(), event)))
+    runner.step('model', 'Downloading', .6)
+    event = json.dumps(dict(type='progress', stage='model', message='model.bin', fraction=.72))
+    bad = json.dumps(dict(type='progress', stage='model', message='bad', fraction=float('nan')))
+    runner([sys.executable, '-c', f'print({event!r}); print({bad!r})'], timeout=5)
+    assert any(e[1] == ('model', 'model.bin', .72) for e in updates)
+    assert all(e[0] == owner and e[1][1] != 'bad' for e in updates)
+
+
+def test_runner_retains_structured_error_without_capture_output():
+    event = json.dumps(dict(type='error', code='download_access', message='denied'))
+    runner = runtime.CancellableRunner(None)
+    with pytest.raises(subprocess.CalledProcessError) as caught:
+        runner([sys.executable, '-c', f'import sys; print({event!r}); sys.exit(1)'], timeout=5)
+    from voice_install_errors import child_failure
+    assert child_failure(caught.value).code == 'download_access'
+
 @pytest.fixture
 def package(tmp_path, monkeypatch):
     archive = tmp_path/'fixture.zip'
@@ -104,7 +143,8 @@ def test_noninteractive_child_does_not_consume_cancel_pipe():
 
 
 @pytest.mark.skipif(sys.platform != 'win32', reason='Windows pipe inheritance regression')
-def test_cli_check_with_open_cancel_pipe(tmp_path, monkeypatch):
+@pytest.mark.parametrize('old_sdk',[False,True])
+def test_cli_check_with_open_cancel_pipe(tmp_path, monkeypatch,old_sdk):
     import scott_voice_install as setup
     import scott_voice_engine as engine
     import os
@@ -114,8 +154,16 @@ def test_cli_check_with_open_cancel_pipe(tmp_path, monkeypatch):
     subprocess.run([sys.executable, '-m', 'venv', '--without-pip', str(config.python.parent.parent)], check=True)
     modules = tmp_path/'modules'; modules.mkdir()
     (modules/'torch.py').write_text('class cuda:\n @staticmethod\n def is_available(): return True\n')
+    if old_sdk:
+        (modules/'torch.py').write_text('raise RuntimeError("An outdated SDK must not be imported before repair")\n')
     for name in ('qwen_tts', 'soundfile', 'scipy'):
         (modules/(name+'.py')).write_text('')
+    from scott_voice_sdk import VERSIONS
+    for name,version in VERSIONS.items():
+        if old_sdk and name=='qwen-tts':version='0.1.1'
+        metadata=modules/(name.replace('-','_')+'-'+version+'.dist-info')
+        metadata.mkdir()
+        (metadata/'METADATA').write_text('Name: '+name+'\nVersion: '+version+'\n')
     for path in (config.worker, config.profiles_json, *[config.model_dir/n for n in setup.MODEL_FILES]):
         path.parent.mkdir(parents=True, exist_ok=True); path.write_text('{}')
     hashes = {n: setup.checksum(config.model_dir/n) for n in setup.MODEL_FILES}
@@ -131,8 +179,10 @@ def test_cli_check_with_open_cancel_pipe(tmp_path, monkeypatch):
     try:
         # Keep cancellation stdin open until completion, like the live backend.
         process.wait(timeout=10)
-        assert process.returncode == 0
-        assert json.loads(process.stdout.read())['available'] is True
+        assert process.returncode == (1 if old_sdk else 0)
+        result=json.loads(process.stdout.read())
+        assert result['available'] is not old_sdk
+        if old_sdk:assert result['error']=='runtime_update_required'
     finally:
         if process.poll() is None:
             owner = psutil.Process(process.pid)

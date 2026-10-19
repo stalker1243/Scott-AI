@@ -24,6 +24,17 @@ class TrayTests : public QObject {
         return tray.menu()->findChild<QAction *>(name);
     }
 private slots:
+    void losingTrayRestoresHiddenWindow() {
+        BackendClient client; QSystemTrayIcon icon; TestWindow window;
+        TrayController tray(&icon, &client, &window, true);
+        window.hide(); tray.availabilityChanged(false); QVERIFY(window.isVisible());
+        window.setProperty("setupActive", true); window.hide();
+        tray.availabilityChanged(false); QVERIFY(!window.isVisible());
+        window.setProperty("setupActive", false); window.setProperty("pendingQuit", true);
+        tray.availabilityChanged(false); QVERIFY(!window.isVisible());
+        window.setProperty("pendingQuit", false); window.setProperty("pendingHide", true);
+        tray.availabilityChanged(false); QVERIFY(window.isVisible());
+    }
     void navigationAndLocalPreferences() {
         BackendClient client;
         QSystemTrayIcon icon;

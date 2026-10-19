@@ -3,14 +3,29 @@ import QtQml
 // Synthetic data for rendering only. Never opens the real backend or its files.
 QtObject {
     property QtObject setupPreview: QtObject {
+        property int elapsed: 65
         property bool visible: true
         property bool busy: false
+        property bool checking: false
         property double progress: 0
         property string message: "Подготовим библиотеки и модели речи для вашего компьютера."
         property string error: ""
         property bool compact: false
+        property string sizeHint: "Чат и голос: около 2 ГиБ на CPU или 5–7 ГиБ на GPU. На время подготовки оставьте 2,5 ГиБ для CPU или 9 ГиБ для GPU. Дополнительные модели и Scott Voice устанавливаются отдельно."
         function prepare() {}
         function cancel() { busy = false }
+    }
+    property QtObject logsPreview: QtObject {
+        property string selectedName: "setup.log"
+        property bool busy: false
+        property var logs: [{name:"setup.log",exists:true,size_bytes:100}]
+        property string text: "ERROR synthetic network failure\nAPI Token: ***СКРЫТО***"
+        property string error: ""
+        property string notice: ""
+        property int exports: 0
+        function refresh(name) {}
+        function exportArchive() { exports++; notice = "Архив сохранён." }
+        function openFolder() {}
     }
     property bool online: true
     property bool busy: false
@@ -18,6 +33,17 @@ QtObject {
     property bool ownsBackend: false
     property string status: "На связи"
     property string error: ""
+    property bool listening: false
+    property bool listeningAvailable: true
+    property bool listeningReady: true
+    property bool listeningBusy: false
+    property string listeningError: ""
+    property int listeningWrites: 0
+    function setListening(enabled) {
+        if (!online || !listeningReady || !listeningAvailable || listeningBusy || listening === enabled) return
+        listeningWrites++
+        listening = enabled
+    }
     signal chatSent()
     property var chats: [{id:"11111111111111111111111111111111",title:"Дизайн Scott",count:2,updated:"2026-10-06T12:00:00Z"}, {id:"22222222222222222222222222222222",title:"Рабочие заметки",count:8,updated:"2026-10-05T12:00:00Z"}]
     property string chatId: "11111111111111111111111111111111"
@@ -25,6 +51,18 @@ QtObject {
     property bool chatsBusy: false
     property var attachments: []
     property string chatNotice: ""
+    property var browserState: ({state:"idle",installed:false,enabled:false,candidates:[],message:"",id:"",browser_open:false})
+    property bool browserReady: true
+    property int browserRequests: 0
+    property int browserStops: 0
+    property string browserLastAction: ""
+    property int browserLastIndex: -1
+    signal browserChanged()
+    onBrowserStateChanged: browserChanged()
+    function refreshBrowser() {}
+    function startBrowser(action, query, index) { ++browserRequests; browserLastAction = action; browserLastIndex = index === undefined ? -1 : index }
+    function cancelBrowser() { ++browserStops }
+    function setBrowserEnabled(enabled) { ++browserRequests }
     property var chatCapabilities: ({enabled:true,model:"Scott / Demo Vision",capabilities:{known:true,text:true,documents:true,images:true,video:false,image_generation:true}})
     onChatCapabilitiesChanged: chatsChanged()
     function refreshChats() {}
@@ -39,7 +77,9 @@ QtObject {
     function stageAttachments(urls) {}
     function removeAttachment(index) { attachments = attachments.filter(function(_, i) { return i !== index }) }
     function saveChatImage(url) {}
-    function sendChatMessage(text, image) { ++messagesSent; chatSent() }
+    property string lastChatText: ""
+    property bool lastChatImageMode: false
+    function sendChatMessage(text, image) { lastChatText = text; lastChatImageMode = image === true; ++messagesSent; chatSent() }
     property var metrics: ({cpu: 24, ram: 48, gpu: 12, disk: 6})
     property var messages: [{role: "user", text: "Что ты умеешь?"}, {role: "assistant", text: "Могу помочь с вопросами, программами и повседневными задачами."}]
     property bool memoryBusy: false
@@ -101,7 +141,7 @@ QtObject {
     property string memoryError: ""
     property string memoryNotice: ""
     property bool settingsBusy: false
-    property var voiceInstall: ({state:"idle",installed:false,supported:true,message:""})
+    property var voiceInstall: ({state:"idle",installed:false,supported:true,message:"",space:{hint:"Scott Voice: примерно 3–4 ГиБ. Для подготовки оставьте 5 ГиБ свободно."}})
     property var voicePreparation: ({id:"",state:"idle",model_loaded:false,message:""})
     property bool voicePreparationReady: true
     function refreshVoicePreparation() {}

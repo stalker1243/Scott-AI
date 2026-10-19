@@ -23,7 +23,7 @@ ColumnLayout {
     readonly property var choices: (provider.models || []).filter(function(m) {
         const query = searchField.text.trim().toLowerCase()
         return !query.length || m.id.toLowerCase().includes(query) || (m.note || "").toLowerCase().includes(query)
-    }).map(function(m) { return {id:m.id, title:m.id + (m.free ? " · бесплатно" : ""), note:m.note || ""} })
+    }).map(function(m) { return {id:m.id, title:m.id + (m.free ? qsTranslate("Launcher", " · бесплатно") : ""), note:m.note || ""} })
     readonly property bool editable: client.online && client.modelsReady && !client.modelsBusy
     readonly property bool validDraft: provider.id !== undefined && modelId.length > 0 && modelId.length <= 200 &&
         !/[\s\x00-\x1f]/.test(modelId) && (provider.configured || tokenField.text.trim().length > 0) &&
@@ -88,44 +88,46 @@ ColumnLayout {
             id: formContent
             width: scroll.width - (scroll.contentHeight > scroll.height ? 12 : 0); spacing: 12
             SurfacePanel {
+                flat: true
                 theme: page.theme; Layout.fillWidth: true; implicitHeight: activeContent.implicitHeight + 28
                 ColumnLayout {
                     id: activeContent
                     anchors.fill: parent; anchors.margins: 14; spacing: 6
                     RowLayout {
-                        Label { text: "Используется"; color: page.theme.muted; font.pixelSize: 12 }
+                        Label { text: qsTranslate("Launcher", "Используется"); color: page.theme.muted; font.pixelSize: 12 }
                         Label {
                             Layout.fillWidth: false
-                            text: !client.online ? "Scott отключён" : !client.modelsReady ? "Нет данных" : client.aiState.enabled ? "Настроено" : "Не подключено"
+                            text: !client.online ? qsTranslate("Launcher", "Scott отключён") : !client.modelsReady ? qsTranslate("Launcher", "Нет данных") : client.aiState.enabled ? qsTranslate("Launcher", "Настроено") : qsTranslate("Launcher", "Не подключено")
                             color: client.online && client.modelsReady && client.aiState.enabled ? page.theme.success : page.theme.muted
                         }
                     }
                     Label {
-                        text: client.aiState.provider ? client.aiState.provider + " · " + (client.aiState.model || "") : "Модель ещё не выбрана"
+                        text: client.aiState.provider ? client.aiState.provider + " · " + (client.aiState.model || "") : qsTranslate("Launcher", "Модель ещё не выбрана")
                         font.pixelSize: 16; font.weight: Font.DemiBold
                     }
                 }
             }
             SurfacePanel {
+                flat: true
                 theme: page.theme; Layout.fillWidth: true; implicitHeight: connectionContent.implicitHeight + 28
                 ColumnLayout {
                     id: connectionContent
                     anchors.fill: parent; anchors.margins: 14; spacing: 8
                     RowLayout {
-                        Label { text: "Провайдер"; font.weight: Font.DemiBold }
-                        Hint { Layout.fillWidth: false; text: page.provider.configured ? "Ключ настроен" : "Нужен API Token" }
+                        Label { text: qsTranslate("Launcher", "Провайдер"); font.weight: Font.DemiBold }
+                        Hint { Layout.fillWidth: false; text: page.provider.configured ? qsTranslate("Launcher", "Ключ настроен") : qsTranslate("Launcher", "Нужен API Token") }
                     }
                     UiComboBox {
                         objectName: "modelProvider"; theme: page.theme; Layout.fillWidth: true
-                        model: client.aiProviders; textRole: "id"; currentIndex: page.providerIndex(page.providerId)
+                        model: client.aiProviders; textRole: "id"; translateDisplay: false; currentIndex: page.providerIndex(page.providerId)
                         enabled: page.editable
                         onActivated: function(index) { page.chooseProvider(model[index].id) }
                     }
-                    Hint { text: page.provider.note || (client.modelsBusy ? "Загружаю провайдеров и модели…" : "Обновите данные для настройки подключения.") }
+                    Hint { text: qsTranslate("Launcher", page.provider.note || (client.modelsBusy ? qsTranslate("Launcher", "Загружаю провайдеров и модели…") : qsTranslate("Launcher", "Обновите данные для настройки подключения."))) }
                     RowLayout {
-                        Label { text: "Модель"; font.weight: Font.DemiBold }
+                        Label { text: qsTranslate("Launcher", "Модель"); font.weight: Font.DemiBold }
                         UiSwitch {
-                            objectName: "manualModel"; theme: page.theme; text: "ID вручную"
+                            objectName: "manualModel"; theme: page.theme; text: qsTranslate("Launcher", "ID вручную")
                             checked: page.manualModel; enabled: page.editable
                             onToggled: {
                                 page.manualModel = checked
@@ -136,31 +138,32 @@ ColumnLayout {
                     }
                     Input {
                         id: searchField; objectName: "modelSearch"; visible: !page.manualModel; enabled: page.editable
-                        placeholderText: "Поиск модели"; maximumLength: 200
+                        placeholderText: qsTranslate("Launcher", "Поиск модели"); maximumLength: 200
                     }
                     UiComboBox {
                         objectName: "modelChoice"; theme: page.theme; Layout.fillWidth: true
-                        model: page.choices; textRole: "title"; currentIndex: page.modelIndex(page.selectedModel)
-                        displayText: currentIndex >= 0 ? page.choices[currentIndex].title : page.selectedModel || "Нет моделей — укажите ID вручную"
+                        model: page.choices; textRole: "title"; translateDisplay: false; currentIndex: page.modelIndex(page.selectedModel)
+                        displayText: currentIndex >= 0 ? page.choices[currentIndex].title : page.selectedModel || qsTranslate("Launcher", "Нет моделей — укажите ID вручную")
                         enabled: page.editable && page.choices.length > 0; visible: !page.manualModel
                         onActivated: function(index) { page.selectedModel = model[index].id; page.dirty = true }
                     }
                     Input {
                         id: customField; objectName: "customModel"; visible: page.manualModel; enabled: page.editable
-                        placeholderText: "ID модели у провайдера"; maximumLength: 200
+                        placeholderText: qsTranslate("Launcher", "ID модели у провайдера"); maximumLength: 200
                         onTextEdited: page.dirty = true
                     }
                     Hint {
                         visible: !page.manualModel
-                        text: page.choices.length === 0 && searchField.text.length ? "Ничего не найдено. Измените поиск или укажите ID вручную." :
-                            ((page.provider.models || []).find(function(m) { return m.id === page.selectedModel }) || {}).note || "Можно указать модель, которой ещё нет в каталоге."
+                        text: page.choices.length === 0 && searchField.text.length ? qsTranslate("Launcher", "Ничего не найдено. Измените поиск или укажите ID вручную.") :
+                            qsTranslate("Launcher", ((page.provider.models || []).find(function(m) { return m.id === page.selectedModel }) || {}).note || qsTranslate("Launcher", "Можно указать модель, которой ещё нет в каталоге."))
                     }
                     CapabilityBadges { theme: page.theme; Layout.fillWidth: true; capabilities: page.selectedCapabilities; onFeatureRequested: function(feature) { page.warningFeature = feature } }
                     UiNotice { theme: page.theme; Layout.fillWidth: true; warning: true; text: page.warningFeature.length ? CapabilityInfo.reason({model:page.modelId, capabilities:page.selectedCapabilities}, page.warningFeature) : "" }
-                    Hint { text: page.selectedCapabilities.known ? "Файлы: текст из PDF, DOCX и исходного кода. Возможности и доступ зависят от API модели." : "Возможности этой модели не подтверждены каталогом." }
+                    Hint { text: page.selectedCapabilities.known ? qsTranslate("Launcher", "Файлы: текст из PDF, DOCX и исходного кода. Возможности и доступ зависят от API модели.") : qsTranslate("Launcher", "Возможности этой модели не подтверждены каталогом.") }
                 }
             }
             SurfacePanel {
+                flat: true
                 theme: page.theme; Layout.fillWidth: true; implicitHeight: tokenContent.implicitHeight + 28
                 ColumnLayout {
                     id: tokenContent
@@ -171,16 +174,16 @@ ColumnLayout {
                             id: tokenField; objectName: "modelToken"; enabled: page.editable
                             maximumLength: 4096; echoMode: page.showToken ? TextInput.Normal : TextInput.Password
                             inputMethodHints: Qt.ImhSensitiveData | Qt.ImhNoPredictiveText | Qt.ImhNoAutoUppercase
-                            placeholderText: page.provider.configured ? "Пустое поле — использовать настроенный ключ" : "Вставьте ключ выбранного провайдера"
+                            placeholderText: page.provider.configured ? qsTranslate("Launcher", "Пустое поле — использовать настроенный ключ") : qsTranslate("Launcher", "Вставьте ключ выбранного провайдера")
                             onTextEdited: page.dirty = true
                         }
                         UiButton {
                             objectName: "revealModelToken"; theme: page.theme
-                            text: page.showToken ? "Скрыть" : "Показать"; enabled: page.editable && tokenField.text.length > 0
+                            text: page.showToken ? qsTranslate("Launcher", "Скрыть") : qsTranslate("Launcher", "Показать"); enabled: page.editable && tokenField.text.length > 0
                             onClicked: page.showToken = !page.showToken
                         }
                     }
-                    Hint { text: "Ключи сохраняются на этом компьютере. Новый токен заменяет ключ выбранного провайдера." }
+                    Hint { text: qsTranslate("Launcher", "Ключи сохраняются на этом компьютере. Новый токен заменяет ключ выбранного провайдера.") }
                 }
             }
         }
@@ -188,12 +191,12 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true; spacing: 10
         UiButton {
-            objectName: "applyModel"; theme: page.theme; text: "Применить"; primary: true
+            objectName: "applyModel"; theme: page.theme; text: qsTranslate("Launcher", "Применить"); primary: true
             enabled: page.editable && page.validDraft
             onClicked: page.apply()
         }
-        UiButton { objectName: "refreshModels"; theme: page.theme; text: "Обновить"; enabled: client.online && !client.modelsBusy; onClicked: client.refreshModels() }
+        UiButton { objectName: "refreshModels"; theme: page.theme; text: qsTranslate("Launcher", "Обновить"); enabled: client.online && !client.modelsBusy; onClicked: client.refreshModels() }
         BusyIndicator { running: client.modelsBusy; visible: running; Layout.preferredWidth: 24; Layout.preferredHeight: 24; palette.highlight: page.theme.accent }
-        Hint { text: client.modelsBusy ? "Подключение…" : page.dirty ? "Изменения не применены" : "" }
+        Hint { text: client.modelsBusy ? qsTranslate("Launcher", "Подключение…") : page.dirty ? qsTranslate("Launcher", "Изменения не применены") : "" }
     }
 }

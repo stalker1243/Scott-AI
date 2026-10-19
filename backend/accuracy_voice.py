@@ -31,6 +31,8 @@ import re
 import wave
 from pathlib import Path
 from typing import Dict, List, Optional
+import ast
+import json
 
 import numpy as np
 
@@ -79,6 +81,26 @@ def _normalize(value):
     return value
 
 
+def _local_payload(parsed):
+    """Canonical input only: never call a command executor, device or stopwatch."""
+    import local_tools
+    import utility_units
+    result = _normalize(parsed)
+    action = result.get('action')
+    if action == 'calculate':
+        source = local_tools.prepare_expression(result['expression'])
+        result['expression'] = ast.dump(ast.parse(source, mode='eval'), include_attributes=False)
+    elif action in ('percent', 'convert'):
+        for name in ('value', 'percent') if action == 'percent' else ('value',):
+            result[name] = local_tools.number(result[name])
+        if action == 'convert':
+            for name in ('source', 'target'):
+                result[name] = utility_units.UNITS[result[name]]
+    elif action in ('days_until', 'days_between'):
+        for name in ('date',) if action == 'days_until' else ('first', 'last'):
+            result[name] = local_tools.read_date(result[name])
+    return result
+
 def _same_decision(before, after):
     if after is None or (before.kind, before.action or '') != (after.kind, after.action or ''):
         return False
@@ -87,7 +109,17 @@ def _same_decision(before, after):
     if before.parsed is not None and before.kind != 'question':
         if after.parsed is None:
             return False
-        if (_parameter(before) != _parameter(after)
+        if isinstance(before.parsed, dict):
+            if not isinstance(after.parsed, dict):
+                return False
+            try:
+                first = _local_payload(before.parsed) if before.kind == 'utility' else _normalize(before.parsed)
+                last = _local_payload(after.parsed) if after.kind == 'utility' else _normalize(after.parsed)
+            except (ValueError, KeyError, TypeError, SyntaxError, RecursionError):
+                return False
+            if first != last:
+                return False
+        elif (_parameter(before) != _parameter(after)
                 or _normalize(before.parsed.context) != _normalize(after.parsed.context)):
             return False
     for field in ('service', 'query', 'memory', 'project', 'order'):
@@ -102,6 +134,8 @@ def _same_decision(before, after):
 
 
 def _parameter(decision):
+    if isinstance(decision.parsed, dict):
+        return json.dumps(decision.parsed, ensure_ascii=False, sort_keys=True)
     value = _normalize(decision.parsed.main_param)
     if decision.action in {'open_app', 'close_app'}:
         from app_resolver import ALIASES
@@ -180,8 +214,8 @@ def check(understanding, engines: Dict, recognizer,
                 промахи.append({
                     "сказано": фраза,
                     "услышано": услышано or "(тишина)",
-                    "ожидалось": accuracy._описать(было.kind, было.action or "", getattr(было.parsed, 'main_param', '')),
-                    "вышло": (accuracy._описать(стало.kind, стало.action or "", getattr(стало.parsed, 'main_param', ''))
+                    "ожидалось": accuracy._описать(было.kind, было.action or "", _parameter(было) if было.parsed is not None else ''),
+                    "вышло": (accuracy._описать(стало.kind, стало.action or "", _parameter(стало) if стало.parsed is not None else '')
                               if стало else "—"),
                 })
 

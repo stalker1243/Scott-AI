@@ -128,7 +128,13 @@ def copy_voice_assets(dest: Path) -> None:
     import importlib.util
     spec = importlib.util.spec_from_file_location('voice_install_builder', ROOT/'backend/scott_voice_install.py')
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Provisioning helpers live beside this module; builders run from installer/.
+    previous_path = sys.path[:]
+    try:
+        sys.path.insert(0, str(ROOT/'backend'))
+        spec.loader.exec_module(module)
+    finally:
+        sys.path[:] = previous_path
     target = dest/'voice-assets'
     if target.exists():
         current = module.asset_sources(ROOT)
@@ -141,17 +147,26 @@ def copy_voice_assets(dest: Path) -> None:
     log(f"пакет Scott Voice: {result['files']} файлов, {result['bytes']/1024:.0f} КиБ; веса ставятся отдельно")
 
 
-def build_qt_launcher(dest: Path, qt_root: Path, compiler_root: Path) -> None:
+def build_qt_launcher(dest: Path, qt_root: Path, compiler_root: Path, build_directory: Path | None = None) -> None:
     project = ROOT / 'ScottAI_qt'
+    build = (build_directory or project/'build').resolve()
+    if not build.is_relative_to(ROOT.resolve()) or build == ROOT.resolve():
+        raise ValueError('Папка сборки должна находиться внутри проекта')
     output = dest / 'launcher'
     output.mkdir(parents=True, exist_ok=True)
     tool = qt_root / 'bin' / 'windeployqt.exe'
     if not tool.is_file() or not (compiler_root / 'bin' / 'g++.exe').is_file():
         raise RuntimeError('Не найден Qt / MinGW. Укажите --qt-root и --compiler-root')
     subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(project / 'build.ps1'),
-                    '-QtRoot', str(qt_root), '-CompilerRoot', str(compiler_root)], check=True, cwd=ROOT)
+                    '-QtRoot', str(qt_root), '-CompilerRoot', str(compiler_root), '-BuildDirectory', str(build)], check=True, cwd=ROOT)
     executable = output / 'ScottAIQt.exe'
-    shutil.copy2(project / 'build' / 'ScottAIQt.exe', executable)
+    shutil.copy2(build / 'ScottAIQt.exe', executable)
+    shutil.copy2(build / 'ScottAIUpdater.exe', output/'ScottAIUpdater.exe')
+    helper = build / 'ScottSystem.exe'
+    if not helper.is_file():
+        raise RuntimeError('Не собран нативный помощник ScottSystem')
+    (dest / 'backend/native').mkdir(exist_ok=True)
+    shutil.copy2(helper, dest / 'backend/native/ScottSystem.exe')
     environment = dict(os.environ)
     environment['PATH'] = str(compiler_root / 'bin') + os.pathsep + str(qt_root / 'bin') + os.pathsep + environment.get('PATH', '')
     subprocess.run([str(tool), '--release', '--no-translations', '--compiler-runtime', '--qmldir', str(project),
@@ -203,7 +218,7 @@ def copy_extras(dest: Path) -> None:
     notes = ROOT/'docs'/f'release-notes-{read_version()}.md'
     if notes.is_file():
         shutil.copy2(notes,dest/'RELEASE-NOTES.md')
-    for name in ('installation.md', 'models.md'):
+    for name in ('installation.md', 'interface.md', 'security.md', 'models.md', 'commands.md', 'desktop-control.md', 'browser-control.md', 'chat.md', 'companions.md', 'logs.md', 'voice-check.md', 'voice.md', 'linux.md'):
         document = ROOT/'docs'/name
         if document.is_file():
             (dest/'docs').mkdir(exist_ok=True)
@@ -311,6 +326,7 @@ def main() -> int:
     parser.add_argument('--qt-root', type=Path, default=Path(r'C:\Qt\6.11.2\mingw_64'))
     parser.add_argument('--compiler-root', type=Path, default=Path(r'C:\Qt\Tools\mingw1310_64'))
     parser.add_argument('--output', type=Path, help='новая папка дистрибутива внутри проекта; не перезаписывает существующую')
+    parser.add_argument('--build-directory', type=Path, default=ROOT/'ScottAI_qt/build', help='папка сборки Qt внутри проекта')
     args = parser.parse_args()
     destination = DIST
     if args.output is not None:
@@ -336,7 +352,7 @@ def main() -> int:
     copy_voice_assets(destination)
     copy_extras(destination)
     if not args.skip_launcher:
-        build_qt_launcher(destination, args.qt_root, args.compiler_root)
+        build_qt_launcher(destination, args.qt_root, args.compiler_root, args.build_directory)
     report_size(destination)
 
     if args.installer and not build_installer(destination):

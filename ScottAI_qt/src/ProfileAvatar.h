@@ -14,7 +14,7 @@ class ProfileAvatar final : public QObject {
     Q_PROPERTY(QVariantMap crop READ crop NOTIFY changed)
     Q_PROPERTY(QVariantMap cropSize READ cropSize NOTIFY changed)
 public:
-    explicit ProfileAvatar(QString directory, bool temporary = false, QString legacyDirectory = {});
+    explicit ProfileAvatar(QString directory, bool temporary = false, QString legacyDirectory = {}, QString previousDirectory = {});
     bool hasAvatar() const { return !m_image.isNull(); }
     bool dirty() const { return m_dirty; }
     QString error() const { return m_error; }

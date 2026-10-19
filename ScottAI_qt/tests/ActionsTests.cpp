@@ -25,6 +25,7 @@ private slots:
                 if (buffer->startsWith("GET /health ")) body = {{"status", healthOnline ? "online" : "offline"}};
                 else if (buffer->startsWith("GET /metrics ")) body = {{"metrics", QJsonObject{}}};
                 else if (buffer->startsWith("GET /listen/status ")) body = {{"listening", false}, {"available", false}};
+                else if (buffer->startsWith("GET /browser ")) body = {{"state", "idle"}, {"enabled", false}, {"installed", false}};
                 else if (buffer->startsWith("GET /abilities ")) { ++reads; body = response; error = fail; }
                 else { ++writes; error = true; }
                 const auto bytes = QJsonDocument(body).toJson(QJsonDocument::Compact);

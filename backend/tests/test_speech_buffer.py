@@ -196,7 +196,7 @@ def test_ready_full_cache_is_played_once_without_extra_wait(sink, tmp_path):
 def test_api_rejects_unknown_buffer_and_preserves_settings(main_module, integrated):
     voice_config.save_voice('scott-voice', profile='restrained', streaming=True)
     async def run():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             for value in (None, True, 2, 'unknown', [], {}):
                 assert (await client.post('/voice/select', json={'voice':'scott-voice', 'buffer':value})).status_code == 400
                 assert voice_config.get_scott_buffer() == 'immediate'

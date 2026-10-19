@@ -34,7 +34,9 @@ for line in sys.stdin:
     packet=json.loads(line); request=packet['id']
     if packet['action']=='prepare':
         (c.cache_dir/'preparing').touch()
+        with (c.cache_dir/'prepare-count').open('a') as output: output.write('1')
         mode=os.environ.get('SCOTT_TEST_PREPARE_MODE','')
+        if mode=='slow': time.sleep(.75)
         if mode=='wait': time.sleep(20)
         if mode=='exit': os._exit(17)
         emit(dict(event='prepared',id='0'*32 if mode=='bad_id' else request,
@@ -55,7 +57,7 @@ for line in sys.stdin:
         output.setnchannels(1);output.setsampwidth(2);output.setframerate(24000)
         output.writeframes(b'\\x40\\x01'*2400)
     publish_audio(c.cache_dir,packet['key'],request,temporary)
-    emit(dict(event='audio',id=request,key=packet['key'],cached=False))
+    emit(dict(event='audio',id=request,key=packet['key'],cached=False,model_loaded=True))
 '''
 
 
@@ -124,16 +126,56 @@ def test_prepare_does_not_create_audio_and_reuses_worker(config):
         assert not voice.status()['model_loaded']
 
 
+@pytest.mark.parametrize('automatic', [False, True])
 @pytest.mark.parametrize('mode,code', [('wait','timeout'), ('exit','worker_exited'),
     ('bad_id','invalid_protocol'), ('bad_recipe','invalid_protocol')])
-def test_prepare_failure_disposes_worker_and_can_retry(config, monkeypatch, mode, code):
+def test_prepare_failure_disposes_worker_and_can_retry(config, monkeypatch, mode, code, automatic):
     monkeypatch.setenv('SCOTT_TEST_PREPARE_MODE',mode)
     with ScottVoiceProcess(config,prepare_timeout=.2) as voice:
         with pytest.raises(VoiceProcessError) as error:
-            voice.prepare()
+            voice.synthesize('Проверка.') if automatic else voice.prepare()
         assert error.value.code==code and not voice.status()['running']
+        assert not list(config.cache_dir.glob('*.wav'))
         monkeypatch.delenv('SCOTT_TEST_PREPARE_MODE')
         assert voice.prepare()['model_loaded']
+
+
+def test_cold_preparation_has_its_own_budget_and_loaded_worker_is_reused(config, monkeypatch):
+    monkeypatch.setenv('SCOTT_TEST_PREPARE_MODE','slow')
+    with ScottVoiceProcess(config,timeout=.5,prepare_timeout=3) as voice:
+        assert not voice.synthesize('Первая реплика.').cached
+        assert voice.status()['model_loaded']
+        pid=voice.status()['pid']
+        assert not voice.synthesize('Вторая реплика.').cached
+        assert voice.status()['pid']==pid
+        assert (config.cache_dir/'prepare-count').read_text()=='1'
+        with pytest.raises(VoiceProcessError,match='timeout'):
+            voice.synthesize('таймаут')
+        assert not voice.status()['running']
+        # A cached WAV needs neither a new worker nor another preparation.
+        assert voice.synthesize('Первая реплика.').cached
+        assert not voice.status()['running']
+        assert (config.cache_dir/'prepare-count').read_text()=='1'
+        assert not voice.synthesize('После остановки.').cached
+        assert (config.cache_dir/'prepare-count').read_text()=='11'
+
+
+def test_cancellation_interrupts_automatic_preparation_before_synthesis(config, monkeypatch):
+    monkeypatch.setenv('SCOTT_TEST_PREPARE_MODE','wait')
+    with ScottVoiceProcess(config) as voice,ThreadPoolExecutor(max_workers=1) as pool:
+        pending=pool.submit(voice.synthesize,'Первая реплика.')
+        wait_for(lambda:(config.cache_dir/'preparing').exists())
+        pid=int((config.cache_dir/'worker-pid').read_text())
+        assert voice.status()['active'] and not voice.status()['model_loaded']
+        voice.cancel()
+        with pytest.raises(VoiceProcessError,match='cancelled'):
+            pending.result(timeout=3)
+        wait_for(lambda:not psutil.pid_exists(pid))
+        assert not voice.status()['running']
+        assert not list(config.cache_dir.glob('*.wav'))
+        assert not list(config.cache_dir.glob('.pending-*'))
+        monkeypatch.delenv('SCOTT_TEST_PREPARE_MODE')
+        assert not voice.synthesize('Повтор.').cached
 
 
 def test_prepare_cancel_and_idle_release_do_not_leave_loaded_state(config, monkeypatch):
@@ -286,6 +328,20 @@ def test_profile_and_recipe_changes_invalidate_cache(config):
     with ScottVoiceProcess(config) as updated:
         new = updated.synthesize('Готово.','natural')
         assert not new.cached and new.path!=original.path
+
+
+@pytest.mark.parametrize('name',['create_scott_voice.py','stream_voice.py'])
+def test_processor_update_uses_new_cache_without_removing_old_audio(config,name):
+    processor=config.worker.parent/name
+    processor.write_text('# previous processor\n')
+    with ScottVoiceProcess(config) as voice:
+        previous=voice.synthesize('Готово.','scott')
+    old_bytes=Path(previous.path).read_bytes()
+    processor.write_text('# selected processor B\n')
+    with ScottVoiceProcess(config) as voice:
+        selected=voice.synthesize('Готово.','scott')
+    assert not selected.cached and selected.path!=previous.path
+    assert Path(previous.path).read_bytes()==old_bytes
 
 
 def test_idle_worker_releases_resources_and_leaves_disk_cache(config):

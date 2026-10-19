@@ -302,7 +302,7 @@ def test_memory_settings_endpoint_and_stats(main_module, monkeypatch, tmp_path):
     turn(memory, 'Синтетический вопрос')
     monkeypatch.setattr(main_module, 'intelligent_answerer', SimpleNamespace(memory=memory))
     async def check():
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://test') as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             result = (await client.get('/memories')).json()
             assert result['auto_capture'] is True and result['archived_turns'] == 1
             assert (await client.post('/memories/settings', json={'auto_capture': False})).json()['success']

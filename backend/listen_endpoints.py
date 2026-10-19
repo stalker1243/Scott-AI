@@ -13,10 +13,16 @@ from fastapi.responses import JSONResponse
 
 try:
     from . import runtime as scott_runtime
-    from . import listener as listener_module
 except ImportError:
     import runtime as scott_runtime
-    import listener as listener_module
+try:
+    if __package__:
+        from . import listener as listener_module
+    else:
+        import listener as listener_module
+except (ImportError, OSError):
+    # Keep status/history/control routes available on a partial audio install.
+    listener_module = None
 
 router = APIRouter(prefix="/listen", tags=["listen"])
 
@@ -26,7 +32,7 @@ def _unavailable() -> JSONResponse:
         status_code=503,
         content={
             "success": False,
-            "message": "Прослушивание недоступно: не создан слушатель или нет библиотеки sounddevice",
+            "message": "Голосовой режим недоступен. Проверьте настройки звука.",
         },
     )
 
@@ -80,7 +86,7 @@ async def status() -> Dict:
     if scott_runtime.listener is None:
         return {
             "listening": False,
-            "available": listener_module.HAS_SOUNDDEVICE,
+            "available": bool(listener_module and listener_module.HAS_SOUNDDEVICE),
             "message": "Слушатель не создан",
         }
     return scott_runtime.listener.status()
@@ -110,6 +116,8 @@ async def stop() -> Dict:
 @router.get("/devices")
 async def devices() -> Dict:
     """Микрофоны, доступные в системе, — чтобы выбрать нужный, если их несколько."""
+    if listener_module is None:
+        return _unavailable()
     return {"success": True, "devices": await asyncio.to_thread(listener_module.list_input_devices)}
 
 @router.post("/say")

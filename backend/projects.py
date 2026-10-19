@@ -32,7 +32,12 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
-STORE_PATH = Path(__file__).resolve().parent / "data" / "projects.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+STORE_PATH = backend_path('projects.json')
 
 MAX_NAME = 80
 MAX_STACK = 80

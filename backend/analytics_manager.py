@@ -154,8 +154,14 @@ class AnalyticsManager:
             'total_commands': sum(self.analytics_data['daily_commands'].values())
         }
     
-    def export_analytics(self, filepath: str = 'data/analytics.json') -> Dict:
+    def export_analytics(self, filepath: str | None = None) -> Dict:
         """Экспортировать аналитику в JSON"""
+        if filepath is None:
+            try:
+                from .storage_paths import backend_path
+            except ImportError:
+                from storage_paths import backend_path
+            filepath = str(backend_path('analytics.json'))
         try:
             analytics = self.get_comprehensive_analytics()
             path = Path(filepath)

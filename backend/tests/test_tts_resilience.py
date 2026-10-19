@@ -171,28 +171,30 @@ def test_recognizer_load_is_idempotent(monkeypatch):
     assert loads == [True]
 
 
-def test_concurrent_recognition_does_not_share_decoder_state():
+def test_concurrent_recognition_does_not_share_decoder_state(monkeypatch):
     import speech_to_text
     started = threading.Event()
     release = threading.Event()
     second_started = threading.Event()
 
     def transcribe(audio, **kwargs):
-        if audio == "first":
+        name = 'first' if np.isclose(audio[0],.02) else 'second'
+        if name == "first":
             started.set()
             release.wait(2)
         else:
             second_started.set()
-        return {"text": audio}
+        return {"text": name}
 
     recognizer = speech_to_text.Recognizer("fake", "cpu")
     recognizer.engine = "openai-whisper"
     recognizer._model = SimpleNamespace(transcribe=transcribe)
+    monkeypatch.setattr(recognizer,'_есть_речь',lambda audio:True)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(recognizer.transcribe, "first")
+        first = pool.submit(recognizer.transcribe, np.full(16000,.02,dtype=np.float32))
         try:
             assert started.wait(1)
-            second = pool.submit(recognizer.transcribe, "second")
+            second = pool.submit(recognizer.transcribe, np.full(16000,.03,dtype=np.float32))
             assert not second_started.wait(0.05)
         finally:
             release.set()

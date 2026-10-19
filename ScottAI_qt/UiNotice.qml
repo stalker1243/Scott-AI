@@ -19,7 +19,7 @@ Rectangle {
     Text {
         id: label
         x: 28; y: 14; width: parent.width - 42
-        text: notice.displayedText; textFormat: Text.PlainText; wrapMode: Text.Wrap
+        text: notice.displayedText.split("\n").map(function(line) { return qsTranslate("Launcher", line) }).join("\n"); textFormat: Text.PlainText; wrapMode: Text.Wrap
         color: notice.tone; font.pixelSize: 12; font.family: notice.theme.fontFamily
     }
 }

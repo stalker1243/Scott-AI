@@ -31,13 +31,15 @@ jobs:
       - name: Системные библиотеки
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build xvfb patchelf libgl1-mesa-dev libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libpulse0 libportaudio2 ffmpeg
+          sudo apt-get install -y ninja-build xvfb weston patchelf file desktop-file-utils fuse3 libgl1-mesa-dev libegl1 libwayland-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-xkb1 libxcb-shape0 libpulse0 libportaudio2 ffmpeg
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.11.2'
           arch: linux_gcc_64
+          archives: 'qtbase qtdeclarative qtsvg qtwayland qttools icu'
           aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7'
           cache: true
+          cache-key-prefix: scott-qt-linux-20261015
       # install-qt-action selects its own Python for aqt. Select backend Python last.
       - uses: actions/setup-python@v5
         with:
@@ -56,6 +58,15 @@ jobs:
         run: |
           source installer/dist-linux-qt/python-environment.sh
           python installer/linux/check_package.py --package installer/dist-linux-qt
+      - name: Проверить постоянный Python и смену readonly mount
+        run: python installer/linux/check_runtime.py --package installer/dist-linux-qt --work "$RUNNER_TEMP/scott-runtime-mount-check"
+      - name: Собрать AppImage и второй образ для проверки замены
+        run: |
+          scott_version=$(python -c 'import json; print(json.load(open("VERSION.json"))["version"])')
+          python installer/build_appimage.py --package installer/dist-linux-qt --output "installer/release/ScottAI-$scott_version-Qt-linux-x86_64.AppImage"
+          cp -a installer/dist-linux-qt "$RUNNER_TEMP/scott-image-fixture"
+          printf 'Local image replacement fixture. Not a release.\n' > "$RUNNER_TEMP/scott-image-fixture/RELEASE-NOTES.md"
+          python installer/build_appimage.py --package "$RUNNER_TEMP/scott-image-fixture" --output "$RUNNER_TEMP/ScottAI-second.AppImage" --offline
       - name: Запустить пакет без SDK
         run: |
           scott_sdk_backup="$QT_ROOT_DIR.hidden-for-package-test"
@@ -65,11 +76,18 @@ jobs:
           env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-voice
           env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-setup
           env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a "$RUNNER_TEMP/Scott AI package/run.sh" --smoke-profile
+          python installer/linux/check_wayland.py --prefix "$RUNNER_TEMP/Scott AI package" --output "$RUNNER_TEMP/scott-wayland-without-sdk"
+          scott_image=$(find installer/release -maxdepth 1 -name 'ScottAI-*-Qt-linux-x86_64.AppImage' -print -quit)
+          env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a python installer/linux/check_appimage.py --image "$scott_image" --second-image "$RUNNER_TEMP/ScottAI-second.AppImage" --work "$RUNNER_TEMP/scott-appimage-without-fuse"
+          python installer/linux/check_wayland.py --appimage "$scott_image" --output "$RUNNER_TEMP/scott-appimage-wayland"
+          if test -r /dev/fuse && test -w /dev/fuse; then
+            env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u LD_LIBRARY_PATH xvfb-run -a python installer/linux/check_appimage.py --image "$scott_image" --second-image "$RUNNER_TEMP/ScottAI-second.AppImage" --work "$RUNNER_TEMP/scott-appimage-fuse" --fuse
+          fi
       - name: Библиотеки backend для CPU
         run: |
           source installer/dist-linux-qt/python-environment.sh
           scott_python="$RUNNER_TEMP/Scott AI package/runtime/bin/python"
-          "$scott_python" -I -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1+cpu
+          "$scott_python" -I -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1+cpu
           "$scott_python" -I -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
       - name: Изолированные тесты backend
         run: '"$RUNNER_TEMP/Scott AI package/runtime/bin/python" backend/run_tests.py'
@@ -90,6 +108,8 @@ jobs:
           path: |
             installer/release/ScottAI-*-Qt-linux-x86_64.tar.gz
             installer/release/ScottAI-*-Qt-linux-x86_64.tar.gz.sha256
+            installer/release/ScottAI-*-Qt-linux-x86_64.AppImage
+            installer/release/ScottAI-*-Qt-linux-x86_64.AppImage.sha256
           if-no-files-found: error
           retention-days: 14
   distributions:

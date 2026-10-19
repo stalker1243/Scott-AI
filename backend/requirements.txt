@@ -3,10 +3,23 @@
 # 3.13 попросту не собирались: numpy==1.24.3 падал на этапе сборки колеса, а
 # scipy был указан дважды с разными версиями (1.11.4 и 1.11.1).
 
-fastapi==0.128.0
+fastapi==0.143.3
+# Security fixes in dependencies used by HTTP, downloads and document parsing.
+starlette==1.3.1
+anyio==4.14.2
+h11==0.16.0
+httpx==0.28.1
+httpcore==1.0.9
+urllib3==2.8.0
+idna==3.15
+multidict==6.9.1
+filelock==3.20.3
+fsspec==2026.6.0
+setuptools==83.0.0
+soupsieve==2.9.0
 uvicorn==0.40.0
 websockets==15.0.1
-python-dotenv==1.2.1
+python-dotenv==1.2.2
 pydantic==2.12.5
 psutil==7.2.2
 openai==2.14.0
@@ -15,7 +28,7 @@ openai==2.14.0
 # отсутствовала, а отказ выглядел как «не удалось подключиться с этим ключом».
 groq==1.4.0
 pydub==0.25.1
-requests==2.32.3
+requests==2.34.2
 
 # Разбор прикреплённых картинок: уменьшение до предела, который принимают
 # модели, и сведение прозрачности на белый фон.
@@ -25,16 +38,16 @@ requests==2.32.3
 # теста разом легли с «No module named PIL». Сам Scott при этом не падал —
 # attachments.py переживает отсутствие Pillow и просто отказывается смотреть
 # картинки, то есть возможность, ради которой всё затевалось, молча исчезала.
-Pillow==12.1.0
+Pillow==12.3.0
 
 # Чтение прикреплённых документов.
 #
 # Картинки Scott показывает модели как есть, а из документов извлекает текст —
 # для этого и нужны эти две. Без них прикреплённый PDF или .docx будет честно
 # отвергнут с объяснением, а всё остальное продолжит работать.
-pypdf==5.1.0
+pypdf==6.19.0
 python-docx==1.1.2
-aiohttp==3.13.3
+aiohttp==3.14.3
 sqlalchemy==2.0.50
 python-multipart==0.0.32
 
@@ -101,7 +114,7 @@ GPUtil==1.4.0
 # распознаёт короткую фразу ~6.6с, на RTX 3060 — доли секунды, поэтому сборку
 # с CUDA нужно ставить явно, отдельной командой и со своего индекса:
 #
-#   pip install --index-url https://download.pytorch.org/whl/cu126 torch==2.9.1+cu126
+#   pip install --index-url https://download.pytorch.org/whl/cu126 torch==2.14.1+cu126
 #
 # Проверить, что видеокарта реально подхватилась:
 #   python -c "import torch; print(torch.cuda.is_available())"
@@ -122,12 +135,14 @@ GPUtil==1.4.0
 # и проверять такие обещания стоит самому.
 #
 # Обе оставлены намеренно: быстрая тянет за собой CTranslate2 и скачивает
-# модель в собственном формате (для small это около полутора сотен мегабайт и
-# пара минут при первом запуске). Если её нет, Scott продолжает слышать
+# модель в собственном формате (small с конфигурацией около 464 МиБ).
+# Первая подготовка готовит выбранный формат; если движок не завёлся, Scott продолжает слышать
 # обычной. Выбор — через WHISPER_ENGINE в .env.
 faster-whisper==1.1.0
 # PyAV 19 удалил metadata_errors в av.open; faster-whisper 1.1 использует его.
 # Закрепляем версию, проверенную на загруженных WAV и встроенном Python.
 av==18.1.0
 openai-whisper==20250625
-torch>=2.9.1
+# CPU/CUDA profiles use 2.14.1; the AMD ROCm profile uses audited 2.13.0.
+# Older wheels must be upgraded before other dependencies, preserving the profile.
+torch>=2.13.0

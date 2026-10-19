@@ -1,4 +1,5 @@
 #include "BackendClient.h"
+#include "ApiError.h"
 #include <QFileDialog>
 #include <QFile>
 #include <QFileInfo>
@@ -143,7 +144,7 @@ void BackendClient::sendChatMessage(const QString &text, bool image, bool comman
         if (!issue.isEmpty()) { m_error = issue; emit stateChanged(); return; }
     }
     if (m_chatId.isEmpty()) {
-        m_chatsBusy = true; emit chatsChanged(); const QJsonObject body;
+        m_error.clear(); m_chatsBusy = true; emit chatsChanged(); const QJsonObject body;
         request("/chats", &body, 10000, [this, question, image, command](const QJsonObject &data, const QString &error) {
             m_chatsBusy = false;
             if (!error.isEmpty() || !data.value("success").toBool() || !acceptChat(data.value("chat").toObject())) { m_error = error.isEmpty() ? QStringLiteral("Не удалось создать диалог") : error; emit stateChanged(); emit chatsChanged(); return; }
@@ -163,15 +164,19 @@ void BackendClient::sendChatMessage(const QString &text, bool image, bool comman
     }
     m_busy = true; m_error.clear(); m_chatNotice.clear(); emit stateChanged();
     auto url = m_base; url.setPath("/chats/" + m_chatId + "/messages"); QNetworkRequest req(url);
-    req.setTransferTimeout(image ? 240000 : 150000); req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+    // A plain chat request may generate an image after backend classification.
+    req.setTransferTimeout(command ? 150000 : 240000); req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     auto *reply = m_network.post(req, multipart); multipart->setParent(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         m_busy = false; QJsonParseError parse; const auto data = QJsonDocument::fromJson(reply->readAll(), &parse).object();
         if (reply->error() == QNetworkReply::NoError && parse.error == QJsonParseError::NoError && data.value("success").toBool() && acceptChat(data.value("chat").toObject())) {
             m_attachments.clear(); emit attachmentsChanged(); QStringList notes;
             for (const auto &note : data.value("notes").toArray()) notes.append(note.toString()); m_chatNotice = notes.join("\n");
-            emit chatSent(); refreshChats();
-        } else m_error = data.value("detail").toString(data.value("error").toString(QStringLiteral("Не удалось отправить: ") + reply->errorString()));
+            emit chatSent(); refreshChats(); refreshBrowser();
+        } else {
+            m_error = apiErrorMessage(data);
+            if(m_error.isEmpty())m_error=backendNetworkError(reply->error());
+        }
         reply->deleteLater(); emit stateChanged(); emit chatsChanged();
     });
 }

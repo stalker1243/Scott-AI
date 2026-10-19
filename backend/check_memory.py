@@ -68,8 +68,9 @@ def worker(args):
         memories.STORE_PATH = state / 'memories.json'
         personality.CONFIG_PATH = state / 'personality.json'
         projects.STORE_PATH = state / 'projects.json'
-        load_dotenv(ROOT / '.env')
-        ia.AI_CONFIG_PATH = ROOT / 'backend' / 'data' / 'ai_config.json'
+        from storage_paths import environment_path, backend_path
+        load_dotenv(environment_path())
+        ia.AI_CONFIG_PATH = backend_path('ai_config.json')
         answerer = ia.IntelligentAnswerer()
         # Even an accidental save would now remain inside this test directory.
         ia.AI_CONFIG_PATH = state / 'unused-ai-config.json'

@@ -7,11 +7,16 @@ ApplicationWindow {
     objectName: "setupDialog"
     required property var controller
     required property QtObject theme
+    readonly property bool checking: controller.checking === true
+    function uiText(value) {
+        const source = String(value || "")
+        return typeof appLanguage !== "undefined" && appLanguage.language ? qsTranslate("Launcher", source) : source
+    }
     transientParent: null
-    title: "Подготовка ScottAI"
-    flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint
-    width: 500; height: 490
-    minimumWidth: 500; maximumWidth: 500; minimumHeight: 490; maximumHeight: 490
+    title: checking ? qsTranslate("Launcher", "Запуск ScottAI") : qsTranslate("Launcher", "Подготовка ScottAI")
+    flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint | Qt.MSWindowsFixedSizeDialogHint
+    width: checking ? 440 : 500; height: checking ? 220 : 490
+    minimumWidth: 440; maximumWidth: 500; minimumHeight: 220; maximumHeight: 490
     color: theme.popup
     visible: controller.visible
     onClosing: function(close) { controller.cancel(); Qt.quit() }
@@ -20,35 +25,41 @@ ApplicationWindow {
         Rectangle { width: parent.width; height: 3; color: setupDialog.theme.accent }
     }
     ColumnLayout {
-        anchors.fill: parent; anchors.margins: 28; spacing: 14
+        anchors.fill: parent; anchors.margins: 28; spacing: 10
         RowLayout {
             spacing: 14
             Image { source: "qrc:/brand/scott-logo.png"; Layout.preferredWidth: 54; Layout.preferredHeight: 54 }
             ColumnLayout {
                 spacing: 5
                 Text { text: "SCOTT AI"; color: setupDialog.theme.muted; font.pixelSize: 11; font.letterSpacing: 2 }
-                Text { text: "Готовим всё к работе"; color: setupDialog.theme.ink; font.family: setupDialog.theme.fontFamily; font.pixelSize: 23; font.weight: Font.DemiBold }
+                Text { text: setupDialog.checking ? qsTranslate("Launcher", "Запускаем ScottAI") : qsTranslate("Launcher", "Готовим всё к работе"); color: setupDialog.theme.ink; font.family: setupDialog.theme.fontFamily; font.pixelSize: 23; font.weight: Font.DemiBold }
             }
         }
-        Text { text: "Чат и голос будут готовы после загрузки.\nЭто нужно сделать один раз."; color: setupDialog.theme.muted; font.pixelSize: 13; lineHeight: 1.3; Layout.fillWidth: true }
-        Rectangle { Layout.fillWidth: true; height: 1; color: setupDialog.theme.line }
+        Text { visible: !setupDialog.checking; text: qsTranslate("Launcher", "Чат и голос будут готовы после загрузки.\nЭто нужно сделать один раз."); color: setupDialog.theme.muted; font.pixelSize: 13; lineHeight: 1.3; Layout.fillWidth: true }
+        Rectangle { visible: !setupDialog.checking; Layout.fillWidth: true; height: 1; color: setupDialog.theme.line }
         UiSwitch {
             objectName: "compactSetupOption"; theme: setupDialog.theme
-            text: "Компактная установка (CPU)"
+            visible: !setupDialog.checking
+            text: qsTranslate("Launcher", "Компактная установка (CPU)")
             checked: setupDialog.controller.compact; enabled: !setupDialog.controller.busy
             onToggled: setupDialog.controller.compact = checked
         }
         Text {
-            text: setupDialog.controller.compact ? "Меньше места и загрузок. Чат и голос сохраняются;\nречь обрабатывает процессор." : "Ускорение на видеокарте определяется автоматически.\nGPU-библиотеки могут занимать несколько гигабайт."
+            objectName: "setupStorageInfo"
+            visible: !setupDialog.checking
+            text: setupDialog.uiText(setupDialog.controller.sizeHint) || qsTranslate("Launcher", "Чат и голос: около 2 ГиБ на CPU или 5–7 ГиБ на GPU.")
+            wrapMode: Text.Wrap
             color: setupDialog.theme.muted; font.pixelSize: 12; lineHeight: 1.25; Layout.fillWidth: true
         }
         Item { Layout.fillHeight: true }
+        Text { visible: setupDialog.controller.busy && !setupDialog.checking; text: qsTranslate("Launcher", "Прошло: ") + Math.floor((setupDialog.controller.elapsed || 0) / 60) + qsTranslate("Launcher", " мин. ") + ((setupDialog.controller.elapsed || 0) % 60) + qsTranslate("Launcher", " с"); color: setupDialog.theme.muted; font.pixelSize: 11 }
         ScrollView {
-            Layout.fillWidth: true; Layout.preferredHeight: 72; clip: true
+            Layout.fillWidth: true; Layout.preferredHeight: setupDialog.checking ? 28 : 60; clip: true
             contentWidth: availableWidth
             TextArea {
                 readOnly: true; selectByMouse: true; padding: 0; wrapMode: Text.Wrap
-                text: setupDialog.controller.error || setupDialog.controller.message
+                text: [setupDialog.uiText(setupDialog.controller.error || setupDialog.controller.message),
+                       setupDialog.uiText(diagnosticsController.error || diagnosticsController.notice)].filter(function(value) { return value && value.length }).join("\n\n")
                 color: setupDialog.controller.error.length ? setupDialog.theme.danger : setupDialog.theme.ink
                 font.pixelSize: 12; background: null
             }
@@ -71,9 +82,11 @@ ApplicationWindow {
             }
         }
         RowLayout {
+            visible: !setupDialog.checking
             Layout.fillWidth: true
-            UiButton { objectName: "prepareScottButton"; theme: setupDialog.theme; Layout.fillWidth: true; primary: true; text: setupDialog.controller.busy ? "Подготовка…" : setupDialog.controller.error.length ? "Повторить" : "Продолжить"; enabled: !setupDialog.controller.busy; onClicked: setupDialog.controller.prepare() }
-            UiButton { objectName: "cancelSetupButton"; theme: setupDialog.theme; text: "Остановить"; visible: setupDialog.controller.busy; onClicked: setupDialog.controller.cancel() }
+            UiButton { objectName: "prepareScottButton"; theme: setupDialog.theme; Layout.fillWidth: true; primary: true; text: setupDialog.controller.busy ? qsTranslate("Launcher", "Подготовка…") : setupDialog.controller.error.length ? qsTranslate("Launcher", "Повторить") : qsTranslate("Launcher", "Продолжить"); enabled: !setupDialog.controller.busy; onClicked: setupDialog.controller.prepare() }
+            UiButton { objectName: "cancelSetupButton"; theme: setupDialog.theme; text: qsTranslate("Launcher", "Остановить"); visible: setupDialog.controller.busy; onClicked: setupDialog.controller.cancel() }
+            UiButton { objectName: "setupLogsButton"; theme: setupDialog.theme; text: diagnosticsController.busy ? qsTranslate("Launcher", "Сбор…") : qsTranslate("Launcher", "Логи"); enabled: !diagnosticsController.busy; onClicked: diagnosticsController.exportArchive() }
         }
     }
 }

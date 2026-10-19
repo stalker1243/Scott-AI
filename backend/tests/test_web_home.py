@@ -18,10 +18,8 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(scope="module")
-def scott_main():
-    import main
-
-    return main
+def scott_main(main_module):
+    return main_module
 
 
 @pytest.fixture(scope="module")

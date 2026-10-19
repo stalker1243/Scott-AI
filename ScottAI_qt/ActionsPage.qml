@@ -8,7 +8,7 @@ Item {
     required property QtObject theme
     property string activeGroup: ""
     property bool readyOnly: false
-    readonly property var categories: ["Все категории"].concat(client.abilities.map(function(group) { return group.group }))
+    readonly property var categories: [qsTranslate("Launcher", "Все категории")].concat(client.abilities.map(function(group) { return group.group }))
     readonly property var filtered: {
         const query = search.text.trim().toLocaleLowerCase()
         const result = []
@@ -16,7 +16,7 @@ Item {
             if (activeGroup.length && group.group !== activeGroup) continue
             for (const item of group.items) {
                 if (readyOnly && item.state !== "ready") continue
-                const words = [group.group, item.title, item.detail, item.reason].concat(item.examples).join(" ").toLocaleLowerCase()
+                const words = [group.group, item.title, item.detail, item.reason, qsTranslate("Launcher", group.group), qsTranslate("Launcher", item.title), qsTranslate("Launcher", item.detail)].concat(item.examples).join(" ").toLocaleLowerCase()
                 if (query.length && words.indexOf(query) < 0) continue
                 result.push({id: item.id, group: group.group, title: item.title, detail: item.detail,
                                 state: item.state, reason: item.reason, examples: item.examples})
@@ -47,7 +47,7 @@ Item {
                 Layout.fillWidth: true; implicitHeight: 40
                 font.family: page.theme.fontFamily; font.pixelSize: 13
                 color: page.theme.ink; placeholderTextColor: page.theme.muted
-                placeholderText: "Найти действие или фразу…"
+                placeholderText: qsTranslate("Launcher", "Найти действие или фразу…")
                 selectByMouse: true; hoverEnabled: true; leftPadding: 38; rightPadding: 38
                 selectionColor: page.theme.accent; selectedTextColor: page.theme.accentText
                 background: FieldSurface { theme: page.theme; fill: page.theme.surface; focused: search.activeFocus; hovered: search.hovered }
@@ -55,12 +55,12 @@ Item {
                 ActionButton {
                     anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
                     width: 30; implicitHeight: 30; leftPadding: 0; rightPadding: 0; text: "×"
-                    Accessible.name: "Очистить поиск"; visible: search.text.length > 0
+                    Accessible.name: qsTranslate("Launcher", "Очистить поиск"); visible: search.text.length > 0
                     onClicked: { search.clear(); search.forceActiveFocus() }
                 }
             }
             ActionButton {
-                objectName: "refreshActions"; text: client.abilitiesBusy ? "Загрузка…" : "Обновить"
+                objectName: "refreshActions"; text: client.abilitiesBusy ? qsTranslate("Launcher", "Загрузка…") : qsTranslate("Launcher", "Обновить")
                 enabled: client.online && !client.abilitiesBusy
                 onClicked: client.refreshAbilities()
             }
@@ -71,32 +71,32 @@ Item {
                 id: category; objectName: "actionsCategory"; theme: page.theme
                 Layout.preferredWidth: 205; implicitHeight: 36; font.pixelSize: 12
                 model: page.categories
-                Accessible.name: "Категория действий"
+                Accessible.name: qsTranslate("Launcher", "Категория действий")
                 onActivated: page.activeGroup = currentIndex === 0 ? "" : currentText
             }
             ActionButton {
-                objectName: "actionsReadyOnly"; text: "Доступные"; checkable: true
+                objectName: "actionsReadyOnly"; text: qsTranslate("Launcher", "Доступные"); checkable: true
                 checked: page.readyOnly; primary: checked
                 onClicked: page.readyOnly = checked
-                Accessible.name: "Показать только доступные действия"
+                Accessible.name: qsTranslate("Launcher", "Показать только доступные действия")
             }
             Item { Layout.fillWidth: true }
             Text {
                 objectName: "actionsSummary"
-                text: client.abilitiesReady ? client.abilitiesReadyCount + " из " + client.abilitiesTotal + " доступны" : client.abilitiesBusy ? "Проверяю…" : "Список не обновлён"
+                text: client.abilitiesReady ? client.abilitiesReadyCount + qsTranslate("Launcher", " из ") + client.abilitiesTotal + qsTranslate("Launcher", " доступны") : client.abilitiesBusy ? qsTranslate("Launcher", "Проверяю…") : qsTranslate("Launcher", "Список не обновлён")
                 color: page.theme.muted; font.family: page.theme.fontFamily; font.pixelSize: 12
             }
         }
         UiNotice {
             theme: page.theme; Layout.fillWidth: true; error: true
-            text: !client.online ? (client.abilities.length ? "Нет подключения. Показан последний список действий." : "Подключите Scott, чтобы загрузить действия.") : client.abilitiesError
+            text: !client.online ? (client.abilities.length ? qsTranslate("Launcher", "Нет подключения. Показан последний список действий.") : qsTranslate("Launcher", "Подключите Scott, чтобы загрузить действия.")) : client.abilitiesError
         }
         Item {
             Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 100
             Text {
                 objectName: "actionsEmpty"; anchors.centerIn: parent; width: parent.width - 32
                 visible: page.filtered.length === 0
-                text: client.abilitiesBusy ? "Загружаю действия…" : !client.online ? "Scott не подключён" : !client.abilitiesReady ? "Список действий недоступен" : client.abilitiesTotal === 0 ? "Пока нет действий" : "Ничего не найдено"
+                text: client.abilitiesBusy ? qsTranslate("Launcher", "Загружаю действия…") : !client.online ? qsTranslate("Launcher", "Scott не подключён") : !client.abilitiesReady ? qsTranslate("Launcher", "Список действий недоступен") : client.abilitiesTotal === 0 ? qsTranslate("Launcher", "Пока нет действий") : qsTranslate("Launcher", "Ничего не найдено")
                 color: page.theme.muted; font.family: page.theme.fontFamily; font.pixelSize: 14
                 wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter
             }
@@ -115,11 +115,12 @@ Item {
                     readonly property bool ready: modelData.state === "ready"
                     Text {
                         visible: entry.index <= 0 || !page.filtered[entry.index - 1] || page.filtered[entry.index - 1].group !== entry.modelData.group
-                        text: entry.modelData.group; color: page.theme.muted
+                        text: qsTranslate("Launcher", entry.modelData.group); color: page.theme.muted
                         font.family: page.theme.fontFamily; font.pixelSize: 12; font.weight: Font.DemiBold
                         topPadding: 4; bottomPadding: 6
                     }
                     SurfacePanel {
+                flat: true
                         theme: page.theme; width: parent.width; implicitHeight: body.implicitHeight + 28
                         ColumnLayout {
                             id: body; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
@@ -128,24 +129,24 @@ Item {
                                 spacing: 10
                                 Text {
                                     Layout.fillWidth: true; Layout.minimumWidth: 0
-                                    text: entry.modelData.title; color: page.theme.ink
+                                    text: qsTranslate("Launcher", entry.modelData.title); color: page.theme.ink
                                     font.family: page.theme.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold
                                     wrapMode: Text.WordWrap
                                 }
                                 Text {
-                                    text: entry.ready ? "● Доступно" : "○ Недоступно"
+                                    text: entry.ready ? qsTranslate("Launcher", "● Доступно") : qsTranslate("Launcher", "○ Недоступно")
                                     color: entry.ready ? page.theme.accent : page.theme.danger
                                     font.family: page.theme.fontFamily; font.pixelSize: 11
                                 }
                             }
                             Text {
-                                Layout.fillWidth: true; text: entry.modelData.detail; color: page.theme.muted
+                                Layout.fillWidth: true; text: qsTranslate("Launcher", entry.modelData.detail); color: page.theme.muted
                                 font.family: page.theme.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap
                             }
                             Text {
                                 objectName: "actionReason_" + entry.modelData.id
                                 Layout.fillWidth: true; visible: !entry.ready
-                                text: entry.modelData.reason.length ? entry.modelData.reason : "Действие недоступно на этой машине."
+                                text: qsTranslate("Launcher", entry.modelData.reason.length ? entry.modelData.reason : qsTranslate("Launcher", "Действие недоступно на этой машине."))
                                 color: page.theme.danger; font.family: page.theme.fontFamily; font.pixelSize: 12; wrapMode: Text.WordWrap
                             }
                             Flow {
@@ -159,9 +160,9 @@ Item {
                                         objectName: "actionExample_" + entry.modelData.id + "_" + index
                                         text: modelData + " ↗"; width: Math.min(implicitWidth, examples.width)
                                         enabled: page.client.online && page.client.abilitiesReady && !page.client.abilitiesBusy
-                                        Accessible.name: "Добавить в диалог: " + modelData
+                                        Accessible.name: qsTranslate("Launcher", "Добавить в диалог: ") + modelData
                                         ToolTip.visible: hovered; ToolTip.delay: 450
-                                        ToolTip.text: "Добавить в черновик диалога"
+                                        ToolTip.text: qsTranslate("Launcher", "Добавить в черновик диалога")
                                         contentItem: Text {
                                             text: phraseButton.text; color: page.theme.ink; font: phraseButton.font
                                             elide: Text.ElideRight; verticalAlignment: Text.AlignVCenter

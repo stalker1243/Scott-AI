@@ -29,8 +29,13 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
 
-STORE_PATH = Path(__file__).resolve().parent / "data" / "remote_access.json"
-LOG_PATH = Path(__file__).resolve().parent / "data" / "remote_log.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+STORE_PATH = backend_path('remote_access.json')
+LOG_PATH = backend_path('remote_log.json')
 
 # Сколько живёт код привязки.
 #
@@ -265,12 +270,15 @@ def find_by_token(token: str) -> Optional[Dict]:
     Сравнение идёт по всему списку: устройств немного, а постоянное время
     сравнения здесь важнее скорости.
     """
-    ключ = (token or "").strip()
+    if not isinstance(token, str) or len(token) > 2048:
+        return None
+    ключ = token.strip()
     if not ключ:
         return None
 
     for устройство in _load().get("devices", []):
-        if secrets.compare_digest(устройство.get("token", ""), ключ):
+        stored = устройство.get("token", "")
+        if isinstance(stored, str) and secrets.compare_digest(stored.encode('utf-8'), ключ.encode('utf-8')):
             return устройство
 
     return None

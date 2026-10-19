@@ -125,6 +125,10 @@ def try_extended_answer(text):
     """
     import re
     import random
+    from assistant_identity import reply
+    introduction = reply(text)
+    if introduction:
+        return introduction
     
     text_lower = text.lower()
     
@@ -133,7 +137,7 @@ def try_extended_answer(text):
         'capabilities',  # Сначала специфичные "что ты умеешь"
         'time',          # Динамическое время
         'system_info',   # Динамическая информация системы
-        'who_are_you',   # В конце общие вопросы про Scott
+        # Identity is matched as a whole request above, never by a substring.
     ]
     
     for category in category_order:

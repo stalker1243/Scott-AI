@@ -2,13 +2,15 @@ param(
     [string]$QtRoot = 'C:\Qt\6.11.2\mingw_64',
     [string]$CompilerRoot = 'C:\Qt\Tools\mingw1310_64',
     [string]$Python = '',
-    [ValidateSet('home','chat','system','appearance','memory','settings','profile','actions','protocols','models')]
+    [ValidateSet('home','chat','system','appearance','memory','settings','profile','actions','protocols','models','logs','about')]
     [string]$Tab = 'home',
     [ValidateSet('classic','glass','terminal-pro')]
-    [string]$Style = ''
+    [string]$Style = '',
+    [string]$BuildDirectory = 'build'
 )
 $ErrorActionPreference = 'Stop'
-$appPath = Join-Path $PSScriptRoot 'build/ScottAIQt.exe'
+$buildPath = if ([IO.Path]::IsPathRooted($BuildDirectory)) { $BuildDirectory } else { Join-Path $PSScriptRoot $BuildDirectory }
+$appPath = Join-Path $buildPath 'ScottAIQt.exe'
 if (!(Test-Path -LiteralPath $appPath)) { throw 'Run build.ps1 first.' }
 if (!$Python) {
     $Python = (& py -3.13 -c 'import sys; print(sys.executable)' | Select-Object -Last 1)

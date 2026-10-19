@@ -26,6 +26,10 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Deque, Dict, Optional
+try:
+    from .support_logs import backend_log_directory, private_directory
+except ImportError:
+    from support_logs import backend_log_directory, private_directory
 
 # Сколько последних замеров держим в памяти на каждый этап — хватает для
 # устойчивых медианы и p95, но не растёт бесконечно при долгой работе.
@@ -38,7 +42,7 @@ _errors: Dict[str, int] = defaultdict(int)
 _started_at = time.time()
 
 LOG_ENABLED = os.getenv("TIMING_LOG", "1") not in ("0", "false", "False", "no")
-LOG_DIR = Path(os.getenv("TIMING_LOG_DIR", os.path.join(os.path.dirname(__file__), "logs")))
+LOG_DIR = Path(os.getenv("TIMING_LOG_DIR") or backend_log_directory())
 _LOG_PATH = LOG_DIR / "timings.jsonl"
 
 
@@ -55,7 +59,7 @@ def record(stage_name: str, seconds: float, ok: bool = True, meta: Optional[dict
                 _errors[stage_name] += 1
 
         if LOG_ENABLED:
-            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            private_directory(LOG_DIR)
             entry = {
                 "ts": round(time.time(), 3),
                 "stage": stage_name,

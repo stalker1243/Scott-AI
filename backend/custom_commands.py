@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
 class CustomCommand:
     """Структура кастомной команды"""
     
@@ -47,8 +52,8 @@ class CustomCommand:
 class CustomCommandManager:
     """Управляет кастомными командами"""
     
-    def __init__(self, db_path: str = 'data/custom_commands.json'):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        self.db_path = Path(db_path) if db_path is not None else backend_path('custom_commands.json')
         self.commands: Dict[str, CustomCommand] = {}
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.load_commands()
@@ -176,6 +181,6 @@ class CustomCommandManager:
         return f"CustomCommandManager({len(self.commands)} команд)"
 
 
-def get_custom_command_manager(db_path: str = 'data/custom_commands.json') -> CustomCommandManager:
+def get_custom_command_manager(db_path: str | None = None) -> CustomCommandManager:
     """Factory функция"""
     return CustomCommandManager(db_path)

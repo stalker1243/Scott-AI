@@ -303,6 +303,10 @@ class QuestionAnswerer:
     
     def answer(self, text: str, brief: bool = False) -> Optional[str]:
         """Ответить на вопрос"""
+        from assistant_identity import reply
+        introduction = reply(text)
+        if introduction:
+            return introduction
         if not self.is_question(text):
             return None
 

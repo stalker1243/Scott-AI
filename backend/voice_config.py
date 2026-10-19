@@ -11,7 +11,12 @@ except ImportError:
     from storage import atomic_write_text
     from speech_buffer import BUFFER_MODES
 
-CONFIG_PATH = Path(__file__).resolve().parent / "data" / "voice_config.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+CONFIG_PATH = backend_path('voice_config.json')
 _lock = threading.RLock()
 
 

@@ -6,6 +6,7 @@ Scott Voice System - Система синтеза речи
 import pyttsx3
 import asyncio
 import os
+import re
 from pathlib import Path
 import subprocess
 import threading
@@ -60,8 +61,7 @@ except ImportError:  # pragma: no cover — запуск из корня реп�
 # вариантом и включается через TTS_ENGINE=edge в .env.
 TTS_ENGINE = os.getenv("TTS_ENGINE", "silero").strip().lower()
 
-# Edge TTS официально предлагает только два voice для ru-RU (Dmitry/Svetlana),
-# но его многоязычные ("Multilingual") neural-голоса реально умеют произносить
+# Мужские многоязычные ("Multilingual") neural-голоса также умеют произносить
 # русский текст через автоопределение языка — проверено вручную (не падают,
 # синтезируют настоящий звук, а не тишину). Добавлены как альтернативные
 # варианты тембра для Scott — какой из них лучше звучит, решать на слух через
@@ -72,18 +72,15 @@ TTS_ENGINE = os.getenv("TTS_ENGINE", "silero").strip().lower()
 _ENV_VOICE = os.getenv("TTS_VOICE", "").strip()
 AVAILABLE_VOICES = {
     "ru-RU-DmitryNeural": "Дмитрий (муж., ru-RU)",
-    "ru-RU-SvetlanaNeural": "Светлана (жен., ru-RU)",
     "en-US-AndrewMultilingualNeural": "Andrew (муж., многоязычный)",
     "en-US-BrianMultilingualNeural": "Brian (муж., многоязычный)",
     "en-AU-WilliamMultilingualNeural": "William (муж., многоязычный)",
     "de-DE-FlorianMultilingualNeural": "Florian (муж., многоязычный, низкий тембр)",
 }
 
-# Пол голосов — чтобы лаунчер мог показать только мужские (или только женские),
-# не зашивая знание о конкретных именах голосов в интерфейс.
+# Пол сохраняется в API для совместимости с клиентами; каталог только мужской.
 VOICE_GENDERS = {
     "ru-RU-DmitryNeural": "male",
-    "ru-RU-SvetlanaNeural": "female",
     "en-US-AndrewMultilingualNeural": "male",
     "en-US-BrianMultilingualNeural": "male",
     "en-AU-WilliamMultilingualNeural": "male",
@@ -150,6 +147,10 @@ def describe_voices(gender='') -> dict:
                     local=local, engine='silero' if local else 'edge', available=True)
         if name == scott_voice_engine.VOICE_ID:
             info.update(scott_voice_engine.get_engine().describe())
+            default = silero_tts.DEFAULT_SILERO_VOICE if HAS_SILERO else 'ru-RU-DmitryNeural'
+            fallback = voice_config.get_fallback_voice(default, AVAILABLE_VOICES)
+            info.update(fallback_id=fallback, fallback_label=AVAILABLE_VOICES.get(fallback, fallback),
+                        fallback_active=not info['available'] or info.get('state') == 'fallback')
         voices.append(info)
     return dict(voices=voices, default=DEFAULT_VOICE, current=get_current_voice(),
         scott_profile=voice_config.get_scott_profile(),
@@ -180,16 +181,21 @@ class ScottVoice:
             selected_voice = self._find_russian_voice(voices)
             if selected_voice:
                 self.engine.setProperty('voice', selected_voice.id)
+                self._system_voice_id = str(selected_voice.id)
                 print(f"✅ Русский голос: {selected_voice.name}")
-            elif voices:
-                self.engine.setProperty('voice', voices[0].id)
-                print(f"✅ Голос: {voices[0].name}")
+            else:
+                self.engine.stop()
+                raise RuntimeError('Нет доступного мужского системного голоса')
         except Exception as e:
             print(f"⚠️ Ошибка инициализации pyttsx3: {e}")
             self.engine = None
         
         # Директория для audio файлов
-        self.audio_dir = Path(__file__).resolve().parent.parent / "audio_cache"
+        try:
+            from .storage_paths import audio_cache
+        except ImportError:
+            from storage_paths import audio_cache
+        self.audio_dir = audio_cache()
         self.audio_dir.mkdir(exist_ok=True)
         
         # Queue для изолированного выполнения TTS
@@ -223,8 +229,9 @@ class ScottVoice:
                     selected_voice = self._find_russian_voice(voices)
                     if selected_voice:
                         engine.setProperty('voice', selected_voice.id)
-                    elif voices:
-                        engine.setProperty('voice', voices[0].id)
+                    else:
+                        engine.stop()
+                        raise RuntimeError('Нет доступного мужского системного голоса')
                     
                     # Сохраняем в файл
                     engine.save_to_file(text, save_file)
@@ -346,7 +353,7 @@ class ScottVoice:
         """
         Обработать синтезированный файл по выбранному характеру.
 
-        Голосов у локальной модели пять, и все обычные человеческие: сделать
+        Голоса локальной модели обычные человеческие: сделать
         звучание узнаваемым сменой голоса нельзя, а обработкой — можно. Стоит
         это тридцать миллисекунд на фразу, и только один раз: файл ложится в
         кэш уже обработанным.
@@ -368,18 +375,24 @@ class ScottVoice:
             print(f"⚠️ Характер голоса не применён: {e}")
 
     def _find_russian_voice(self, voices):
-        """Найти первый доступный русский голос в pyttsx3"""
-        if not voices:
-            return None
-        names = ["Irina", "Dmitry", "Anna", "Ekaterina", "Sergey", "Ivan", "Olga", "Tatyana", "Maria"]
-        for voice in voices:
-            if any(name.lower() in (voice.name or "").lower() for name in names):
+        """Prefer Russian among confirmed male voices; never use an unknown default."""
+        male_names={'dmitry','dmitri','pavel','sergey','ivan','alexander','david','mark','george',
+                    'дмитрий','павел','сергей','иван','александр'}
+        fallback=None
+        for voice in voices or ():
+            gender=str(getattr(voice,'gender','') or '').casefold()
+            if 'female' in gender or gender in ('f','женский'):
+                continue
+            tokens=set(re.findall(r'[a-zа-яё]+',str(getattr(voice,'name','') or '').casefold()))
+            if gender not in ('male','m','masculine','мужской') and not gender.endswith('gendermale') and not tokens&male_names:
+                continue
+            languages=[item.decode('utf-8',errors='replace') if isinstance(item,bytes) else str(item)
+                       for item in (getattr(voice,'languages',None) or ())]
+            if any(re.search(r'\bru(?:[-_]|\b)|\brussian\b|\brus\b',item.casefold()) for item in languages) or tokens&{'russian','русский'}:
                 return voice
-            if hasattr(voice, 'languages') and voice.languages:
-                langs = [lang.lower() for lang in voice.languages]
-                if any('ru' in lang or 'rus' in lang for lang in langs):
-                    return voice
-        return None
+            if fallback is None:
+                fallback=voice
+        return fallback
 
     def _save_edge_tts(self, text: str, save_file: str, voice: str = DEFAULT_VOICE) -> str:
         """Сохранить текст в файл через Edge TTS"""
@@ -617,13 +630,15 @@ class ScottVoice:
 
         Args:
             text: Текст для озвучивания
-            voice: Имя голоса Edge TTS (например, 'ru-RU-SvetlanaNeural');
+            voice: Имя доступного голоса (например, 'ru-RU-DmitryNeural');
                    по умолчанию — DEFAULT_VOICE (см. .env TTS_VOICE)
 
         Returns:
             Путь к аудио файлу
         """
         voice = voice or get_current_voice()
+        if not isinstance(voice,str) or voice not in AVAILABLE_VOICES:
+            return None
         try:
             if voice == scott_voice_engine.VOICE_ID:
                 try:
@@ -719,7 +734,8 @@ class ScottVoice:
 
             # pyttsx3 produces WAV. Saving it as .mp3 sent the player down the
             # MP3 decoder path, so the local fallback looked like silence.
-            system_hash = hashlib.sha256(f"pyttsx3:{text}".encode()).hexdigest()[:24]
+            system_id = getattr(self,'_system_voice_id','')
+            system_hash = hashlib.sha256(f"pyttsx3:male-v1:{system_id}:{text}".encode()).hexdigest()[:24]
             save_file = self.audio_dir / f"scott_{system_hash}.wav"
             if save_file.exists() and save_file.stat().st_size > 0:
                 return str(save_file)

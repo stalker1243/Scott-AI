@@ -13,6 +13,7 @@ public:
     QMenu *menu() { return &m_menu; }
 public slots:
     void restoreWindow();
+    void availabilityChanged(bool available);
 signals:
     void notificationRequested(const QString &title, const QString &text);
 private slots:

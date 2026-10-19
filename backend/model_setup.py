@@ -23,12 +23,19 @@ def load_environment():
     # The embeddable interpreter may not have python-dotenv until pip finishes.
     try:
         from dotenv import load_dotenv
-        load_dotenv(Path(__file__).resolve().parents[1] / '.env', override=False)
+        try:
+            from .storage_paths import environment_path
+        except ImportError:
+            from storage_paths import environment_path
+        load_dotenv(environment_path(), override=False)
     except ImportError:
         pass
+    # The Hub reads these at import time, before faster-whisper is imported.
+    os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '60')
+    os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '30')
 
 
-def whisper_spec() -> tuple[Path, str, str]:
+def whisper_spec(model_name=None) -> tuple[Path, str, str]:
     """Read the installed provider's manifest without importing torch or loading weights."""
     spec = importlib.util.find_spec('whisper')
     if spec is None or not spec.origin:
@@ -38,7 +45,7 @@ def whisper_spec() -> tuple[Path, str, str]:
         if isinstance(node, ast.Assign) and any(isinstance(n, ast.Name) and n.id == '_MODELS' for n in node.targets):
             manifest = ast.literal_eval(node.value)
             break
-    model = os.getenv('WHISPER_MODEL', 'small').strip()
+    model = model_name or os.getenv('WHISPER_MODEL', 'small').strip()
     if model == 'turbo':
         model = 'large-v3-turbo'
     if model not in manifest:
@@ -46,11 +53,22 @@ def whisper_spec() -> tuple[Path, str, str]:
     url = manifest[model]
     digest = urlsplit(url).path.split('/')[-2]
     filename = urlsplit(url).path.split('/')[-1]
-    local = Path(__file__).resolve().parent / 'data/models/whisper' / filename
+    try:
+        from .storage_paths import model_directory
+    except ImportError:
+        from storage_paths import model_directory
+    local = model_directory('models/whisper', backend=Path(__file__).resolve().parent) / filename
     root = Path(os.getenv('XDG_CACHE_HOME') or Path.home() / '.cache') / 'whisper'
     # Follow the existing recognizer's choice; never move an existing user's cache.
     target = local if local.is_file() else root / filename
     return target, url, digest
+
+
+def prepare_openai(model_name, report):
+    """A needed fallback uses the same resumable, verified download as setup."""
+    target, url, digest = whisper_spec(model_name)
+    download_file(url, target, expected_sha256=digest, status=lambda message: report(message))
+    return target
 
 
 def silero_repo() -> Path:
@@ -79,16 +97,27 @@ def valid_silero(path: Path) -> bool:
 
 def models_ready() -> bool:
     try:
-        target, _, digest = whisper_spec()
+        try:
+            from .recognition_models import selected_engine, prepared_faster_path
+        except ImportError:
+            from recognition_models import selected_engine, prepared_faster_path
         voice = silero_repo() / 'src/silero/model/v4_ru.pt'
-        return target.is_file() and checksum(target) == digest and valid_silero(voice)
+        if selected_engine() == 'faster':
+            speech_ready = prepared_faster_path(os.getenv('WHISPER_MODEL', 'small').strip()) is not None
+        else:
+            target, _, digest = whisper_spec()
+            speech_ready = target.is_file() and checksum(target) == digest
+        return speech_ready and valid_silero(voice)
     except (OSError, ValueError, SyntaxError, ImportError):
         return False
 
 
 def prepare_models(report):
     load_environment()
-    target, url, digest = whisper_spec()
+    try:
+        from .recognition_models import selected_engine, prepare_faster
+    except ImportError:
+        from recognition_models import selected_engine, prepare_faster
     last = [0.0]
     fraction = [.76]
 
@@ -104,10 +133,14 @@ def prepare_models(report):
         fraction[0] = start + span * (min(1, done / total) if total else 0)
         report(text, fraction[0])
 
-    report(f'Готовлю Whisper {target.stem}…', .76)
-    download_file(url, target, expected_sha256=digest,
-                  progress=lambda done, total: bytes_progress(done, total, 'Whisper', .76, .14),
-                  status=lambda message: report(message, fraction[0]))
+    if selected_engine() == 'faster':
+        prepare_faster(os.getenv('WHISPER_MODEL', 'small').strip(), report)
+    else:
+        target, url, digest = whisper_spec()
+        report(f'Готовлю Whisper {target.stem}…', .76)
+        download_file(url, target, expected_sha256=digest,
+                      progress=lambda done, total: bytes_progress(done, total, 'Whisper', .76, .14),
+                      status=lambda message: report(message, fraction[0]))
     report('Готовлю локальный голос Silero…', .90)
     fraction[0] = .90
     import torch
@@ -145,7 +178,12 @@ def prepare_models(report):
     except DownloadError:
         raise
     except Exception as error:
-        raise DownloadError('Не удалось подготовить голос Silero. Проверьте интернет и нажмите «Повторить». Whisper повторно скачиваться не будет.') from error
+        try:
+            from .support_logs import append_log
+        except ImportError:
+            from support_logs import append_log
+        append_log('setup.log', 'Silero: '+type(error).__name__+': '+str(error))
+        raise DownloadError('Не удалось подготовить голос Silero. Причина сохранена в setup.log; соберите логи и повторите подготовку. Whisper повторно скачиваться не будет.') from error
     finally:
         torch.hub.download_url_to_file = original
         socket.setdefaulttimeout(original_timeout)

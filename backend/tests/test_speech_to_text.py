@@ -103,6 +103,32 @@ def подсунуть_обычную(monkeypatch, модель=None):
     return готовая
 
 
+def test_prepared_faster_model_is_loaded_by_local_path(monkeypatch, tmp_path):
+    import recognition_models
+    подсунуть_быструю(monkeypatch)
+    monkeypatch.setattr(recognition_models, 'prepared_faster_path', lambda _: tmp_path)
+    recognizer = speech_to_text.Recognizer('small', 'cpu')
+    assert recognizer.load() == 'faster-whisper'
+    assert ПоддельнаяБыстрая.последний_вызов['name'] == str(tmp_path)
+
+
+def test_prepared_faster_failure_uses_resumable_openai_fallback(monkeypatch, tmp_path):
+    import recognition_models
+    import model_setup
+    подсунуть_быструю(monkeypatch, работает=False)
+    monkeypatch.setattr(recognition_models, 'prepared_faster_path', lambda _: tmp_path/'faster')
+    prepared = []
+    def prepare(name, report):
+        prepared.append(name)
+        return tmp_path/'whisper/small.pt'
+    monkeypatch.setattr(model_setup, 'prepare_openai', prepare)
+    loaded = []
+    monkeypatch.setitem(sys.modules, 'whisper', types.SimpleNamespace(load_model=lambda name, **kwargs: loaded.append((name, kwargs)) or ПоддельнаяОбычная()))
+    recognizer = speech_to_text.Recognizer('small', 'cpu')
+    assert recognizer.load() == 'openai-whisper'
+    assert prepared == ['small'] and loaded[0][1]['download_root'] == str(tmp_path/'whisper')
+
+
 # ==================== Выбор реализации ====================
 
 def test_fast_engine_is_preferred(monkeypatch):

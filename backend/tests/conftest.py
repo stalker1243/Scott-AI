@@ -28,6 +28,13 @@ os.chdir(BACKEND_DIR)
 # в бою.
 os.environ.setdefault("WARMUP_MODELS", "0")
 os.environ['SCOTT_SEMANTIC_MEMORY'] = '0'  # Unit tests never download or run real embedding models.
+os.environ['SCOTT_DESKTOP_DISABLED'] = '1'  # Unit tests never manipulate the user's applications.
+
+
+@pytest.fixture(autouse=True)
+def isolated_companion_events(tmp_path, monkeypatch):
+    # Mocked application launches must never animate the user's real pet.
+    monkeypatch.setenv('SCOTT_PET_STATE_DIR', str(tmp_path / 'companion-profile'))
 
 
 @pytest.fixture(autouse=True)
@@ -91,7 +98,7 @@ def isolated_voice_file(tmp_path, monkeypatch):
 
 
 @pytest.fixture(scope="session")
-def main_module():
+def main_module(tmp_path_factory):
     """
     Импортированный main.py.
 
@@ -99,7 +106,17 @@ def main_module():
     поэтому делается один раз на весь прогон. Сам факт успешного импорта уже
     показателен: именно здесь ловятся обрывы файла и потерянные блоки.
     """
-    import main
+    # Session fixtures run before function-scoped isolation. main initializes
+    # the answerer on import, so redirect its initial archive before that import
+    # as well. Otherwise even a read-only endpoint test rewrites live migration
+    # metadata in the user's SQLite archive.
+    initial_memory = tmp_path_factory.mktemp('initial-memory')
+    with pytest.MonkeyPatch.context() as initial_paths:
+        for name in ('intelligent_answerer', 'backend.intelligent_answerer'):
+            module = importlib.import_module(name)
+            initial_paths.setattr(module, 'CONVERSATION_PATH', initial_memory / 'conversations.jsonl')
+            initial_paths.setattr(module, 'LEGACY_CHAT_PATH', initial_memory / 'legacy-chat.jsonl')
+        import main
 
     # Unit tests must not contact the user's real configured model. Tests of
     # providers and payloads install their own clients explicitly.

@@ -44,6 +44,41 @@ def решить(движки):
     return lambda text: understanding.understand(text, **engines)
 
 
+@pytest.mark.parametrize('phrase', [
+    'Скотт, можешь открыть блокнот?', 'пожалуйста, закрой дискорд',
+    'сделай громче', 'запомни, что я работаю вечером',
+    'открой YouTube', 'найди на YouTube уроки Python',
+    'Я хочу открыть блокнот', 'давай откроем браузер', 'мне нужно открыть блокнот',
+])
+def test_chat_routes_natural_requests(движки, phrase):
+    understanding, engines = движки
+    assert understanding.chat_action(phrase, **engines) is not None
+
+
+@pytest.mark.parametrize('phrase', [
+    'Как открыть блокнот?', 'Что такое GitHub?', 'Я пишу код в VS Code',
+    'Я использую Telegram', 'Это пример: открой браузер',
+    'Напиши код, который открывает YouTube',
+    'Создай функцию для запуска блокнота',
+    'Объясни код: `os.system("notepad")`',
+    'Пример команды:\n```bash\nshutdown now\n```',
+    'Покажи программу для поиска на GitHub',
+    'Продолжи предыдущий ответ',
+    'Объясни, что делает команда выключи компьютер',
+    'Расскажи про команду закрой браузер',
+    'Не открывай браузер', 'Если я скажу открой браузер, что будет?',
+    '«Открой блокнот» — это пример команды',
+    'Вчера я сказал открой браузер', 'Мне нравится команда закрой Telegram',
+    'Из статьи я узнал о команде выключи компьютер',
+    'Сделай скрипт, который открывает YouTube',
+    'Подготовь пример запуска Telegram', 'Покажи пример открытия браузера',
+    'Напишите программу поиска на GitHub',
+])
+def test_chat_discussion_and_code_do_not_execute(движки, phrase):
+    understanding, engines = движки
+    assert understanding.chat_action(phrase, **engines) is None
+
+
 # ==================== Действия ====================
 
 @pytest.mark.parametrize("phrase,action", [

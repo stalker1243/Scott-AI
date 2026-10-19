@@ -37,6 +37,7 @@ if _HERE not in sys.path:
 if __name__ == "__main__":
     sys.modules.setdefault("main", sys.modules["__main__"])
 
+import bounded_work
 
 def _ensure_data_dir(base: str) -> str:
     """
@@ -53,7 +54,9 @@ def _ensure_data_dir(base: str) -> str:
     return path
 
 
-_ensure_data_dir(_HERE)
+from storage_paths import backend_path, environment_path
+from platform_paths import private_directory
+private_directory(backend_path())
 
 # Установить UTF-8 кодировку для вывода.
 #
@@ -77,9 +80,9 @@ sys.stderr = _force_utf8(sys.stderr)
 
 # 🔑 Загрузить переменные из .env файла
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(environment_path(), override=False)
 
-from fastapi import FastAPI, WebSocket, UploadFile, File, HTTPException, Form, Request, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, Form, Request, Depends
 from security import require_scott_token, check_rate_limit
 from timing import stage as timing_stage, snapshot as timing_snapshot, reset as timing_reset
 from speech_text import shorten_for_speech, THINKING_CUES
@@ -246,7 +249,9 @@ except ImportError:
 # ============= LIFESPAN CONTEXT MANAGER =============
 
 # Настройка логирования в файл для сбора traceback при падениях
-log_path = os.path.join(os.path.dirname(__file__), '..', 'backend_errors.log')
+import support_logs
+log_path = support_logs.backend_error_path()
+support_logs.private_directory(log_path.parent)
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s %(levelname)s %(name)s: %(message)s',
@@ -487,6 +492,8 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(voice_install_jobs.close)
     from voice_prepare import preparation as voice_preparation
     await asyncio.to_thread(voice_preparation.close)
+    from browser_control_jobs import jobs as browser_jobs
+    await asyncio.to_thread(browser_jobs.close)
     
     # ===== SHUTDOWN =====
     print("\n" + "="*80)
@@ -499,17 +506,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Exception handler for HTTPException
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "success": False,
-            "message": exc.detail,
-            "data": None
-        },
-    )
+from api_boundary import ApiBoundary, install_error_handlers
+install_error_handlers(app)
 
 # CORS
 # Источники ограничены петлевым адресом. Со «*» и allow_credentials любая
@@ -531,44 +529,6 @@ REMOTE_PATHS = {
 }
 
 
-@app.middleware("http")
-async def _guard_remote(request: Request, call_next):
-    """
-    Снаружи — только с ключом устройства и только по разрешённым путям.
-
-    Backend слушает всю сеть, когда человек это разрешил: иначе мобильное
-    приложение до него не достучится. Но открытый порт без охраны — та самая
-    беда, из-за которой доступ по сети когда-то и закрыли: сосед по Wi-Fi мог
-    открывать программы и смотреть рабочий стол.
-
-    Поэтому запросы с чужого адреса проходят только два условия сразу: путь из
-    короткого списка и ключ привязанного устройства. Всё остальное API снаружи
-    не существует вовсе.
-
-    Свои запросы — с этого же компьютера — проходят как раньше: лаунчер ничего
-    не знает ни о каких ключах, и знать не должен.
-    """
-    откуда = request.client.host if request.client else ""
-
-    if откуда in ("127.0.0.1", "::1", "localhost", ""):
-        return await call_next(request)
-
-    if request.url.path not in REMOTE_PATHS:
-        return JSONResponse(status_code=404, content={"detail": "Not Found"})
-
-    ключ = request.headers.get("X-Scott-Device", "")
-    устройство = remote_access.find_by_token(ключ)
-
-    if устройство is None:
-        return JSONResponse(status_code=403,
-                            content={"detail": "Устройство не привязано"})
-
-    # Кладём устройство в запрос: обработчику нужно знать, кто спрашивает, —
-    # для журнала и для ограничения частоты.
-    request.state.device = устройство
-    return await call_next(request)
-
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_LOCAL_ORIGINS,
@@ -576,6 +536,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(ApiBoundary, allowed_origins=_LOCAL_ORIGINS,
+                   remote_paths=REMOTE_PATHS, device_lookup=remote_access.find_by_token)
 
 # Secure execution router (token-protected, whitelisted commands)
 try:
@@ -725,6 +687,11 @@ try:
 except ImportError:
     from chat_endpoints import router as chat_router
 app.include_router(chat_router)
+try:
+    from .browser_control_endpoints import router as browser_router
+except ImportError:
+    from browser_control_endpoints import router as browser_router
+app.include_router(browser_router)
 
 # ✨ Инициализируем intelligent_answerer перед использованием в endpoints
 print("\n✨ Ранняя инициализация IntelligentAnswerer...")
@@ -768,6 +735,8 @@ class ScottAI:
         global intelligent_answerer, voice_trigger
         
         print("🤖 Инициализирую Scott AI...")
+        from assistant_identity import VoiceIntroduction
+        self._identity_dialogue = VoiceIntroduction()
         
         try:
             # Инициализируем все компоненты (кроме intelligent_answerer который уже инициализирован выше)
@@ -847,8 +816,33 @@ class ScottAI:
         phrases = self.acknowledgement_phrases + self.execution_phrases
         return random.choice(phrases)
     
+    def _understanding_engines(self):
+        return dict(intent_engine=fast_intent_engine, parser=command_parser,
+                    answerer=question_answerer,
+                    find_protocol=scott_runtime.protocols.match if scott_runtime.protocols else None)
+
+    async def try_chat_action(self, text: str, quiet_mode: bool = True):
+        try:
+            decision = self._browser_decision(text)
+            if decision is None:
+                decision = await asyncio.to_thread(understanding.chat_action, text, **self._understanding_engines())
+        except Exception as error:
+            logging.warning('Chat request classification failed (%s)', type(error).__name__)
+            return None
+        if decision is None:
+            return None
+        return await self.process_command(text, quiet_mode=quiet_mode, decision=decision)
+
+    def _browser_decision(self, text):
+        from browser_commands import parse
+        from browser_control_jobs import jobs
+        request = parse(text)
+        if request and (jobs.enabled or request['action'] in ('install', 'enable', 'disable', 'cancel', 'status')):
+            return understanding.Decision(kind='browser', parsed=request, reason='команда управляемому браузеру')
+        return None
+
     async def process_command(self, text: str, quiet_mode: bool = False, user_name: str = "User",
-                              by_voice: bool = False) -> Dict:
+                              by_voice: bool = False, decision=None) -> Dict:
         """
         Обёртка над _process_command_impl: замеряет время отклика и пишет
         каждую команду в analytics_manager — раньше это нигде не вызывалось,
@@ -856,20 +850,27 @@ class ScottAI:
         """
         start = time.time()
         try:
-            captured = await asyncio.to_thread(memories_module.observe, text)
+            captured = await bounded_work.memory.run(memories_module.observe, text, timeout=3)
         except Exception:
             captured = [{'success': False, 'error': 'Не удалось обновить память'}]
         with timing_stage("00.команда.всего"):
-            result = await self._process_command_impl(
-                text, quiet_mode=quiet_mode, user_name=user_name, by_voice=by_voice
-            )
+            options = dict(quiet_mode=quiet_mode, user_name=user_name, by_voice=by_voice)
+            if decision is not None:
+                options['decision'] = decision
+            result = await self._process_command_impl(text, **options)
         memory = getattr(intelligent_answerer, 'memory', None)
-        if any(not fact.get('success') for fact in captured):
+        if not isinstance(result, dict):
+            result = dict(type='error', response='Обработчик команды не вернул результат.')
+        if not isinstance(captured, list) or any(not isinstance(fact, dict) or not fact.get('success') for fact in captured):
             result['memory_warning'] = 'Не удалось сохранить новые сведения в память.'
         record_turn = getattr(memory, 'record_external_turn', None)
         response = result.get('response', '')
-        if callable(record_turn) and isinstance(response, str) and response.strip() and 'error' not in result.get('type', ''):
-            await asyncio.to_thread(record_turn, text, response)
+        if callable(record_turn) and isinstance(response, str) and response.strip() and 'error' not in result.get('type', '') and not result.get('transient'):
+            try:
+                await bounded_work.memory.run(record_turn, text, response, timeout=3)
+            except Exception as error:
+                logging.warning('Conversation archive write failed (%s)', type(error).__name__)
+                result['memory_warning'] = 'Ответ готов, но сохранить его в память пока не удалось.'
         if HAS_V32_FEATURES:
             try:
                 analytics_manager.record_command(
@@ -883,7 +884,7 @@ class ScottAI:
         return result
 
     async def _process_command_impl(self, text: str, quiet_mode: bool = False, user_name: str = "User",
-                                    by_voice: bool = False) -> Dict:
+                                    by_voice: bool = False, decision=None) -> Dict:
         """
         Понять фразу и сделать то, о чём просили.
 
@@ -894,16 +895,50 @@ class ScottAI:
         print(f"\n👤 Пользователь ({user_name}): {text}")
 
         try:
+            if by_voice:
+                answer = self._identity_dialogue.answer(text)
+                if answer:
+                    return dict(type='introduction', response=answer, quiet_mode=quiet_mode)
             with timing_stage("разбор"):
-                decision = understanding.understand(
-                    text,
-                    intent_engine=fast_intent_engine,
-                    parser=command_parser,
-                    answerer=question_answerer,
-                    find_protocol=(scott_runtime.protocols.match
-                                   if scott_runtime.protocols else None),
-                )
+                if decision is None:
+                    decision = self._browser_decision(text) or understanding.understand(text, **self._understanding_engines())
             print(f"🔎 Решение: {decision.kind} — {decision.reason}")
+
+            if decision.kind == 'browser':
+                from browser_control_jobs import jobs
+                request = dict(decision.parsed)
+                action = request['action']
+                if action in ('enable', 'disable'):
+                    await asyncio.to_thread(jobs.set_enabled, action == 'enable')
+                    answer = 'Управление браузером включено.' if action == 'enable' else 'Управление браузером отключено.'
+                elif action == 'cancel':
+                    await asyncio.to_thread(jobs.cancel, jobs.snapshot()['id'])
+                    answer = 'Останавливаю действие в браузере.'
+                elif action == 'status':
+                    state = jobs.snapshot()
+                    answer = state.get('message') or 'Пока нет действий в браузере. Для подготовки скажите: «Подготовь браузер».'
+                    for i, row in enumerate(state.get('candidates') or []):
+                        answer += f"\n{i + 1}. {row['title']}"
+                else:
+                    if action == 'select':
+                        request['results_id'] = jobs.snapshot()['results_id']
+                    state = await asyncio.to_thread(jobs.start, **request)
+                    answer = ('Подготавливаю браузер. Ход подготовки появится в диалоге.' if action == 'install'
+                              else 'Браузер закрыт.' if action == 'close'
+                              else 'Выполняю в браузере Scott. Результаты появятся в диалоге; можно сказать «включи второе».')
+                return {'type': 'browser', 'response': answer, 'quiet_mode': quiet_mode,
+                        'job_id': jobs.snapshot().get('id', '')}
+
+            if decision.kind == 'utility':
+                import local_tools
+                result = await asyncio.to_thread(local_tools.execute, decision.parsed)
+                return dict(result, type='utility' if result['success'] else 'utility_error', quiet_mode=quiet_mode)
+
+            if decision.kind == 'action' and decision.action == 'desktop_control':
+                import desktop_control
+                result = await bounded_work.actions.run(desktop_control.execute, decision.parsed.context['desktop'], timeout=45)
+                return dict(result, type='desktop' if result['success'] else 'desktop_error', quiet_mode=quiet_mode,
+                            transient=decision.param in ('list', 'controls', 'list_apps'))
 
             # Only explicit, exact facts may answer a question from this cache.
             # A remembered acknowledgement must never replace executing an
@@ -913,7 +948,10 @@ class ScottAI:
                 if saved_answer:
                     return {'type': 'memory', 'response': saved_answer,
                             'source': 'user_memory', 'quiet_mode': quiet_mode}
-                memory_result = knowledge_base.search_memory(text)
+                try:
+                    memory_result = await bounded_work.memory.run(knowledge_base.search_memory, text, timeout=3)
+                except Exception:
+                    memory_result = {}
                 for key, data in memory_result.items():
                     response = data.get("value")
                     if (key.strip().casefold() == text.strip().casefold()
@@ -936,7 +974,7 @@ class ScottAI:
                     служба.add(decision.order, decision.when, kind="command")
                     response = f"Сделаю {decision.when:%d.%m в %H:%M}: {decision.order}"
 
-                knowledge_base.add_conversation(text, response)
+                await self._remember_answer(text, response)
                 print(f"🤖 Scott: {response}")
                 return {
                     "type": "scheduled",
@@ -962,7 +1000,7 @@ class ScottAI:
                     else:
                         response = f"Не удалось открыть: {итог.get('error', 'папка недоступна')}"
 
-                knowledge_base.add_conversation(text, response)
+                await self._remember_answer(text, response)
                 print(f"🤖 Scott: {response}")
                 return {
                     "type": "project",
@@ -984,7 +1022,7 @@ class ScottAI:
                 else:
                     response = итог.get("note") or f"Запомнил: {decision.memory}"
 
-                knowledge_base.add_conversation(text, response)
+                await self._remember_answer(text, response)
                 print(f"🤖 Scott: {response}")
                 return {
                     "type": "memory_added",
@@ -997,7 +1035,7 @@ class ScottAI:
                 result = await self.run_protocol(
                     decision.protocol, depth=_protocol_depth_context.get())
                 response = result.summary()
-                knowledge_base.add_conversation(text, response)
+                await self._remember_answer(text, response)
                 print(f"🤖 Scott: {response}")
                 return {
                     "type": "protocol",
@@ -1015,10 +1053,10 @@ class ScottAI:
                             'youtube': web_integrations.search_youtube_video,
                             'github': web_integrations.search_github_repo,
                         }[decision.service]
-                        result = await asyncio.to_thread(searcher, decision.query)
+                        result = await bounded_work.actions.run(searcher, decision.query, timeout=35)
                     else:
                         # Искать нечего — значит человек просил открыть сам сайт.
-                        result = await asyncio.to_thread(web_integrations.open_service_home, decision.service)
+                        result = await bounded_work.actions.run(web_integrations.open_service_home, decision.service, timeout=15)
                 print(f"🌐 {decision.service}: {result['message']}")
                 return {
                     "type": f"{decision.service}_search",
@@ -1029,7 +1067,7 @@ class ScottAI:
             # ---------------------------------------------------- отказ
             if decision.kind == 'refused':
                 print(f"🛡️ Отказ: {decision.reason}")
-                knowledge_base.add_conversation(text, decision.message)
+                await self._remember_answer(text, decision.message)
                 return {
                     "type": "refused",
                     "response": decision.message,
@@ -1043,7 +1081,7 @@ class ScottAI:
             # ---------------------------------------------------- действие
             with timing_stage("команда.выполнение"):
                 response = await self._execute_parsed_command(decision.parsed, text)
-            knowledge_base.add_conversation(text, response)
+            await self._remember_answer(text, response)
             print(f"🤖 Scott: {response}")
             return {
                 "type": "command",
@@ -1104,6 +1142,12 @@ class ScottAI:
         print(f"📋 {result.summary()}")
         return result
 
+    async def _remember_answer(self, text, answer):
+        try:
+            await bounded_work.memory.run(knowledge_base.add_conversation, text, answer, timeout=3)
+        except Exception as error:
+            logging.warning('Optional answer cache write failed (%s)', type(error).__name__)
+
     async def _answer_as_question(self, text: str, quiet_mode: bool, decision,
                                   by_voice: bool = False) -> Dict:
         """
@@ -1117,9 +1161,9 @@ class ScottAI:
             # Признак «спросили голосом» нужен и здесь: отвечающий сам
             # обращается к модели, когда своих правил ему не хватает, и без
             # признака оттуда приходил ответ на полтысячи знаков со списками.
-            answer = await asyncio.to_thread(question_answerer.answer, text, brief=by_voice)
+            answer = await bounded_work.models.run(question_answerer.answer, text, brief=by_voice, timeout=105)
         if answer:
-            knowledge_base.add_conversation(text, answer)
+            await self._remember_answer(text, answer)
             print(f"🤖 Scott: {answer}")
             return {
                 "type": "question",
@@ -1132,10 +1176,10 @@ class ScottAI:
             with timing_stage("ответ.llm"):
                 # Вопрос с микрофона — просим короткий ответ: вслух он
                 # звучит вдвое дольше, чем читается глазами.
-                ai_answer = await asyncio.to_thread(intelligent_answerer.answer_question, text, brief=by_voice)
+                ai_answer = await bounded_work.models.run(intelligent_answerer.answer_question, text, brief=by_voice, timeout=105)
             if ai_answer:
                 print(f"✨ Ответ от ИИ: {ai_answer[:100]}...")
-                knowledge_base.add_conversation(text, ai_answer)
+                await self._remember_answer(text, ai_answer)
                 return {
                     "type": "ai_question",
                     "response": ai_answer,
@@ -1150,7 +1194,7 @@ class ScottAI:
             "Попробуйте переформулировать или задайте другой вопрос."
         )
         print(f"❓ Ответа не нашлось: {decision.reason}")
-        knowledge_base.add_conversation(text, fallback)
+        await self._remember_answer(text, fallback)
         return {
             "type": "question",
             "response": fallback,
@@ -1160,7 +1204,7 @@ class ScottAI:
     async def _execute_parsed_command(self, parsed, original_text: str) -> str:
         # Search, weather, code generation and OS calls all perform blocking IO.
         # Keep the shared HTTP loop free for health polling and voice controls.
-        return await asyncio.to_thread(self._execute_parsed_command_sync, parsed, original_text)
+        return await bounded_work.actions.run(self._execute_parsed_command_sync, parsed, original_text, timeout=45)
 
     def _execute_parsed_command_sync(self, parsed, original_text: str) -> str:
         """
@@ -1173,6 +1217,10 @@ class ScottAI:
         if cmd_type == 'voice_settings':
             import voice_commands
             return voice_commands.execute(param, context.get('voice_value'))
+
+        if cmd_type == 'desktop_control':
+            import desktop_control
+            return desktop_control.execute(context['desktop'])['response']
 
         # Получаем профиль Scott
         scott_name = scott_profile.get_name()
@@ -1391,11 +1439,11 @@ class ScottAI:
 
         # ============= УПРАВЛЕНИЕ ОКНАМИ =============
         elif cmd_type == 'manage_window':
-            if 'alt+tab' in original_text.lower():
-                import pyautogui
-                pyautogui.hotkey('alt', 'tab')
-                return "Переключаюсь на следующее окно"
-            return "Окна управляются"
+            import desktop_commands, desktop_control
+            request = desktop_commands.parse(understanding.strip_command_wrapper(original_text))
+            if request:
+                return desktop_control.execute(request)['response']
+            return 'Уточните действие: «сверни окно», «разверни окно», «переключись на Firefox» или «закрой все окна».'
 
         # ============= НЕИЗВЕСТНАЯ КОМАНДА - СПРАШИВАЕМ AI =============
         else:
@@ -1441,6 +1489,7 @@ try:
 except ImportError:
     import chat_endpoints as chat_api
 chat_api.command_handler = scott_ai.process_command
+chat_api.auto_command_handler = scott_ai.try_chat_action
 
 # Протоколы умеют хранить себя сами, но не умеют выполнять шаги: шаг — обычная
 # фраза, и разбирает её ассистент. Отдаём ему эту работу той же дорогой, что
@@ -1561,11 +1610,16 @@ def _похоже_на_команду(текст: str) -> bool:
     же самое уже с именем.
 
     Но в это окно попадает всё, что сказано в комнате. Поэтому принимаются
-    только ДЕЙСТВИЯ: вопрос из чужого разговора заставил бы Scott влезть в него
+    только ДЕЙСТВИЯ и ответ на собственное предложение знакомства:
+    вопрос из чужого разговора заставил бы Scott влезть в него
     с ответом, а это хуже, чем промолчать. Разбор тот же, что и у обычной
     команды, — своего понимания смысла здесь не заводим.
     """
     try:
+        if scott_ai._identity_dialogue.accepts_followup(текст):
+            return True
+        if scott_ai._browser_decision(текст) is not None:
+            return True
         решение = understanding.understand(
             текст,
             intent_engine=fast_intent_engine,
@@ -1577,7 +1631,7 @@ def _похоже_на_команду(текст: str) -> bool:
     except Exception:
         return False
 
-    return решение.kind in ("action", "schedule", "remember", "project", "protocol")
+    return решение.kind in ("action", "schedule", "remember", "project", "protocol", "utility")
 
 
 def _есть_ли_речь(окно) -> bool:
@@ -1725,7 +1779,9 @@ def _listener_handle(text: str) -> None:
             # время микрофон приглушён, чтобы он не услышал сам себя, — то есть
             # перебить его нельзя даже словом. Полный текст остаётся в чате, где
             # его можно прочитать глазами за пару секунд.
-            spoken = shorten_for_speech(response)
+            # Знакомство — законченный диалог: предложение и согласованное
+            # объяснение должны прозвучать целиком.
+            spoken = response if result.get('type') == 'introduction' else shorten_for_speech(response)
             if spoken != response:
                 print(f"✂️ Вслух короче: {len(response)} знаков -> {len(spoken)}")
 
@@ -2022,6 +2078,7 @@ async def health():
         "status": "online",
         "scott": "ready",
         "message": "Scott AI Assistant is online",
+        "workers": {name:getattr(bounded_work,name).snapshot() for name in ('actions','models','memory')},
         "version": scott_profile.get('version'),
         "ai_name": scott_profile.get_name()
     }
@@ -2871,7 +2928,7 @@ async def list_available_voices(gender: str = ""):
     Список доступных голосов для выбора в Настройках — и локальных (Silero),
     и облачных (Edge TTS).
 
-    ?gender=male|female фильтрует список; без фильтра доступны все голоса.
+    Каталог содержит мужские голоса. Параметр gender сохранён для совместимости.
     """
     from scott_voice import describe_voices
     return await asyncio.to_thread(describe_voices, gender.strip().lower())
@@ -2941,8 +2998,12 @@ async def select_voice(request: Dict):
 async def text_to_speech(request: Dict):
     """Преобразование текста в речь"""
     text = request.get("text", "")
-    voice_name = request.get("voice")  # опционально: 'ru-RU-DmitryNeural' / 'ru-RU-SvetlanaNeural'
-    from scott_voice import get_current_voice
+    voice_name = request.get("voice")
+    from scott_voice import get_current_voice, AVAILABLE_VOICES
+    if voice_name is not None:
+        voice_name = voice_name.strip() if isinstance(voice_name,str) else ''
+        if voice_name not in AVAILABLE_VOICES:
+            return JSONResponse(status_code=400,content={'error':'Неизвестный голос'})
     synthesis_timeout = 90 if (voice_name or get_current_voice()) == 'scott-voice' else 45
 
     if not text:
@@ -3018,7 +3079,13 @@ async def websocket_endpoint(websocket: WebSocket):
             
             try:
                 message = json.loads(data)
+                if not isinstance(message, dict):
+                    await websocket.send_json({'status': 'error', 'message': 'Ожидается объект JSON.'})
+                    continue
                 text = message.get("text", "") or message.get("command", "")
+                if not isinstance(text, str) or len(text) > 8000:
+                    await websocket.send_json({'status': 'error', 'message': 'Команда должна быть строкой до 8000 символов.'})
+                    continue
                 
                 if text:
                     # Обрабатываем команду
@@ -3040,9 +3107,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "message": "Некорректный формат JSON"
                 })
     
-    except Exception as e:
-        print(f"❌ WebSocket ошибка: {e}")
-        await websocket.close(code=1011)
+    except WebSocketDisconnect:
+        return
 
 
 # ============= ВЕБ-ИНТЕГРАЦИИ (YouTube, GitHub) =============
@@ -3147,5 +3213,9 @@ if __name__ == "__main__":
         host=backend_host,
         port=backend_port,
         reload=backend_reload,
-        log_level="info"
+        log_level="info",
+        access_log=False,
+        proxy_headers=False,
+        ws_max_size=65536,
+        limit_concurrency=64,
     )

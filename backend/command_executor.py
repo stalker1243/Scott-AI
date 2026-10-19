@@ -17,6 +17,10 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 import platform
 import shutil
+try:
+    from .companion_events import application_opened
+except ImportError:
+    from companion_events import application_opened
 
 WEBSITE_ALIASES = {
     'гугл': 'https://www.google.com', 'google': 'https://www.google.com',
@@ -193,6 +197,7 @@ class CommandExecutor:
             if executable:
                 try:
                     subprocess.Popen([executable] + (args.split() if args else []))
+                    application_opened()
                     return f"✅ Открыл приложение: {name}"
                 except Exception as e:
                     print(f"⚠️ Прямой запуск «{name}» не удался ({e}), пробую каталог приложений")
@@ -207,6 +212,7 @@ class CommandExecutor:
             if executable.startswith("ms-"):
                 try:
                     os.startfile(executable)
+                    application_opened()
                     print(f"🚀 Открыл через APP_MAP (URI): {name} → {executable}")
                     return f"✅ Открыл приложение: {name}"
                 except Exception as e:
@@ -219,6 +225,7 @@ class CommandExecutor:
                 if found_path:
                     try:
                         subprocess.Popen([found_path], shell=False)
+                        application_opened()
                         print(f"🚀 Открыл через APP_MAP: {name} → {found_path}")
                         return f"✅ Открыл приложение: {name}"
                     except Exception as e:
@@ -242,6 +249,7 @@ class CommandExecutor:
         result = launch_app(name)
         if result["success"]:
             print(f"🚀 Открыл через resolver ({result['source']}): {name} → {result['matched_name']}")
+            application_opened()
             return f"✅ Открыл приложение: {result['matched_name']}"
 
         print(f"❌ Резолвер не нашёл «{name}»: {result['error']}")

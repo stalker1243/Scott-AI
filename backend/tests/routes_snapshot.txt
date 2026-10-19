@@ -7,6 +7,7 @@ DELETE /protocols/id/{protocol_id}
 DELETE /protocols/{name}
 DELETE /remote/devices/{device_id}
 GET /abilities
+GET /browser
 GET /ai/memory-stats
 GET /ai/providers
 GET /chats
@@ -198,3 +199,6 @@ POST /voice/install/cancel
 POST /voice/suggest-name
 POST /web/github/search
 POST /web/youtube/search
+POST /browser
+POST /browser/cancel
+POST /browser/settings

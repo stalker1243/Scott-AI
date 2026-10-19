@@ -3,6 +3,7 @@
 # на Linux скрипт просто не запускается.
 *.sh text eol=lf
 *.desktop text eol=lf
+installer/linux/AppRun text eol=lf
 
 # Остальное — как принято в репозитории: в рабочей копии CRLF, в истории LF.
 * text=auto

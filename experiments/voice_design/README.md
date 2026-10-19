@@ -43,9 +43,16 @@ backend оставался доступен. Проверено 27 выбран�
 
 ## Запуск на текущем компьютере
 
-Windows, Python 3.13, PyTorch 2.9.1+cu126, RTX 3060 12 ГБ.
-Окружение `.venv` использует установленный PyTorch; остальные зависимости
-устанавливаются в эту папку. TorchAudio должен совпадать с версией PyTorch.
+Текущий профиль: Windows, Python 3.13, PyTorch 2.14.1+cu126,
+TorchAudio 2.11.0+cu126 и локальная сборка Qwen `0.1.1+scott.1` для
+Transformers 5.20.1. Base проверен на RTX 3060 12 ГБ. Для других режимов
+VoiceDesign и иных GPU результаты нужно проверять отдельно.
+
+`setup.ps1` создаёт приватное окружение без глобальных пакетов. Если старый
+`.venv` использует `system-site-packages`, скрипт сохраняет его и просит
+указать новую папку через `-EnvironmentDirectory`. Эксперименты ниже до
+19 октября выполнялись на прежнем SDK; исторические результаты не пересчитаны.
+Патч SDK и воспроизводимая сборка описаны в [tools/voice_compat](../../tools/voice_compat/README.md).
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File experiments/voice_design/setup.ps1

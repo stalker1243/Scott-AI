@@ -47,7 +47,12 @@ def _mutate(operation):
                 return {"success": False, "error": "Не удалось сохранить память. Проверьте файл памяти и доступ к папке данных"}
     return run
 
-STORE_PATH = Path(__file__).resolve().parent / "data" / "memories.json"
+try:
+    from .storage_paths import backend_path
+except ImportError:
+    from storage_paths import backend_path
+
+STORE_PATH = backend_path('memories.json')
 
 # Сколько записей уходит в разговор.
 #

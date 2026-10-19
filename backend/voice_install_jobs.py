@@ -10,6 +10,10 @@ import sys
 import threading
 import uuid
 import psutil
+try:
+    from .support_logs import append_log, redact
+except ImportError:
+    from support_logs import append_log, redact
 
 try:
     from . import scott_voice_install as setup
@@ -46,8 +50,15 @@ class VoiceInstallJobs:
 
     def snapshot(self):
         with self._lock:
+            try:
+                from .installation_space import budget
+                from .voice_shared_runtime import candidate
+            except ImportError:
+                from installation_space import budget
+                from voice_shared_runtime import candidate
             return dict(self._state, installed=self.installed(),
-                        supported=os.name == 'nt' and struct.calcsize('P') == 8)
+                        supported=os.name == 'nt' and struct.calcsize('P') == 8,
+                        space=budget('voice_shared' if candidate(self.home, self.root) else 'voice', self.home))
 
     def start(self, action):
         if action not in ('install', 'check'):
@@ -91,9 +102,10 @@ class VoiceInstallJobs:
             return self.snapshot()
 
     def _read(self, job, process, owner):
-        result, cancelled, error_code = None, False, ''
+        result, cancelled, error_code, error_message = None, False, '', ''
         try:
             while line := process.stdout.readline(16385):
+                append_log('scott-voice-install.log', line, self.root)
                 if len(line) > 16384:
                     continue
                 try:
@@ -108,15 +120,16 @@ class VoiceInstallJobs:
                     if event.get('type') == 'progress' and self._state['state'] == 'running':
                         stage = event.get('stage')
                         if stage in STAGES:
-                            self._state.update(stage=stage, message=STAGES[stage],
-                                progress={'python':.05, 'environment':.15, 'libraries':.3,
-                                          'model':.6, 'verification':.9, 'complete':1.}[stage])
+                            fraction = event.get('fraction')
+                            fraction = max(0., min(1., fraction)) if isinstance(fraction, (int, float)) else {'python':.05, 'environment':.15, 'libraries':.3, 'model':.6, 'verification':.9, 'complete':1.}[stage]
+                            self._state.update(stage=stage, message=redact(str(event.get('message') or STAGES[stage]), self.root)[:2000], progress=fraction)
                     elif event.get('type') == 'result':
                         result = event.get('available') is True
                         error_code = event.get('error', '')
                     elif event.get('type') == 'error':
                         cancelled = event.get('cancelled') is True
-                        error_code = 'cancelled' if cancelled else 'install_failed'
+                        error_code = 'cancelled' if cancelled else event.get('code', 'install_failed')
+                        error_message = redact(str(event.get('message') or ''), self.root)[:2000]
             code = process.wait()
             with self._lock:
                 cancelled = cancelled or self._state['state'] == 'cancelling'
@@ -134,14 +147,16 @@ class VoiceInstallJobs:
                     cancelled = cancelled or self._state['state'] == 'cancelling'
                     state = 'cancelled' if cancelled else 'complete' if code == 0 and result else 'failed'
                     self._state.update(state=state, progress=1. if state == 'complete' else self._state['progress'],
-                        error=error_code if error_code in ('cuda_unavailable', 'not_installed', 'invalid_assets', 'runtime_unavailable', 'missing_checksums', 'cancelled', 'install_failed') else 'process_failed' if state == 'failed' else '',
+                        error=error_code if error_code in ('cuda_unavailable', 'not_installed', 'invalid_assets', 'runtime_unavailable', 'missing_checksums', 'cancelled', 'install_failed', 'timeout', 'process_failed', 'network_unavailable', 'download_timeout', 'download_server', 'download_access', 'download_certificate', 'disk_full', 'permission_denied') else 'process_failed' if state == 'failed' else '',
                         exit_code=code,
                         message={'cancelled':'Подготовка отменена. Её можно продолжить позже.',
                                  'complete':'Scott Voice проверен и готов к выбору.',
-                                 'failed':'Подготовка не завершена. Проверьте подключение, свободное место и повторите попытку.'}[state])
-                    if state == 'failed' and error_code == 'cuda_unavailable':
+                                 'failed':'Подготовка не завершена. Соберите логи с причиной ошибки и повторите попытку.'}[state])
+                    if state == 'failed' and error_message:
+                        self._state['message'] = error_message
+                    if state == 'failed' and error_code == 'cuda_unavailable' and not error_message:
                         self._state['message'] = 'Для Scott Voice не найдена доступная NVIDIA/CUDA. Поддержка AMD и CPU ещё проверяется.'
-                    elif state == 'failed' and error_code == 'not_installed':
+                    elif state == 'failed' and error_code == 'not_installed' and not error_message:
                         self._state['message'] = 'Scott Voice пока не установлен. Нажмите «Установить Scott Voice».'
         except (OSError, ValueError, subprocess.SubprocessError):
             with self._lock:

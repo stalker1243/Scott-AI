@@ -1,10 +1,15 @@
-"""Update only identified Scott Voice runtime source files; preserve foreign edits."""
+"""Update identified Scott Voice code and bundled DSP settings; preserve foreign edits."""
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import uuid
+
+
+# Bundled DSP settings can change with an approved voice profile. Other JSON,
+# the reference and user data remain immutable through this code-update path.
+UPDATABLE_DATA = frozenset({'experiments/voice_design/robotic_profiles.json'})
 
 
 def digest(path):
@@ -42,7 +47,7 @@ def sync_assets(home, sources, legacy=None):
                 raise ValueError('Папка установки содержит перенаправление: '+name)
         actual=digest(target) if target.is_file() else None
         if target.exists() and actual!=hashes[name]:
-            if Path(name).suffix!='.py' or actual!=previous.get(name):
+            if (Path(name).suffix!='.py' and name not in UPDATABLE_DATA) or actual!=previous.get(name):
                 raise ValueError('В папке другая версия файла; сохраните его перед обновлением: '+name)
         if actual!=hashes[name]:
             changed.append(name)
