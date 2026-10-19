@@ -241,23 +241,31 @@ private slots:
         auto *item=qobject_cast<QQuickItem *>(character.get());QVERIFY(item);
         QQuickWindow window;window.resize(280,260);item->setParentItem(window.contentItem());item->setSize(QSizeF(280,260));window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
-        // QTest's QWindow mouseMove sends a move, not a native Enter event.
-        // Supply the complete pointer sequence independently of the runner's
-        // real cursor position; retain the actual hover and animation checks.
+        // QTest's QWindow mouseMove does not move the native cursor. Establish
+        // hover once, then keep native and synthetic coordinates together.
         const auto priorCursor=QCursor::pos();
         const auto restoreCursor=qScopeGuard([&]{
 #ifdef Q_OS_WIN
             QCursor::setPos(priorCursor);
 #endif
         });
+#ifdef Q_OS_WIN
+        window.requestActivate();QVERIFY(QTest::qWaitForWindowActive(&window));
+        QCursor::setPos(window.mapToGlobal(QPoint(140,130)));
+#else
+        QEnterEvent enter(QPoint(140,130),QPoint(140,130),window.mapToGlobal(QPoint(140,130)));
+        QCoreApplication::sendEvent(&window,&enter);
+#endif
+        QTest::mouseMove(&window,QPoint(140,130),20);
+        QTRY_VERIFY(character->property("attention").toBool());
         const auto hoverAt=[&](QPoint point){
 #ifdef Q_OS_WIN
             // Windows also receives native hover packets. Keep their physical
             // cursor coordinate consistent with the synthetic QWindow event.
             QCursor::setPos(window.mapToGlobal(point));
+            QTest::qWait(60);
 #endif
-            QEnterEvent enter(point,point,window.mapToGlobal(point));
-            QCoreApplication::sendEvent(&window,&enter);
+            // Establish Enter once; subsequent input consists only of moves.
             QTest::mouseMove(&window,point,20);
         };
         hoverAt(QPoint(60,90));

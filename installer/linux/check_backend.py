@@ -18,8 +18,12 @@ import main
 from fastapi.testclient import TestClient
 
 # Leave lifespan inactive: no model preparation, devices or background listener.
-with_context = TestClient(main.app, client=('127.0.0.1', 50000))
+with_context = TestClient(main.app, base_url='http://127.0.0.1:8000',
+                          client=('127.0.0.1', 50000))
 try:
+    # Exercise the same Host boundary as the native launcher. TestClient's
+    # default "testserver" host must remain rejected as a rebinding request.
+    assert with_context.get('/health', headers={'Host': 'testserver'}).status_code == 403
     response = with_context.get('/health')
     assert response.status_code == 200, (response.status_code, response.text)
     assert response.json()['status'] == 'online'

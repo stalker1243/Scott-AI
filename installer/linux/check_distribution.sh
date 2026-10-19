@@ -32,7 +32,7 @@ source "$scott_source/python-environment.sh"
 "$scott_source/python-runtime/bin/python3.13" -I /checks/check_package.py --package "$scott_source"
 scott_prefix="$RUNNER_TEMP/Scott AI package"
 scott_python="$scott_prefix/runtime/bin/python"
-"$scott_python" -I -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1+cpu
+"$scott_python" -I -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1+cpu
 "$scott_python" -I -m pip install -r "$scott_prefix/backend/requirements.txt"
 "$scott_python" -I -m pip check
 "$scott_python" -I /checks/check_backend.py --prefix "$scott_prefix"
