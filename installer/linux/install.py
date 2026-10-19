@@ -11,6 +11,10 @@ import subprocess
 import sys
 import uuid
 
+# -I ignores PYTHONDONTWRITEBYTECODE. Import helpers without modifying the
+# source package, which may be read-only or validated for AppImage afterwards.
+sys.dont_write_bytecode = True
+
 SOURCE = Path(__file__).resolve().parent
 # -I omits the script directory from sys.path. Use only our packaged stdlib
 # helper; source checkouts keep it in the repository's backend directory.

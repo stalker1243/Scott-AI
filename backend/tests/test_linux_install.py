@@ -16,6 +16,22 @@ installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 
 
+@pytest.mark.parametrize('entry', ['install.py', 'backend/linux_runtime.py'])
+def test_isolated_entry_does_not_create_bytecode_in_package(tmp_path, entry):
+    source = tmp_path/'package'
+    (source/'backend').mkdir(parents=True)
+    shutil.copy2(ROOT/'installer/linux/install.py', source/'install.py')
+    for name in ('platform_paths.py', 'linux_runtime.py'):
+        shutil.copy2(ROOT/'backend'/name, source/'backend'/name)
+    env = dict(os.environ)
+    env.pop('PYTHONDONTWRITEBYTECODE', None)
+    result = subprocess.run([sys.executable, '-I', str(source/entry), '--help'],
+                            env=env, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert not list(source.rglob('__pycache__'))
+    assert not list(source.rglob('*.pyc'))
+
+
 @pytest.mark.skipif(os.name=='nt', reason='Linux shell and Unix socket')
 @pytest.mark.parametrize('plugin,live_socket,display,override,expected', [
     (True,True,'relative','','wayland;xcb'), (True,True,'absolute','','wayland;xcb'),

@@ -15,6 +15,10 @@ import sys
 import tempfile
 import time
 
+# This entry point is also executed with -I from writable tar packages.
+# Keep those packages clean without depending on environment variables.
+sys.dont_write_bytecode = True
+
 try:
     from .platform_paths import private_directory, xdg_home
 except ImportError:

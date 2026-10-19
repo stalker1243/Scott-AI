@@ -48,6 +48,9 @@ jobs:
     name: Qt на чистой Windows
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      QT_QUICK_BACKEND: software
+      QSG_RHI_BACKEND: software
     steps:
       - uses: actions/checkout@v4
       - uses: jurplel/install-qt-action@v4
@@ -69,4 +72,17 @@ jobs:
           if ($LASTEXITCODE) { throw 'Build failed' }
           # Native desktop/compositor checks run locally on Windows 11.
           ctest --test-dir ScottAI_qt/build --output-on-failure -LE native_desktop
-          if ($LASTEXITCODE) { throw 'Qt checks failed' }
+          if ($LASTEXITCODE) {
+            if (Test-Path ScottAI_qt/build/pet-contract.xml) { Get-Content ScottAI_qt/build/pet-contract.xml }
+            throw 'Qt checks failed'
+          }
+      - name: Сохранить диагностику Qt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-Qt-test-diagnostics
+          path: |
+            ScottAI_qt/build/pet-contract.xml
+            ScottAI_qt/build/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+          retention-days: 14
