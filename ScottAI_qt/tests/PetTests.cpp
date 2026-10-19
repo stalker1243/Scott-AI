@@ -28,6 +28,7 @@
 #include <cmath>
 #include <atomic>
 #include <QDateTime>
+#include <QEnterEvent>
 #include <QSaveFile>
 #include <QStyleHints>
 #ifdef Q_OS_WIN
@@ -239,8 +240,16 @@ private slots:
         auto *item=qobject_cast<QQuickItem *>(character.get());QVERIFY(item);
         QQuickWindow window;window.resize(280,260);item->setParentItem(window.contentItem());item->setSize(QSizeF(280,260));window.show();
         QVERIFY(QTest::qWaitForWindowExposed(&window));
+        // QTest's QWindow mouseMove sends a move, not a native Enter event.
+        // Supply the complete pointer sequence independently of the runner's
+        // real cursor position; retain the actual hover and animation checks.
+        const QPoint start(60,90);
+        QEnterEvent enter(start,start,window.mapToGlobal(start));
+        QCoreApplication::sendEvent(&window,&enter);
         QTest::mouseMove(&window,QPoint(60,90));
-        QTRY_VERIFY(character->property("lookX").toReal()<-0.3);
+        QTRY_VERIFY2(character->property("lookX").toReal()<-0.3,
+            qPrintable(QString("look=%1 gaze=%2 attention=%3").arg(character->property("lookX").toReal())
+                .arg(character->property("gazeX").toReal()).arg(character->property("attention").toBool())));
         QDir().mkpath("screenshots/pets-motion");
         for(const auto &kind:{"scott"}) {
             character->setProperty("kind",kind);
