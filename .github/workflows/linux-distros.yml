@@ -8,7 +8,7 @@ on:
         required: false
         type: string
       package_release:
-        description: 'Или тег выпуска/черновика для проверки его настоящего tar.gz'
+        description: 'Или тег опубликованного выпуска для проверки его настоящего tar.gz'
         required: false
         type: string
   workflow_call:
