@@ -5,12 +5,20 @@ on:
     inputs:
       package_run:
         description: 'ID успешной сборки Linux с артефактом ScottAI-Qt-Linux-x86_64'
-        required: true
+        required: false
+        type: string
+      package_release:
+        description: 'Или тег выпуска/черновика для проверки его настоящего tar.gz'
+        required: false
         type: string
   workflow_call:
     inputs:
       package_run:
         required: true
+        type: string
+      package_release:
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -28,12 +36,34 @@ jobs:
         image: ['ubuntu:22.04', 'debian:12', 'debian:13', 'registry.fedoraproject.org/fedora:44', 'archlinux:base']
     steps:
       - uses: actions/checkout@v4
+      - name: Проверить источник пакета
+        env:
+          SCOTT_PACKAGE_RUN: ${{ inputs.package_run }}
+          SCOTT_PACKAGE_RELEASE: ${{ inputs.package_release }}
+        run: |
+          if [[ -n "$SCOTT_PACKAGE_RUN" && -z "$SCOTT_PACKAGE_RELEASE" ]]; then
+            [[ "$SCOTT_PACKAGE_RUN" =~ ^[0-9]+$ ]]
+          elif [[ -z "$SCOTT_PACKAGE_RUN" && -n "$SCOTT_PACKAGE_RELEASE" ]]; then
+            [[ "$SCOTT_PACKAGE_RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          else
+            echo 'Укажите один источник: package_run или package_release.' >&2
+            exit 1
+          fi
       - uses: actions/download-artifact@v4
+        if: inputs.package_run != ''
         with:
           name: ScottAI-Qt-Linux-x86_64
           path: ${{ runner.temp }}/linux-artifact
           run-id: ${{ inputs.package_run }}
           github-token: ${{ github.token }}
+      - name: Скачать настоящий пакет выпуска
+        if: inputs.package_release != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SCOTT_PACKAGE_RELEASE: ${{ inputs.package_release }}
+        run: |
+          gh release download "$SCOTT_PACKAGE_RELEASE" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'ScottAI-*-Qt-linux-x86_64.tar.gz*' --dir "$RUNNER_TEMP/linux-artifact"
       - name: Проверить тот же пакет в чистом дистрибутиве
         env:
           SCOTT_IMAGE: ${{ matrix.image }}

@@ -20,7 +20,9 @@ permissions:
 jobs:
   linux:
     name: Ubuntu 24.04 x86-64
-    runs-on: ubuntu-24.04
+    # Build against the oldest supported glibc. A 24.04 build can link libm
+    # symbols from GLIBC_2.38 and then fail to start on Ubuntu 22.04/Debian 12.
+    runs-on: ubuntu-22.04
     timeout-minutes: 40
     env:
       PYTHONIOENCODING: utf-8
