@@ -226,3 +226,37 @@ def test_independent_package_upgrade_changes_audio_identity(tmp_path):
     metadata.write_text('Name: qwen-tts\nVersion: 0.1.1+scott.1\n')
     assert before and before!=shared.config_fingerprint(config)
 
+
+def alias_config(tmp_path):
+    actual=tmp_path/'persistent/runtime'
+    site=actual/'lib/python3.13/site-packages'
+    metadata=site/'qwen_tts-0.1.1.dist-info/METADATA'
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text('Name: qwen-tts\nVersion: 0.1.1\n')
+    alias=tmp_path/'application/runtime';alias.parent.mkdir()
+    try:alias.symlink_to(actual,target_is_directory=True)
+    except OSError:pytest.skip('symlinks unavailable')
+    config=SimpleNamespace(worker=tmp_path/'fixture.py',python=alias/'bin/python')
+    return config,actual,site,metadata
+
+
+def test_runtime_directory_alias_preserves_interpreter_and_package_identity(tmp_path):
+    config,actual,_,metadata=alias_config(tmp_path)
+    original=config.python
+    direct=SimpleNamespace(worker=config.worker,python=actual/'bin/python')
+    before=shared.config_fingerprint(config)
+    assert before and before==shared.config_fingerprint(direct)
+    assert config.python==original
+    metadata.write_text('Name: qwen-tts\nVersion: 0.1.1+scott.1\n')
+    assert shared.config_fingerprint(config)!=before
+
+
+@pytest.mark.parametrize('redirected',['site','metadata'])
+def test_runtime_alias_still_rejects_redirected_package_metadata(tmp_path,redirected):
+    config,actual,site,metadata=alias_config(tmp_path)
+    original=site if redirected=='site' else metadata
+    outside=tmp_path/'foreign'
+    original.rename(outside)
+    original.symlink_to(outside,target_is_directory=redirected=='site')
+    with pytest.raises(shared.SharedRuntimeError):shared.config_fingerprint(config)
+

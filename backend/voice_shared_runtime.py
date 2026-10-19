@@ -155,7 +155,10 @@ def config_fingerprint(config):
     python = Path(config.python) if hasattr(config,'python') else None
     if python is None or python.parent.name not in ('Scripts','bin'):
         return shared
-    venv = python.parent.parent
+    # Linux installations retain an application-owned pointer to a persistent
+    # venv. Resolve that directory for metadata checks only; the executable
+    # path must remain unchanged so Python still recognizes its pyvenv.cfg.
+    venv = python.parent.parent.resolve()
     sites = [venv/'Lib/site-packages',*venv.glob('lib/python*/site-packages')]
     names=('torch','torchaudio','qwen_tts','transformers','accelerate')
     files=sorted(path for site in sites for path in site.glob('*.dist-info/METADATA')
