@@ -5,7 +5,7 @@ scott_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 source "$scott_root/python-environment.sh"
 scott_python="$scott_root/runtime/bin/python"
 if [[ -f "$scott_root/backend/linux_runtime.py" && -f "$scott_root/.scott-linux-install.json" ]]; then
-    scott_python=$("$scott_root/python-runtime/bin/python3.13" -I "$scott_root/backend/linux_runtime.py" --root "$scott_root")
+    scott_python=$("$scott_root/python-runtime/bin/python3.13" -I -B "$scott_root/backend/linux_runtime.py" --root "$scott_root")
     # Also works when an AppImage has no per-user runtime symlink in its image.
     set -- --python "$scott_python" --backend-dir "$scott_root/backend" "$@"
 fi

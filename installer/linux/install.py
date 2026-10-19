@@ -1,6 +1,11 @@
 """Per-user Linux installation. Preserve data and .env on upgrade/uninstall."""
 from __future__ import annotations
 
+import sys
+
+# -I ignores environment flags, including PYTHONDONTWRITEBYTECODE.
+sys.dont_write_bytecode = True
+
 import argparse
 import hashlib
 import json
@@ -8,12 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import uuid
-
-# -I ignores PYTHONDONTWRITEBYTECODE. Import helpers without modifying the
-# source package, which may be read-only or validated for AppImage afterwards.
-sys.dont_write_bytecode = True
 
 SOURCE = Path(__file__).resolve().parent
 # -I omits the script directory from sys.path. Use only our packaged stdlib

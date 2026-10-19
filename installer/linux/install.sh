@@ -46,14 +46,14 @@ if [[ ! -f "$scott_python" ]]; then
     echo 'В пакете отсутствует встроенный Python. Распакуйте полный архив ScottAI.' >&2
     exit 1
 fi
-if ! "$scott_python" -I -c 'import sys; assert sys.version_info[:2] == (3,13)' ; then
+if ! "$scott_python" -I -B -c 'import sys; assert sys.version_info[:2] == (3,13)' ; then
     echo 'Встроенный Python не запускается из распакованной папки (права или noexec).'
     echo 'Пробуем системный Python только для копирования установщика; backend получит Python из пакета.'
     scott_fallback=$(command -v python3 || true)
-    if [[ -z "$scott_fallback" ]] || ! "$scott_fallback" -I -c 'import sys; assert sys.version_info >= (3,11)'; then
+    if [[ -z "$scott_fallback" ]] || ! "$scott_fallback" -I -B -c 'import sys; assert sys.version_info >= (3,11)'; then
         echo 'Распакуйте архив в домашнюю папку на разделе с разрешённым запуском и выполните: bash ./install.sh' >&2
         exit 1
     fi
     scott_python="$scott_fallback"
 fi
-"$scott_python" -I "$scott_source/install.py" "$@"
+"$scott_python" -I -B "$scott_source/install.py" "$@"

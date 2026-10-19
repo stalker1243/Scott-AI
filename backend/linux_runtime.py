@@ -4,6 +4,11 @@ Only stdlib is used: this runs before backend dependencies are installed. Existi
 environments are never relocated or deleted. Slots are keyed by the bundled Python
 archive hash, so replacing an application does not replace a running Python base.
 """
+import sys
+
+# -I ignores environment flags, including PYTHONDONTWRITEBYTECODE.
+sys.dont_write_bytecode = True
+
 from contextlib import contextmanager
 import hashlib
 import json
@@ -11,13 +16,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
-
-# This entry point is also executed with -I from writable tar packages.
-# Keep those packages clean without depending on environment variables.
-sys.dont_write_bytecode = True
 
 try:
     from .platform_paths import private_directory, xdg_home
