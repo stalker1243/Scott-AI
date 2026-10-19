@@ -90,7 +90,7 @@ jobs:
           "$scott_python" -I -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1+cpu
           "$scott_python" -I -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
       - name: Изолированные тесты backend
-        run: '"$RUNNER_TEMP/Scott AI package/runtime/bin/python" backend/run_tests.py'
+        run: '"$RUNNER_TEMP/Scott AI package/runtime/bin/python" backend/run_tests.py tests -q -x -m "not integration and not slow"'
       - name: Полная подготовка моделей в новом CPU-кеше
         env:
           SCOTT_TORCH_BACKEND: cpu

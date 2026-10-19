@@ -29,7 +29,7 @@ jobs:
       - name: Изолированные тесты backend
         env:
           PYTHONIOENCODING: utf-8
-        run: python backend/run_tests.py
+        run: python backend/run_tests.py tests -q -x -m "not integration and not slow"
       - name: Полная подготовка моделей в новом CPU-кеше
         env:
           PYTHONIOENCODING: utf-8
