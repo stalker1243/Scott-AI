@@ -67,8 +67,10 @@ def test_slow_model_does_not_block_history_and_other_chats(setup,monkeypatch):
 
 def test_timeout_retains_chat_reservation_and_never_commits_late_reply(setup,monkeypatch):
     class FastPool(WorkPool):
+        force_short_timeout=True
         async def run(self,*args,**kwargs):
-            kwargs['timeout']=.06
+            if self.force_short_timeout:
+                kwargs['timeout']=.06
             return await super().run(*args,**kwargs)
     pool=FastPool(1,'fixture-chat-timeout');release=threading.Event();started=threading.Event()
     monkeypatch.setattr(routes.bounded_work,'models',pool)
@@ -88,10 +90,18 @@ def test_timeout_retains_chat_reservation_and_never_commits_late_reply(setup,mon
     while chat in routes._busy_chats and time.monotonic()<deadline:time.sleep(.005)
     assert chat not in routes._busy_chats
     assert setup.db.get(chat)['messages']==[]
-    monkeypatch.setattr(routes,'complete',lambda *args:'fresh answer')
+    # The timeout/late-reply assertions above retain the 60 ms budget. Recovery
+    # uses the route's normal deadline, on the SAME pool after its slot is freed.
+    pool.force_short_timeout=False
+    def fresh(*args):
+        # A recovered provider may take longer than the synthetic 60 ms timeout.
+        time.sleep(.09)
+        return 'fresh answer'
+    monkeypatch.setattr(routes,'complete',fresh)
     try:
         assert setup.client.post(f'/chats/{chat}/messages',data={'question':'fresh'}).status_code==200
         assert len(setup.db.get(chat)['messages'])==2
+        assert setup.db.get(chat)['messages'][-1]['text']=='fresh answer'
     finally:pool.close()
 
 
