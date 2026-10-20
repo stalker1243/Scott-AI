@@ -218,7 +218,7 @@ def copy_extras(dest: Path) -> None:
     notes = ROOT/'docs'/f'release-notes-{read_version()}.md'
     if notes.is_file():
         shutil.copy2(notes,dest/'RELEASE-NOTES.md')
-    for name in ('installation.md', 'interface.md', 'security.md', 'models.md', 'commands.md', 'desktop-control.md', 'browser-control.md', 'chat.md', 'companions.md', 'logs.md', 'voice-check.md', 'voice.md', 'linux.md'):
+    for name in ('installation.md', 'interface.md', 'security.md', 'performance.md', 'models.md', 'commands.md', 'desktop-control.md', 'browser-control.md', 'chat.md', 'companions.md', 'logs.md', 'voice-check.md', 'voice.md', 'linux.md'):
         document = ROOT/'docs'/name
         if document.is_file():
             (dest/'docs').mkdir(exist_ok=True)

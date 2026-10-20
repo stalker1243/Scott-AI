@@ -165,13 +165,14 @@ class ConversationArchive:
                                   + similarities.get(row[0], 0) * 12, row[0]), reverse=True)
         excluded = set(excluded)
         try:
-            from .memories import history_allowed
+            from .memories import history_allowed, settings
         except ImportError:
-            from memories import history_allowed
+            from memories import history_allowed, settings
+        filtering = settings()
         selected, size = [], 0
         for ident, user, assistant, timestamp in rows:
             pair = (user, assistant)
-            if pair in excluded or not history_allowed(user, assistant):
+            if pair in excluded or not history_allowed(user, assistant, filtering):
                 continue
             excluded.add(pair)
             question = excerpt(user, query, 450)

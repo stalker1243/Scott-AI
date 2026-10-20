@@ -3504,5 +3504,9 @@ Solo tendrás que hacerlo una vez.</translation>
       <source>Недостаточно места на диске временных файлов: свободно %1 ГиБ, для новой подготовки нужно около %2 ГиБ. Освободите место и повторите подготовку.</source>
       <translation>No hay espacio suficiente en la unidad de archivos temporales: hay %1 GiB libres; la preparación necesita unos %2 GiB. Libera espacio y vuelve a intentarlo.</translation>
     </message>
+    <message>
+      <source>Ответ остановлен. Проверьте историю перед повторной отправкой.</source>
+      <translation>Respuesta detenida. Revisa el historial antes de volver a enviar.</translation>
+    </message>
   </context>
 </TS>

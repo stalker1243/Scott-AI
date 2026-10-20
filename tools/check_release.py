@@ -14,6 +14,23 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def pe_version(path):
+    """Read the fixed PE resource, rather than trusting the adjacent JSON."""
+    import ctypes
+    api = ctypes.windll.version
+    size = api.GetFileVersionInfoSizeW(str(path), None)
+    if not size:
+        raise ValueError('Missing Windows executable version: ' + path.name)
+    data = ctypes.create_string_buffer(size)
+    if not api.GetFileVersionInfoW(str(path), 0, size, data):
+        raise ValueError('Unreadable Windows executable version: ' + path.name)
+    pointer, length = ctypes.c_void_p(), ctypes.c_uint()
+    if not api.VerQueryValueW(data, '\\', ctypes.byref(pointer), ctypes.byref(length)) or length.value < 52:
+        raise ValueError('Invalid Windows executable version: ' + path.name)
+    fixed = ctypes.cast(pointer, ctypes.POINTER(ctypes.c_uint32 * 13)).contents
+    return [fixed[2] >> 16, fixed[2] & 65535, fixed[3] >> 16, fixed[3] & 65535]
+
+
 def verify(folder, build_directory=None):
     folder = folder.resolve()
     build = (build_directory or ROOT/'ScottAI_qt/build').resolve()
@@ -31,10 +48,13 @@ def verify(folder, build_directory=None):
     for source in (ROOT/'installer/licenses').rglob('*'):
         if source.is_file():
             assert sha(folder/'licenses'/source.relative_to(ROOT/'installer/licenses'))==sha(source)
-    for name in ('installation.md', 'interface.md', 'security.md', 'models.md', 'commands.md', 'desktop-control.md', 'browser-control.md', 'chat.md', 'companions.md', 'logs.md', 'voice-check.md', 'voice.md', 'linux.md'):
+    for name in ('installation.md', 'interface.md', 'security.md', 'performance.md', 'models.md', 'commands.md', 'desktop-control.md', 'browser-control.md', 'chat.md', 'companions.md', 'logs.md', 'voice-check.md', 'voice.md', 'linux.md'):
         assert sha(folder/'docs'/name)==sha(ROOT/'docs'/name)
     assert sha(folder/'launcher/ScottAIQt.exe')==sha(build/'ScottAIQt.exe')
     assert sha(folder/'launcher/ScottAIUpdater.exe')==sha(build/'ScottAIUpdater.exe')
+    expected_version = [int(value) for value in version['version'].split('.')] + [int(version['build_number'])]
+    versions = {name: pe_version(folder/'launcher'/name) for name in ('ScottAIQt.exe', 'ScottAIUpdater.exe')}
+    assert all(parts == expected_version for parts in versions.values()), versions
     helper = folder/'backend/native/ScottSystem.exe'
     assert sha(helper)==sha(build/'ScottSystem.exe')
     native = subprocess.run([str(helper), 'probe'], capture_output=True, text=True, check=True,
@@ -71,7 +91,7 @@ def verify(folder, build_directory=None):
         qt_dlls_included=True,license_contents_equal=True,public_command_docs_equal=True,
         native_helper_bytes=helper.stat().st_size,native_probe_passed=True,
         launcher_sha256=sha(folder/'launcher/ScottAIQt.exe'),
-        updater_sha256=sha(folder/'launcher/ScottAIUpdater.exe'),
+        updater_sha256=sha(folder/'launcher/ScottAIUpdater.exe'),pe_versions=versions,
         distribution_bytes=sum(path.stat().st_size for path in folder.rglob('*') if path.is_file()))
 
 

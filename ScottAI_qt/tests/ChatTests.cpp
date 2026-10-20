@@ -11,6 +11,69 @@
 class ChatTests : public QObject {
     Q_OBJECT
 private slots:
+    void streamedReply_data() {
+        QTest::addColumn<int>("ending");
+        QTest::newRow("complete") << 0;
+        QTest::newRow("safe-error") << 1;
+        QTest::newRow("disconnect") << 2;
+        QTest::newRow("cancel") << 3;
+        QTest::newRow("malformed") << 4;
+    }
+    void streamedReply() {
+        QFETCH(int, ending);
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+        const QString id(32, '2'); QJsonArray saved;
+        QPointer<QTcpSocket> upload;
+        const auto chat = [&] { return QJsonObject{{"id", id}, {"title", "Stream"}, {"messages", saved}}; };
+        const auto event = [](const QByteArray &kind, const QJsonObject &data) { return "event: " + kind + "\ndata: " + QJsonDocument(data).toJson(QJsonDocument::Compact) + "\n\n"; };
+        connect(&server, &QTcpServer::newConnection, this, [&] {
+            auto *socket = server.nextPendingConnection(); auto buffer = std::make_shared<QByteArray>();
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+            connect(socket, &QTcpSocket::readyRead, socket, [&, socket, buffer] {
+                *buffer += socket->readAll(); const auto split = buffer->indexOf("\r\n\r\n"); if (split < 0) return;
+                int length = 0;
+                for (const auto &line : buffer->left(split).split('\n')) if (line.toLower().startsWith("content-length:")) length = line.mid(15).trimmed().toInt();
+                if (buffer->size() < split + 4 + length) return;
+                const auto path = buffer->split(' ').value(1);
+                if (path.endsWith("/messages")) {
+                    QVERIFY(buffer->contains("name=\"stream\""));
+                    upload = socket;
+                    socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n: heartbeat\n\n");
+                    const auto bytes = event("delta", {{"text", QStringLiteral("Привет. ")}});
+                    const auto cut = bytes.indexOf(QStringLiteral("П").toUtf8()) + 1;
+                    socket->write(bytes.left(cut));
+                    QTimer::singleShot(10, socket, [socket, bytes, cut] { socket->write(bytes.mid(cut)); });
+                } else {
+                    QJsonObject data{{"success", true}, {"chat", chat()}};
+                    if (path == "/health") data = {{"status", "online"}};
+                    if (path == "/chats") data["chats"] = QJsonArray{chat()};
+                    const auto bytes = QJsonDocument(data).toJson(QJsonDocument::Compact);
+                    socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " + QByteArray::number(bytes.size()) + "\r\n\r\n" + bytes);
+                    socket->disconnectFromHost();
+                }
+                buffer->clear();
+            });
+        });
+        BackendClient client(QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort())));
+        client.refresh(); QTRY_VERIFY(client.online()); client.newChat(); QTRY_COMPARE(client.chatId(), id); QTRY_VERIFY(!client.chatsBusy());
+        QSignalSpy sent(&client, &BackendClient::chatSent);
+        client.sendChatMessage("Question");
+        QTRY_VERIFY(upload); QTRY_COMPARE(client.messages().size(), 2);
+        QCOMPARE(client.messages().last().toMap().value("text").toString(), QStringLiteral("Привет. "));
+        QVERIFY(client.busy()); QCOMPARE(sent.count(), 0); // Actual first bytes before server completes.
+        if (ending == 0) {
+            saved = QJsonArray{QJsonObject{{"role", "user"}, {"text", "Question"}, {"attachments", QJsonArray{}}},
+                               QJsonObject{{"role", "assistant"}, {"text", QStringLiteral("Привет. Готово.")}, {"attachments", QJsonArray{}}}};
+            upload->write(event("done", {{"success", true}, {"chat", chat()}})); upload->disconnectFromHost();
+        } else if (ending == 1) {
+            upload->write(event("error", {{"success", false}, {"message", "Provider interrupted"}, {"code", "SCOTT-API-502"}})); upload->disconnectFromHost();
+        } else if (ending == 3) client.cancelChatMessage();
+        else if (ending == 4) { upload->write("event: delta\ndata: {broken}\n\n"); upload->disconnectFromHost(); }
+        else upload->disconnectFromHost();
+        QTRY_VERIFY(!client.busy());
+        if (ending == 0) { QCOMPARE(sent.count(), 1); QCOMPARE(client.messages().last().toMap().value("text").toString(), QStringLiteral("Привет. Готово.")); QVERIFY(client.error().isEmpty()); }
+        else { QCOMPARE(sent.count(), 0); QCOMPARE(client.messages().size(), 0); QVERIFY(!client.error().isEmpty()); }
+    }
     void persistentChatAndMultipartFailures() {
         QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost, 0));
         const QString id(32, '1'); QString title = "Plan"; QJsonArray messages;

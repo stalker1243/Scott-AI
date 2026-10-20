@@ -5,6 +5,31 @@ import time
 _catalog = {}
 _updated = 0.0
 _lock = threading.RLock()
+_refreshing = False
+_refresh_attempt = 0.0
+
+
+def _refresh_in_background():
+    global _refreshing, _refresh_attempt
+    with _lock:
+        if _refreshing or (_refresh_attempt != 0.0 and time.monotonic() - _refresh_attempt < 30):
+            return
+        _refreshing = True
+        _refresh_attempt = time.monotonic()
+    def run():
+        global _refreshing
+        try:
+            try:
+                from .intelligent_answerer import list_openrouter_models
+            except ImportError:
+                from intelligent_answerer import list_openrouter_models
+            list_openrouter_models()
+        except Exception:
+            pass  # Keep the last verified catalogue when a background refresh fails.
+        finally:
+            with _lock:
+                _refreshing = False
+    threading.Thread(target=run, name='scott-model-catalog', daemon=True).start()
 
 
 def remember_openrouter(rows):
@@ -35,13 +60,16 @@ def capabilities(provider, model, architecture=None, refresh=False):
     name = (model or '').lower()
     if provider == 'OpenRouter':
         with _lock:
-            stale = time.monotonic() - _updated > 600
+            stale = _updated == 0.0 or time.monotonic() - _updated > 600
         if refresh and stale:
-            try:
-                from .intelligent_answerer import list_openrouter_models
-            except ImportError:
-                from intelligent_answerer import list_openrouter_models
-            list_openrouter_models()
+            if refresh == 'background':
+                _refresh_in_background()
+            else:
+                try:
+                    from .intelligent_answerer import list_openrouter_models
+                except ImportError:
+                    from intelligent_answerer import list_openrouter_models
+                list_openrouter_models()
         with _lock:
             return dict(_catalog.get(model) or dict(result, known=False, source='unknown'))
     if provider == 'OpenAI':

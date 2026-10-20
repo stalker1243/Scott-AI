@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION.json" SCOTT_VERSION_JSON)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION.json")
 string(JSON SCOTT_VERSION GET "${SCOTT_VERSION_JSON}" version)
 string(JSON SCOTT_BUILD GET "${SCOTT_VERSION_JSON}" build_number)
 project(ScottAIQt VERSION ${SCOTT_VERSION} LANGUAGES CXX)
@@ -53,6 +54,12 @@ endif()
 target_link_libraries(ScottAIQt PRIVATE scott_language scott_tray scott_avatar scott_protocol_files scott_chat Qt6::Quick Qt6::QuickControls2 Qt6::Widgets)
 target_compile_definitions(ScottAIQt PRIVATE SCOTT_BACKEND_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../backend")
 configure_file(version.h.in "${CMAKE_CURRENT_BINARY_DIR}/ScottVersion.h" @ONLY)
+if(WIN32)
+    # Ninja/windres does not reliably scan generated headers included by .rc.
+    # Both PE version resources must follow VERSION.json on incremental builds.
+    set_source_files_properties(app.rc updater.rc PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/ScottVersion.h")
+endif()
 target_include_directories(ScottAIQt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 qt_add_library(scott_update STATIC src/UpdateTransfer.cpp src/UpdateTransfer.h src/UpdateRelease.h)
 target_link_libraries(scott_update PUBLIC Qt6::Network)

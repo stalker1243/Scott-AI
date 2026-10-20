@@ -267,6 +267,13 @@ ApplicationWindow {
         const follow = chatList.atYEnd || chatModel.count === 0 ||
                        (items.length > 0 && items[items.length - 1].role === "user")
         if (items.length < chatModel.count) chatModel.clear()
+        // Streaming changes only the last answer. Avoid rebuilding every row's
+        // attachment JSON and code delegates for each batch of arriving tokens.
+        if (backend.busy && items.length === chatModel.count && items.length > 0 && items[items.length - 1].role === "assistant") {
+            chatModel.setProperty(items.length - 1, "body", items[items.length - 1].text)
+            if (follow) Qt.callLater(function() { chatList.positionViewAtEnd() })
+            return
+        }
         for (let i = 0; i < items.length; ++i) {
             const row = {speaker: items[i].role, body: items[i].text, mediaJson: JSON.stringify(items[i].attachments || []), modelName: items[i].model || ""}
             if (i >= chatModel.count) chatModel.append(row)
@@ -810,7 +817,7 @@ ApplicationWindow {
                                 ChatToolButton { theme: visual; objectName: "attachPhotoButton"; text: qsTranslate("Launcher", "Фото"); enabled: !backend.busy; onClicked: if (root.requestChatFeature("images")) backend.chooseAttachments(true); ToolTip.visible: hovered; ToolTip.text: CapabilityInfo.description(backend.chatCapabilities.capabilities || ({}), "images") }
                                 ChatToolButton { theme: visual; objectName: "attachFileButton"; text: qsTranslate("Launcher", "Файл"); enabled: !backend.busy; onClicked: if (root.requestChatFeature("documents")) backend.chooseAttachments(false); ToolTip.visible: hovered; ToolTip.text: CapabilityInfo.description(backend.chatCapabilities.capabilities || ({}), "documents") }
                                 Item { Layout.fillWidth: true }
-                                ActionButton { text: "↑"; primary: true; implicitWidth: 36; implicitHeight: 30; enabled: backend.online && !backend.busy && !backend.chatsBusy && (composer.text.trim().length > 0 || backend.attachments.length > 0); onClicked: composer.submit(); ToolTip.visible: hovered; ToolTip.text: qsTranslate("Launcher", "Отправить") }
+                                ActionButton { text: backend.busy ? "■" : "↑"; primary: true; implicitWidth: 36; implicitHeight: 30; enabled: backend.busy || backend.online && !backend.chatsBusy && (composer.text.trim().length > 0 || backend.attachments.length > 0); onClicked: backend.busy ? backend.cancelChatMessage() : composer.submit(); ToolTip.visible: hovered; ToolTip.text: backend.busy ? qsTranslate("Launcher", "Остановить") : qsTranslate("Launcher", "Отправить") }
                             }
                         }
                         DropArea { anchors.fill: parent; onDropped: function(drop) { if (drop.hasUrls) { backend.stageAttachments(drop.urls); drop.acceptProposedAction() } } }

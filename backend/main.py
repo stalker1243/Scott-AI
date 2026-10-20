@@ -850,7 +850,8 @@ class ScottAI:
         """
         start = time.time()
         try:
-            captured = await bounded_work.memory.run(memories_module.observe, text, timeout=3)
+            with timing_stage('memory.observe'):
+                captured = await bounded_work.memory.run(memories_module.observe, text, timeout=3)
         except Exception:
             captured = [{'success': False, 'error': 'Не удалось обновить память'}]
         with timing_stage("00.команда.всего"):
@@ -858,9 +859,18 @@ class ScottAI:
             if decision is not None:
                 options['decision'] = decision
             result = await self._process_command_impl(text, **options)
+        from request_flow import current as current_flow
+        if current_flow() is not None:
+            current_flow().mark('result_ready')
         memory = getattr(intelligent_answerer, 'memory', None)
         if not isinstance(result, dict):
             result = dict(type='error', response='Обработчик команды не вернул результат.')
+        # A completed local result can reach the user before optional indexing.
+        flow = current_flow()
+        if (flow is not None and not flow.emitted and result.get('response')
+                and result.get('type') != 'introduction'
+                and 'error' not in result.get('type', '')):
+            await asyncio.to_thread(flow.emit, result['response'])
         if not isinstance(captured, list) or any(not isinstance(fact, dict) or not fact.get('success') for fact in captured):
             result['memory_warning'] = 'Не удалось сохранить новые сведения в память.'
         record_turn = getattr(memory, 'record_external_turn', None)
@@ -903,6 +913,9 @@ class ScottAI:
                 if decision is None:
                     decision = self._browser_decision(text) or understanding.understand(text, **self._understanding_engines())
             print(f"🔎 Решение: {decision.kind} — {decision.reason}")
+            from request_flow import current as current_flow
+            if current_flow() is not None:
+                current_flow().check()
 
             if decision.kind == 'browser':
                 from browser_control_jobs import jobs
@@ -1081,7 +1094,8 @@ class ScottAI:
             # ---------------------------------------------------- действие
             with timing_stage("команда.выполнение"):
                 response = await self._execute_parsed_command(decision.parsed, text)
-            await self._remember_answer(text, response)
+            # Dynamic acknowledgements are archived by process_command, and must
+            # never be reused as cached answers instead of executing the action.
             print(f"🤖 Scott: {response}")
             return {
                 "type": "command",
@@ -1157,11 +1171,14 @@ class ScottAI:
         сам — ходить за этим в сеть значило бы ждать секунды вместо
         миллисекунд и тратить лимит запросов на то, что и так известно.
         """
+        from request_flow import current as current_flow
+        flow = current_flow()
+        cancelled = flow.cancelled if flow is not None else None
         with timing_stage("ответ.локальный"):
             # Признак «спросили голосом» нужен и здесь: отвечающий сам
             # обращается к модели, когда своих правил ему не хватает, и без
             # признака оттуда приходил ответ на полтысячи знаков со списками.
-            answer = await bounded_work.models.run(question_answerer.answer, text, brief=by_voice, timeout=105)
+            answer = await bounded_work.models.run(question_answerer.answer, text, brief=by_voice, timeout=105, cancelled=cancelled)
         if answer:
             await self._remember_answer(text, answer)
             print(f"🤖 Scott: {answer}")
@@ -1176,7 +1193,7 @@ class ScottAI:
             with timing_stage("ответ.llm"):
                 # Вопрос с микрофона — просим короткий ответ: вслух он
                 # звучит вдвое дольше, чем читается глазами.
-                ai_answer = await bounded_work.models.run(intelligent_answerer.answer_question, text, brief=by_voice, timeout=105)
+                ai_answer = await bounded_work.models.run(intelligent_answerer.answer_question, text, brief=by_voice, timeout=105, cancelled=cancelled)
             if ai_answer:
                 print(f"✨ Ответ от ИИ: {ai_answer[:100]}...")
                 await self._remember_answer(text, ai_answer)
@@ -1575,6 +1592,9 @@ async def _play_voice_response(text: str, generation=None) -> bool:
                 path = await asyncio.to_thread(voice.speak_to_file, chunk)
                 if not path or is_quiet() or not _voice_response_current(generation):
                     return False
+                from request_flow import current as current_flow
+                if current_flow() is not None:
+                    current_flow().mark('first_audio_ready')
                 if listening is not None and not expecting:
                     listening.expect_interruption(text)
                     expecting = True
@@ -1757,37 +1777,17 @@ def _listener_handle(text: str) -> None:
     started = time.monotonic()
 
     async def run() -> None:
-        # Ответ ИИ иногда идёт долго — замеры показывают до двадцати девяти
-        # секунд в худших случаях. Столько молчать нельзя: человек решит, что
-        # его не услышали, и повторит вопрос, а потом ещё раз.
-        thinking = asyncio.create_task(scott_ai.process_command(text, by_voice=True))
-        finished, _ = await asyncio.wait({thinking}, timeout=THINKING_CUE_AFTER_SECONDS)
-
-        if not finished:
-            await _say_thinking(generation)
-
-        result = await thinking
-        response = result.get("response", "")
-        if not response or not _voice_response_current(generation):
-            return
-        print(f"🤖 Scott: {response}")
-        # Echo/interruption state belongs to the serialized playback session.
+        from voice_flow import respond
         listening = scott_runtime.listener
         try:
-            # Вслух — только суть. Замер: ответ ИИ на «что такое фотосинтез»
-            # занимает 583 знака, и Scott читал его сорок три секунды. Всё это
-            # время микрофон приглушён, чтобы он не услышал сам себя, — то есть
-            # перебить его нельзя даже словом. Полный текст остаётся в чате, где
-            # его можно прочитать глазами за пару секунд.
-            # Знакомство — законченный диалог: предложение и согласованное
-            # объяснение должны прозвучать целиком.
-            spoken = response if result.get('type') == 'introduction' else shorten_for_speech(response)
-            if spoken != response:
-                print(f"✂️ Вслух короче: {len(response)} знаков -> {len(spoken)}")
-
-            await _play_voice_response(spoken, generation)
-        except Exception as e:
-            print(f"⚠️ Не удалось озвучить ответ: {e}")
+            await respond(
+                process=lambda: scott_ai.process_command(text, by_voice=True),
+                play=lambda spoken: _play_voice_response(spoken, generation),
+                current=lambda: _voice_response_current(generation),
+                shorten=shorten_for_speech,
+                cue=lambda: _say_thinking(generation),
+                cue_after=THINKING_CUE_AFTER_SECONDS,
+            )
         finally:
             if listening is not None and _voice_response_current(generation):
                 listening._answered_at = time.time()

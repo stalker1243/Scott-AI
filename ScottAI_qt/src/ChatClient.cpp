@@ -10,10 +10,19 @@
 #include <QSaveFile>
 #include <QRegularExpression>
 #include <QMimeDatabase>
+#include <memory>
 
 namespace {
 bool chatIdValid(const QString &id) { return QRegularExpression("^[a-f0-9]{32}$").match(id).hasMatch(); }
 constexpr qint64 MaxBytes = 20 * 1024 * 1024;
+struct ChatTransfer {
+    QByteArray buffer;
+    QString text;
+    QJsonObject result;
+    QVariantList original;
+    bool streaming = false, terminal = false, invalid = false, shown = false;
+    qint64 bytes = 0;
+};
 }
 
 bool BackendClient::acceptChat(const QJsonObject &chat) {
@@ -153,7 +162,7 @@ void BackendClient::sendChatMessage(const QString &text, bool image, bool comman
     }
     auto *multipart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
     auto field = [multipart](const QByteArray &name, const QByteArray &value) { QHttpPart part; part.setHeader(QNetworkRequest::ContentDispositionHeader, "form-data; name=\"" + name + "\""); part.setBody(value); multipart->append(part); };
-    field("question", question.toUtf8()); field("mode", image ? "image" : command ? "command" : "chat");
+    field("question", question.toUtf8()); field("mode", image ? "image" : command ? "command" : "chat"); field("stream", "true");
     qint64 total = 0;
     for (const auto &entry : m_attachments) {
         const auto item = entry.toMap(); auto *file = new QFile(item.value("path").toString(), multipart);
@@ -164,21 +173,70 @@ void BackendClient::sendChatMessage(const QString &text, bool image, bool comman
     }
     m_busy = true; m_error.clear(); m_chatNotice.clear(); emit stateChanged();
     auto url = m_base; url.setPath("/chats/" + m_chatId + "/messages"); QNetworkRequest req(url);
+    req.setRawHeader("Accept", "text/event-stream, application/json");
     // A plain chat request may generate an image after backend classification.
     req.setTransferTimeout(command ? 150000 : 240000); req.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     auto *reply = m_network.post(req, multipart); multipart->setParent(reply);
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
-        m_busy = false; QJsonParseError parse; const auto data = QJsonDocument::fromJson(reply->readAll(), &parse).object();
-        if (reply->error() == QNetworkReply::NoError && parse.error == QJsonParseError::NoError && data.value("success").toBool() && acceptChat(data.value("chat").toObject())) {
+    m_chatReply = reply;
+    auto state = std::make_shared<ChatTransfer>(); state->original = m_messages;
+    auto *paint = new QTimer(reply); paint->setSingleShot(true); paint->setInterval(40);
+    connect(paint, &QTimer::timeout, this, [this, state, question] {
+        if (state->invalid || state->terminal || state->text.isEmpty()) return;
+        if (!state->shown) {
+            m_messages.append(QVariantMap{{"role", "user"}, {"text", question}, {"attachments", QVariantList{}}});
+            m_messages.append(QVariantMap{{"role", "assistant"}, {"text", QString{}}, {"attachments", QVariantList{}}});
+            state->shown = true;
+        }
+        auto row = m_messages.last().toMap(); row["text"] = state->text; m_messages.last() = row;
+        emit messagesChanged();
+    });
+    auto consume = [this, reply, state, paint] {
+        if (!reply->header(QNetworkRequest::ContentTypeHeader).toString().startsWith("text/event-stream")) return;
+        state->streaming = true;
+        const auto bytes = reply->readAll(); state->bytes += bytes.size(); state->buffer += bytes;
+        if (state->bytes > 32 * 1024 * 1024 || state->buffer.size() > 8 * 1024 * 1024) { state->invalid = true; reply->abort(); return; }
+        state->buffer.replace("\r\n", "\n");
+        qsizetype split;
+        while ((split = state->buffer.indexOf("\n\n")) >= 0) {
+            const auto frame = state->buffer.left(split); state->buffer.remove(0, split + 2);
+            QByteArray kind, data;
+            for (const auto &line : frame.split('\n')) {
+                if (line.startsWith("event:")) kind = line.mid(6).trimmed();
+                else if (line.startsWith("data:")) { if (!data.isEmpty()) data += '\n'; data += line.mid(5).trimmed(); }
+            }
+            if (data.isEmpty()) continue; // Heartbeat/comment.
+            QJsonParseError parse; const auto value = QJsonDocument::fromJson(data, &parse);
+            if (state->terminal || parse.error != QJsonParseError::NoError || !value.isObject()) { state->invalid = true; reply->abort(); return; }
+            const auto object = value.object();
+            if (kind == "delta" && object.value("text").isString()) {
+                state->text += object.value("text").toString();
+                if (state->text.size() > 128 * 1024) { state->invalid = true; reply->abort(); return; }
+                if (!paint->isActive()) paint->start();
+            } else if (kind == "done" || kind == "error") {
+                state->result = object; state->terminal = true; paint->stop();
+            } else { state->invalid = true; reply->abort(); return; }
+        }
+    };
+    connect(reply, &QNetworkReply::readyRead, this, consume);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, state, consume] {
+        consume(); m_chatReply.clear(); m_busy = false;
+        QJsonParseError parse; const auto data = state->streaming ? state->result : QJsonDocument::fromJson(reply->readAll(), &parse).object();
+        if (reply->error() == QNetworkReply::NoError && !state->invalid && (!state->streaming || state->terminal) && parse.error == QJsonParseError::NoError && data.value("success").toBool() && data.value("chat").toObject().value("id").toString() == m_chatId && acceptChat(data.value("chat").toObject())) {
             m_attachments.clear(); emit attachmentsChanged(); QStringList notes;
             for (const auto &note : data.value("notes").toArray()) notes.append(note.toString()); m_chatNotice = notes.join("\n");
             emit chatSent(); refreshChats(); refreshBrowser();
         } else {
-            m_error = apiErrorMessage(data);
+            if (state->shown) { m_messages = state->original; emit messagesChanged(); }
+            m_error = reply->property("scottUserCancelled").toBool()
+                ? QStringLiteral("Ответ остановлен. Проверьте историю перед повторной отправкой.") : apiErrorMessage(data);
             if(m_error.isEmpty())m_error=backendNetworkError(reply->error());
         }
         reply->deleteLater(); emit stateChanged(); emit chatsChanged();
     });
+}
+
+void BackendClient::cancelChatMessage() {
+    if (m_chatReply) { m_chatReply->setProperty("scottUserCancelled", true); m_chatReply->abort(); }
 }
 
 void BackendClient::saveChatImage(const QString &value) {

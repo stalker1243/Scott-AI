@@ -342,13 +342,18 @@ def set_auto_capture(enabled):
 
 
 def observe(text):
-    if not isinstance(text, str) or not settings()['auto_capture']:
+    if not isinstance(text, str):
         return []
     try:
         from .memory_facts import extract
     except ImportError:
         from memory_facts import extract
-    return [add(fact['text'], fact['kind'], source='conversation', key=fact['key']) for fact in extract(text[:20000])]
+    facts = extract(text[:20000])
+    # Most commands/questions contain no new fact. Avoid opening settings/storage
+    # on that path; explicit facts still finish saving before their acknowledgement.
+    if not facts or not settings()['auto_capture']:
+        return []
+    return [add(fact['text'], fact['kind'], source='conversation', key=fact['key']) for fact in facts]
 
 
 def _text_hash(text):
@@ -379,9 +384,9 @@ def _suppress_history(rows):
     _save_settings(data)
 
 
-def history_allowed(user, assistant):
+def history_allowed(user, assistant, _settings=None):
     """A deleted fact must not be silently supplied again from an old turn."""
-    data = settings()
+    data = settings() if _settings is None else _settings
     if data.get('unavailable'):
         return False
     if not data['suppressed_keys'] and not data['suppressed_hashes']:

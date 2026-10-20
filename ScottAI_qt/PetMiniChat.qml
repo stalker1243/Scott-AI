@@ -94,9 +94,9 @@ Popup {
                 }
                 ToolButton {
                     objectName: "petChatSend"; implicitWidth: 30; implicitHeight: 32
-                    enabled: !!chat.controller && !chat.busy && !!input.text.trim(); onClicked: chat.submit()
-                    Accessible.name: qsTranslate("Launcher", "Отправить")
-                    contentItem: Text { text: chat.busy ? "…" : "↑"; color: parent.enabled ? chat.theme.accent : chat.theme.muted; font.pixelSize: 23; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                    enabled: !!chat.controller && (chat.backend.busy || !chat.busy && !!input.text.trim()); onClicked: chat.backend.busy ? chat.backend.cancelChatMessage() : chat.submit()
+                    Accessible.name: chat.backend && chat.backend.busy ? qsTranslate("Launcher", "Остановить") : qsTranslate("Launcher", "Отправить")
+                    contentItem: Text { text: chat.backend && chat.backend.busy ? "■" : chat.busy ? "…" : "↑"; color: parent.enabled ? chat.theme.accent : chat.theme.muted; font.pixelSize: 23; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                 }
             }
         }

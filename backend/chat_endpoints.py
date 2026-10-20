@@ -14,7 +14,7 @@ try:
     from . import bounded_work
 except ImportError:
     import bounded_work
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -177,6 +177,12 @@ async def clear_chat(chat_id: str):
 
 def complete(ia, messages, instructions):
     try:
+        from . import request_flow, model_stream
+    except ImportError:
+        import request_flow, model_stream
+    if request_flow.current() is not None:
+        return model_stream.complete(ia, messages, instructions)
+    try:
         from .model_requests import openai_options, anthropic_options, deepseek_options
     except ImportError:
         from model_requests import openai_options, anthropic_options, deepseek_options
@@ -250,85 +256,90 @@ def send(chat_id, question, mode, files, *, reserved=False, cancelled=None):
     ia = get_intelligent_answerer()
     if not ia or not ia.enabled:
         raise ValueError('Выберите и настройте модель на вкладке «Модели»')
-    with ia._state_lock():
-        if cancelled is not None and cancelled.is_set():
-            raise HTTPException(504, 'Время ожидания модели истекло. Сообщение не сохранено.')
-        caps = model_capabilities.capabilities(ia.api_provider, ia.model, refresh=True)
-        media, notes, text_parts, content = [], [], [], []
-        if mode == 'image':
-            if not caps['image_generation'] or ia.api_provider not in {'OpenAI', 'OpenRouter'}:
-                raise ValueError('Выбранная модель не поддерживает генерацию изображений')
-            if files:
-                raise ValueError('Для генерации сейчас нужен текст без вложений')
-            if not question:
-                raise ValueError('Опишите изображение, которое нужно создать')
-            media = [('assistant', 'Scott-image.png', 'image/png', generate(ia, question))]
-            answer, saved_content = 'Изображение готово.', question
-        else:
-            if not caps['text']:
-                raise ValueError('Эта модель создаёт изображения. Напишите «Нарисуй…» или выберите разговорную модель')
-            for name, data in files:
-                suffix = Path(name).suffix.lower()
-                if suffix in VIDEO_TYPES:
-                    if not caps['video'] or ia.api_provider != 'OpenRouter':
-                        raise ValueError('Выбранная модель не анализирует видео')
-                    content.append(dict(type='video_url', video_url=dict(url='data:' + VIDEO_TYPES[suffix] + ';base64,' + base64.b64encode(data).decode('ascii'))))
-                    mime = VIDEO_TYPES[suffix]
+    try:
+        from . import request_flow
+    except ImportError:
+        import request_flow
+    ia = request_flow.provider_snapshot(ia)
+    if cancelled is not None and cancelled.is_set():
+        raise HTTPException(504, 'Время ожидания модели истекло. Сообщение не сохранено.')
+    caps = model_capabilities.capabilities(ia.api_provider, ia.model, refresh='background')
+    media, notes, text_parts, content = [], [], [], []
+    if mode == 'image':
+        if not caps['image_generation'] or ia.api_provider not in {'OpenAI', 'OpenRouter'}:
+            raise ValueError('Выбранная модель не поддерживает генерацию изображений')
+        if files:
+            raise ValueError('Для генерации сейчас нужен текст без вложений')
+        if not question:
+            raise ValueError('Опишите изображение, которое нужно создать')
+        media = [('assistant', 'Scott-image.png', 'image/png', generate(ia, question))]
+        answer, saved_content = 'Изображение готово.', question
+    else:
+        if not caps['text']:
+            raise ValueError('Эта модель создаёт изображения. Напишите «Нарисуй…» или выберите разговорную модель')
+        for name, data in files:
+            suffix = Path(name).suffix.lower()
+            if suffix in VIDEO_TYPES:
+                if not caps['video'] or ia.api_provider != 'OpenRouter':
+                    raise ValueError('Выбранная модель не анализирует видео')
+                content.append(dict(type='video_url', video_url=dict(url='data:' + VIDEO_TYPES[suffix] + ';base64,' + base64.b64encode(data).decode('ascii'))))
+                mime = VIDEO_TYPES[suffix]
+            else:
+                if suffix in attachments.IMAGE_TYPES:
+                    try:
+                        with Image.open(io.BytesIO(data)) as image:
+                            if image.width * image.height > 32_000_000:
+                                raise ValueError('Слишком большое разрешение изображения')
+                            image.verify()
+                    except Exception as error:
+                        raise ValueError('Не удалось прочитать изображение: файл повреждён или слишком большой') from error
+                attachment = attachments.read(name, data)
+                if not attachment.ok:
+                    raise ValueError(attachment.error)
+                if attachment.kind == 'image':
+                    if not caps['images']:
+                        raise ValueError('Поддержка изображений для этой модели не подтверждена. Выберите модель со значком «Фото»')
+                    content.append(dict(type='image_url', image_url=dict(url='data:' + attachment.media_type + ';base64,' + attachment.image_base64)))
+                    mime, data = attachment.media_type, base64.b64decode(attachment.image_base64)
                 else:
-                    if suffix in attachments.IMAGE_TYPES:
-                        try:
-                            with Image.open(io.BytesIO(data)) as image:
-                                if image.width * image.height > 32_000_000:
-                                    raise ValueError('Слишком большое разрешение изображения')
-                                image.verify()
-                        except Exception as error:
-                            raise ValueError('Не удалось прочитать изображение: файл повреждён или слишком большой') from error
-                    attachment = attachments.read(name, data)
-                    if not attachment.ok:
-                        raise ValueError(attachment.error)
-                    if attachment.kind == 'image':
-                        if not caps['images']:
-                            raise ValueError('Поддержка изображений для этой модели не подтверждена. Выберите модель со значком «Фото»')
-                        content.append(dict(type='image_url', image_url=dict(url='data:' + attachment.media_type + ';base64,' + attachment.image_base64)))
-                        mime, data = attachment.media_type, base64.b64decode(attachment.image_base64)
-                    else:
-                        if not caps['documents']:
-                            raise ValueError('Выбранная модель не анализирует текст документов')
-                        text_parts.append(attachments.as_question(attachment, ''))
-                        mime = 'application/octet-stream'
-                    if attachment.note:
-                        notes.append(name + ': ' + attachment.note)
-                media.append(('user', name, mime, data))
-            question = question or ('Проанализируй вложения и кратко объясни содержимое.' if files else '')
-            if not question:
-                raise ValueError('Введите сообщение или прикрепите файл')
-            prompt = question + ('\n\n' + '\n\n'.join(text_parts) if text_parts else '')
-            if len(prompt) > 30000:
-                raise ValueError('Слишком много текста во вложениях. Отправьте документы по отдельности')
-            saved_content = prompt + ''.join('\n[Вложение: ' + name + ']' for name, _ in files)
-            content = [dict(type='text', text=prompt)] + content if content else prompt
-            has_new_image = isinstance(content, list) and any(part['type'] == 'image_url' for part in content)
-            image_count = sum(part['type'] == 'image_url' for part in content) if isinstance(content, list) else 0
-            if image_count > caps.get('max_images', MAX_FILES):
-                raise ValueError(f"Эта модель принимает до {caps['max_images']} изображений за один запрос")
-            history = database.context(chat_id, images=caps['images'] and not has_new_image)
-            archive = getattr(getattr(ia, 'memory', None), 'archive', None)
-            recalled = []
-            if callable(getattr(archive, 'recall', None)):
-                recent = snapshot['messages'][-20:]
-                excluded = [(u['text'], a['text']) for u, a in zip(recent[::2], recent[1::2])]
-                try:
-                    recalled = archive.recall(question, excluded)
-                except Exception:
-                    pass
-            instructions = ia.instructions(query=question) + '\nПримеры кода оформляй отдельными блоками Markdown с тройными обратными кавычками и именем языка. Объяснение пиши вне блока. Не утверждай, что запустил код или выполнил действие на компьютере: этот ответ создаёт разговорная модель.'
-            answer = complete(ia, recalled + history + [dict(role='user', content=content)], instructions)
-            if not answer:
-                raise ValueError('Модель вернула пустой ответ. Попробуйте ещё раз')
-        model_label = ia.api_provider + ' · ' + ia.model
-    # Release the provider lock before acquiring the history lock.
-    # Network work holds no history lock.
+                    if not caps['documents']:
+                        raise ValueError('Выбранная модель не анализирует текст документов')
+                    text_parts.append(attachments.as_question(attachment, ''))
+                    mime = 'application/octet-stream'
+                if attachment.note:
+                    notes.append(name + ': ' + attachment.note)
+            media.append(('user', name, mime, data))
+        question = question or ('Проанализируй вложения и кратко объясни содержимое.' if files else '')
+        if not question:
+            raise ValueError('Введите сообщение или прикрепите файл')
+        prompt = question + ('\n\n' + '\n\n'.join(text_parts) if text_parts else '')
+        if len(prompt) > 30000:
+            raise ValueError('Слишком много текста во вложениях. Отправьте документы по отдельности')
+        saved_content = prompt + ''.join('\n[Вложение: ' + name + ']' for name, _ in files)
+        content = [dict(type='text', text=prompt)] + content if content else prompt
+        has_new_image = isinstance(content, list) and any(part['type'] == 'image_url' for part in content)
+        image_count = sum(part['type'] == 'image_url' for part in content) if isinstance(content, list) else 0
+        if image_count > caps.get('max_images', MAX_FILES):
+            raise ValueError(f"Эта модель принимает до {caps['max_images']} изображений за один запрос")
+        history = database.context(chat_id, images=caps['images'] and not has_new_image)
+        archive = getattr(getattr(ia, 'memory', None), 'archive', None)
+        recalled = []
+        if callable(getattr(archive, 'recall', None)):
+            recent = snapshot['messages'][-20:]
+            excluded = [(u['text'], a['text']) for u, a in zip(recent[::2], recent[1::2])]
+            try:
+                recalled = archive.recall(question, excluded)
+            except Exception:
+                pass
+        instructions = ia.instructions(query=question) + '\nПримеры кода оформляй отдельными блоками Markdown с тройными обратными кавычками и именем языка. Объяснение пиши вне блока. Не утверждай, что запустил код или выполнил действие на компьютере: этот ответ создаёт разговорная модель.'
+        answer = complete(ia, recalled + history + [dict(role='user', content=content)], instructions)
+        if not answer:
+            raise ValueError('Модель вернула пустой ответ. Попробуйте ещё раз')
+    model_label = ia.api_provider + ' · ' + ia.model
+    # Network work holds neither provider-settings nor history lock.
     def commit():
+        if request_flow.current() is not None:
+            request_flow.current().check()
         if cancelled is not None and cancelled.is_set():
             raise HTTPException(504, 'Время ожидания модели истекло. Сообщение не сохранено.')
         return database.commit_turn(chat_id, question, saved_content, answer, model_label, media)
@@ -346,8 +357,18 @@ def send(chat_id, question, mode, files, *, reserved=False, cancelled=None):
 
 
 @router.post('/{chat_id}/messages')
-async def send_message(chat_id: str, question: str = Form(''), mode: str = Form('chat'),
-                       files: Optional[List[UploadFile]] = File(None)):
+async def send_message(chat_id: str, request: Request, question: str = Form(''), mode: str = Form('chat'),
+                       files: Optional[List[UploadFile]] = File(None), stream: bool = Form(False)):
+    if stream:
+        try:
+            from . import text_stream
+        except ImportError:
+            import text_stream
+        return text_stream.response(lambda: _send_message(chat_id, question, mode, files), request.scope)
+    return await _send_message(chat_id, question, mode, files)
+
+
+async def _send_message(chat_id, question, mode, files):
     if len(question) > 12000 or mode not in {'chat', 'image', 'command'}:
         raise HTTPException(400, 'Проверьте сообщение и режим отправки')
     files = files or []
@@ -384,7 +405,12 @@ async def send_message(chat_id: str, question: str = Form(''), mode: str = Form(
         introduction = await asyncio.to_thread(operation, introduce)
         if introduction is not None:
             return introduction
-    cancelled = threading.Event()
+    try:
+        from . import request_flow
+    except ImportError:
+        import request_flow
+    flow = request_flow.current()
+    cancelled = flow.cancelled if flow is not None else threading.Event()
     def work(reserved=False):
         try:
             try:

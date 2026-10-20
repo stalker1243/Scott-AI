@@ -3504,5 +3504,9 @@ Dies ist nur einmal nötig.</translation>
       <source>Недостаточно места на диске временных файлов: свободно %1 ГиБ, для новой подготовки нужно около %2 ГиБ. Освободите место и повторите подготовку.</source>
       <translation>Nicht genug Speicherplatz auf dem Laufwerk für temporäre Dateien: %1 GiB frei; für eine neue Einrichtung werden etwa %2 GiB benötigt. Gib Speicherplatz frei und versuche es erneut.</translation>
     </message>
+    <message>
+      <source>Ответ остановлен. Проверьте историю перед повторной отправкой.</source>
+      <translation>Antwort angehalten. Prüfe den Verlauf, bevor du erneut sendest.</translation>
+    </message>
   </context>
 </TS>

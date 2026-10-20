@@ -468,13 +468,14 @@ class ConversationMemory:
         with self._lock:
             messages = [{"role": msg["role"], "content": msg["content"]} for msg in self.conversations]
         try:
-            from .memories import history_allowed
+            from .memories import history_allowed, settings
         except ImportError:
-            from memories import history_allowed
+            from memories import history_allowed, settings
+        filtering = settings()
         pending = messages[-1:] if messages and messages[-1]['role'] == 'user' else []
         completed = messages[:-1] if pending else messages
         messages = [message for i in range(0, len(completed) - 1, 2)
-                    if history_allowed(completed[i]['content'], completed[i + 1]['content'])
+                    if history_allowed(completed[i]['content'], completed[i + 1]['content'], filtering)
                     for message in completed[i:i + 2]] + pending
         if max_chars is None:
             return messages
@@ -1143,10 +1144,23 @@ class IntelligentAnswerer:
         return self.__dict__.setdefault("_answer_lock", threading.RLock())
 
     def answer(self, text: str, use_memory: bool = True, brief: bool = False) -> Tuple[str, bool]:
-        # Chat and voice run on worker threads: preserve complete conversation
-        # turns and prevent provider changes halfway through a request.
-        with self._state_lock():
-            return self._answer_locked(text, use_memory, brief)
+        try:
+            from . import request_flow
+        except ImportError:
+            import request_flow
+        # Only voice's shared conversation is serialized. Independent named chats
+        # take provider snapshots and never wait for its network request.
+        lock = self.__dict__.setdefault('_conversation_lock', threading.RLock())
+        while not lock.acquire(timeout=.1):
+            if request_flow.current() is not None:
+                request_flow.current().check()
+        try:
+            if not self.enabled and getattr(self, 'pending_config', None):
+                self.retry_pending_connection()
+            snapshot = request_flow.provider_snapshot(self)
+            return snapshot._answer_locked(text, use_memory, brief)
+        finally:
+            lock.release()
 
     def _answer_locked(self, text: str, use_memory: bool = True, brief: bool = False) -> Tuple[str, bool]:
         """
@@ -1190,8 +1204,15 @@ class IntelligentAnswerer:
             else:
                 messages.append({"role": "user", "content": text})
             
+            try:
+                from . import request_flow, model_stream
+            except ImportError:
+                import request_flow, model_stream
+            if request_flow.current() is not None:
+                answer = model_stream.complete(self, messages[1:], instructions, max_tokens, self.temperature)
+                request_flow.current().check()
             # Используем DeepSeek если доступен
-            if self.api_provider == "DeepSeek":
+            elif self.api_provider == "DeepSeek":
                 print(f"🔷 DeepSeek API запрос ({self.model})...")
                 response = requests.post(
                     "https://api.deepseek.com/chat/completions",

@@ -3504,5 +3504,9 @@ You only need to do this once.</translation>
       <source>Недостаточно места на диске временных файлов: свободно %1 ГиБ, для новой подготовки нужно около %2 ГиБ. Освободите место и повторите подготовку.</source>
       <translation>Not enough space on the temporary drive: %1 GiB available; a new setup needs about %2 GiB. Free some space and retry setup.</translation>
     </message>
+    <message>
+      <source>Ответ остановлен. Проверьте историю перед повторной отправкой.</source>
+      <translation>Response stopped. Check history before sending again.</translation>
+    </message>
   </context>
 </TS>

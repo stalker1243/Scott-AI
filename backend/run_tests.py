@@ -44,7 +44,7 @@ def main():
                      'installer/linux/run.sh',
                      'installer/linux/python-environment.sh',
                      'VERSION.json', 'README.md', '.env.example', 'docs/installation.md', 'docs/models.md',
-                     'docs/voice-check.md', 'docs/desktop-control.md', 'docs/interface.md', 'docs/security.md',
+                     'docs/voice-check.md', 'docs/desktop-control.md', 'docs/interface.md', 'docs/security.md', 'docs/performance.md',
                      'assets/brand/scott-logo.png',
                      'assets/brand/scott-logo-light.png',
                      'experiments/voice_design/stream_voice.py',

@@ -1,6 +1,7 @@
 #pragma once
 #include <QObject>
 #include <QNetworkAccessManager>
+#include <QPointer>
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
@@ -162,6 +163,7 @@ public:
     Q_INVOKABLE void stageAttachments(const QList<QUrl> &urls);
     Q_INVOKABLE void removeAttachment(int index);
     Q_INVOKABLE void sendChatMessage(const QString &text, bool image = false, bool command = false);
+    Q_INVOKABLE void cancelChatMessage();
     Q_INVOKABLE void saveChatImage(const QString &url);
     Q_INVOKABLE void startBackend();
     Q_INVOKABLE void stopBackend();
@@ -269,6 +271,7 @@ private:
     QString m_chatId, m_chatTitle, m_chatNotice;
     bool m_chatsBusy = false, m_chatsReady = false;
     quint64 m_chatCapabilitiesGeneration = 0;
+    QPointer<QNetworkReply> m_chatReply;
     QVariantList m_memories, m_memoryKinds;
     bool m_memoryBusy = false;
     bool m_autoMemoryEnabled = true, m_memorySettingsAvailable = false;

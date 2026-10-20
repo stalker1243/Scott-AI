@@ -578,6 +578,12 @@ class ScottVoice:
                 path=join_wavs([block.path for block in ready],Path(directory.name)/'initial.wav')
             check_current()
             stream_play=getattr(player,'play_stream',None)
+            try:
+                from .request_flow import current as current_flow
+            except ImportError:
+                from request_flow import current as current_flow
+            if current_flow() is not None:
+                current_flow().mark('first_audio_ready')
             use_stream=callable(stream_play) and (started or not last)
             started=True
             try:

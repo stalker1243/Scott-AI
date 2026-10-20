@@ -1,0 +1,80 @@
+"""Start one complete sentence while the model produces the rest of its reply."""
+import asyncio
+import re
+try:
+    from . import request_flow
+except ImportError:
+    import request_flow
+
+async def respond(process, play, current, shorten, cue, cue_after):
+    loop = asyncio.get_running_loop()
+    offered = asyncio.Event()
+    prefix = ''
+    received = ''
+    early = None
+    async def speak(text):
+        with request_flow.use(flow):
+            return await play(text)
+    async def first(text):
+        flow.mark('first_sentence_ready')
+        return await speak(text)
+    def accept(text):
+        nonlocal early
+        if early is None and current():
+            early = asyncio.create_task(first(text))
+            offered.set()
+    def delta(text):
+        nonlocal received, prefix
+        if prefix or len(received) > 1024:
+            return
+        received += text
+        # Wait for a following word, so a decimal/version/abbreviation is not
+        # spoken as a completed sentence. Code stays on the complete-reply path.
+        boundary = re.search(r'(?<=[.!?…])\s+(?=[А-ЯЁA-Z«])', received)
+        if boundary is not None:
+            candidate = received[:boundary.start()].strip()
+            if 12 <= len(candidate) <= 400 and not any(mark in candidate for mark in ('`', '#', '\n', '*', '|')):
+                prefix = candidate
+                loop.call_soon_threadsafe(accept, prefix)
+    flow = request_flow.Flow(delta, kind='voice', valid=current)
+    async def produce():
+        with request_flow.use(flow):
+            return await process()
+    producer = asyncio.create_task(produce())
+    waiting = asyncio.create_task(offered.wait())
+    try:
+        done, _ = await asyncio.wait({producer, waiting}, timeout=cue_after, return_when=asyncio.FIRST_COMPLETED)
+        if not done and current():
+            await cue()
+        result = await producer
+        # Let the last cross-thread offer reach the event loop before deciding
+        # whether the full reply has already started speaking.
+        await asyncio.sleep(0)
+        response = result.get('response', '')
+        if not response or not current():
+            return result
+        spoken = response if result.get('type') == 'introduction' else shorten(response)
+        if early is not None:
+            played = await early
+            if not played or not current():
+                return result
+            if spoken.startswith(prefix):
+                remaining = spoken[len(prefix):].strip()
+                if remaining:
+                    await speak(remaining)
+            # Partial output is never replayed or silently replaced by another
+            # model/voice. A later failure is stated separately.
+            elif response.startswith('❌'):
+                await speak('Ответ прервался. Попробуйте задать вопрос ещё раз.')
+        else:
+            await speak(spoken)
+        return result
+    finally:
+        flow.mark('total')
+        flow.cancelled.set()
+        waiting.cancel()
+        if not producer.done():
+            producer.cancel()
+        if early is not None and not early.done():
+            early.cancel()
+        await asyncio.gather(producer, waiting, *([early] if early else []), return_exceptions=True)
