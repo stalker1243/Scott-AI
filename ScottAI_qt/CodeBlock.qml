@@ -10,7 +10,7 @@ Rectangle {
     property string blockId: ""
     property bool copied: false
     objectName: blockId
-    implicitHeight: 34 + Math.min(190, Math.max(34, codeText.contentHeight + 24))
+    implicitHeight: 34 + Math.max(34, codeText.contentHeight + 24)
     radius: 8
     color: theme.elevated
     border.color: theme.line

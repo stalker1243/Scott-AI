@@ -13,17 +13,21 @@ PetChatController::PetChatController(QString profile,QUrl base,QObject *parent)
     backgroundProcess(m_imageHelper);
     connect(&m_client,&BackendClient::stateChanged,this,[this]{
         if (!m_client.error().isEmpty() && !m_client.busy() && !m_client.chatsBusy()) {
-            m_error=m_client.error();m_pending.clear();m_submitted=false;
+            const bool voiceRequested=m_voicePending;
+            m_error=m_client.error();m_pending.clear();m_submitted=false;m_voicePending=false;
+            if(voiceRequested)emit voiceFailed(m_error);
         }
         emit changed();QTimer::singleShot(0,this,&PetChatController::advance);
     });
+    connect(&m_client,&BackendClient::listeningChanged,this,[this]{emit changed();QTimer::singleShot(0,this,&PetChatController::advance);});
+    connect(&m_client,&BackendClient::listeningFailed,this,[this](const QString &error){m_error=error;emit changed();emit voiceFailed(error);});
     connect(&m_client,&BackendClient::chatsChanged,this,[this]{emit changed();});
     connect(&m_client,&BackendClient::chatSent,this,[this]{
         m_pending.clear();m_submitted=false;m_error.clear();emit changed();emit sent();
     });
     connect(&m_imageHelper,&QProcess::readyReadStandardOutput,this,[this]{AppLog::appendChunk("pet-backend.log",m_helperLog,m_imageHelper.readAllStandardOutput());});
     connect(&m_imageHelper,&QProcess::readyReadStandardError,this,[this]{AppLog::appendChunk("pet-backend.log",m_helperLog,m_imageHelper.readAllStandardError());});
-    connect(&m_imageHelper,&QProcess::errorOccurred,this,[this]{m_error=QStringLiteral("Не удалось запустить фоновую службу Scott.");m_pending.clear();emit changed();});
+    connect(&m_imageHelper,&QProcess::errorOccurred,this,[this]{m_error=QStringLiteral("Не удалось запустить фоновую службу Scott.");m_pending.clear();m_voicePending=false;emit changed();});
     connect(&m_imageHelper,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),this,[this](int code){
         if(code && !m_client.online()){m_error=QStringLiteral("Фоновая служба завершилась. Откройте установленный Scott и проверьте подготовку.");m_pending.clear();emit changed();}
     });
@@ -54,7 +58,22 @@ void PetChatController::send(const QString &text) {
     if(!m_opened)open();else if(!m_client.online())ensureBackend();
     advance();emit changed();
 }
+void PetChatController::toggleVoice() {
+    if (m_voicePending) { m_voicePending=false;emit changed();return; }
+    if (m_client.listeningBusy()) return;
+    m_error.clear();
+    if (m_client.online() && m_client.listeningReady()) {
+        if (!m_client.listeningAvailable()) {m_error=QStringLiteral("Голосовой режим недоступен. Проверьте настройки звука.");emit voiceFailed(m_error);}
+        else m_client.setListening(!m_client.listening());
+    } else { m_voicePending=true; open(); }
+    emit changed();
+}
 void PetChatController::advance() {
+    if (m_voicePending && m_client.online() && m_client.listeningReady() && !m_client.listeningBusy()) {
+        m_voicePending=false;
+        if (m_client.listeningAvailable()) m_client.setListening(true);
+        else {m_error=QStringLiteral("Голосовой режим недоступен. Проверьте настройки звука.");emit changed();emit voiceFailed(m_error);}
+    }
     if(m_pending.isEmpty()||m_submitted||!m_client.online()||m_client.busy()||m_client.chatsBusy())return;
     m_submitted=true;m_error.clear();m_client.sendChatMessage(m_pending);emit changed();
 }

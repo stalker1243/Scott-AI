@@ -88,14 +88,13 @@ def test_invalid_saved_preference_uses_immediate_playback(saved):
 
 
 def test_buffer_preference_preserves_voice_profile_and_other_choices():
-    voice_config.save_voice('eugene')
+    voice_config.CONFIG_PATH.write_text('{"voice":"eugene","fallback_voice":"eugene"}')
     voice_config.save_voice('scott-voice', profile='digital', streaming=True, acceleration=True, buffer_mode='4s')
-    voice_config.save_voice('eugene')
     voice_config.save_voice('scott-voice')
     assert voice_config.get_scott_buffer() == '4s'
     assert voice_config.get_scott_profile() == 'digital'
     assert voice_config.get_scott_streaming() and voice_config.get_scott_acceleration()
-    assert voice_config.get_fallback_voice('demo', ['demo', 'eugene']) == 'eugene'
+    assert 'fallback_voice' not in json.loads(voice_config.CONFIG_PATH.read_text())
 
 
 @pytest.mark.parametrize('mode', ['2s', '4s', 'complete'])
@@ -205,7 +204,8 @@ def test_api_rejects_unknown_buffer_and_preserves_settings(main_module, integrat
             assert (await client.post('/voice/select', json={'voice':'scott-voice', 'buffer':'4s'})).status_code == 200
             assert integrated.engine.generation > generation
             catalog = (await client.get('/voice/available')).json()
-            assert catalog['scott_buffer'] == '4s' and len(catalog['scott_buffers']) == 4
+            assert catalog['scott_buffer'] == '4s' and len(catalog['scott_buffers']) == 5
+            assert [item['id'] for item in catalog['scott_buffers']] == ['immediate', '1s', '2s', '4s', 'complete']
             assert voice_config.get_scott_profile() == 'restrained' and voice_config.get_scott_streaming()
             assert (await client.post('/voice/select', json={'voice':'scott-voice', 'buffer':'immediate'})).status_code == 200
     asyncio.run(run())

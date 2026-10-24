@@ -15,7 +15,7 @@ builder=importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
 
 
 def test_developer_requirements_match_the_qualified_headless_sdk():
-    lines=(ROOT/'experiments/voice_design/requirements.txt').read_text(encoding='utf-8').splitlines()
+    lines=(ROOT/'voice/runtime/requirements.txt').read_text(encoding='utf-8').splitlines()
     assert {line for line in lines if line and not line.startswith('#')}==set(sdk.REQUIREMENTS)
 
 

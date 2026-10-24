@@ -61,6 +61,10 @@ for line in sys.stdin:
 '''
 
 
+FAKE_WORKER=FAKE_WORKER.replace('from scott_voice_process import',
+    'sys.path.insert(0,'+repr(str(Path(__file__).resolve().parents[1]))+')\nfrom scott_voice_process import',1)
+
+
 @pytest.fixture
 def config(tmp_path):
     model = tmp_path/'model'
@@ -350,6 +354,32 @@ def test_idle_worker_releases_resources_and_leaves_disk_cache(config):
         wait_for(lambda: not voice.status()['running'])
         hit = voice.synthesize('Готово.')
         assert hit.cached and hit.path==first.path and not voice.status()['running']
+
+
+@pytest.mark.parametrize('next_request',['prepare','synthesize'])
+def test_delayed_old_idle_callback_cannot_evict_a_refreshed_worker(config,monkeypatch,next_request):
+    timers=[]
+    class Timer:
+        def __init__(self,interval,function,args):
+            self.function,self.args=function,args
+            timers.append(self)
+        def start(self):pass
+        def cancel(self):pass  # Simulate a callback already dispatched before cancel.
+        def fire(self):self.function(*self.args)
+    monkeypatch.setattr('scott_voice_process.threading.Timer',Timer)
+    with ScottVoiceProcess(config,idle_timeout=120) as voice:
+        voice.prepare()
+        old=timers[-1]
+        if next_request=='prepare':voice.prepare()
+        else:voice.synthesize('Новая реплика.')
+        current=timers[-1]
+        assert current is not old
+        pid=voice.status()['pid']
+        old.fire()
+        assert voice.status()['running'] and voice.status()['pid']==pid
+        assert voice.status()['model_loaded']
+        current.fire()
+        assert not voice.status()['running']  # Real idle expiry still releases resources.
 
 
 def test_reference_checksum_failure_and_invalid_request_never_start_worker(config):

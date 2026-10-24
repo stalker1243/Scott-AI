@@ -73,7 +73,43 @@ inline void startPersonalityChecks(QApplication &app,QQuickWindow *window,PetCon
             if(!shot("overview-compact-listening")){fail("compact overview capture");return;}click("appearanceButton");
         } else if(*phase==16){
             const bool captured=shot("picker-compact");if(popup->property("width").toInt()>window->width()-32||popup->property("height").toInt()>window->height()-64||!captured||qmlErrors){fail("compact personalization");return;}
-            timer->stop();qInfo("Overview microphone states, themed menus, about and Scott-only picker passed");app.exit(0);return;
+            QMetaObject::invokeMethod(popup,"close"); preview->setProperty("listening",false);
+            QMetaObject::invokeMethod(preview,"setScottAvailable",Q_ARG(QVariant,false));
+        } else if(*phase==17){
+            if(!voice->isEnabled()||voice->property("text").toString()!=QStringLiteral("Установить Scott Voice")||!click("overviewVoiceButton")){fail("first voice installation entry");return;}
+        } else if(*phase==18){
+            if(voice->property("text").toString()!=QStringLiteral("Отменить")||preview->property("listeningWrites").toInt()!=2||!shot("overview-installing-voice")){fail("install must not open microphone");return;}
+            click("overviewVoiceButton");
+        } else if(*phase==19){
+            if(voice->property("text").toString()!=QStringLiteral("Установить Scott Voice")){fail("install cancellation");return;}
+            QMetaObject::invokeMethod(preview,"setScottAvailable",Q_ARG(QVariant,true));
+            preview->setProperty("deferVoiceWarmup",true); QMetaObject::invokeMethod(preview,"releaseScottVoice");
+            click("overviewVoiceButton");
+        } else if(*phase==20){
+            if(preview->property("voiceWarmRequests").toInt()!=2||preview->property("listeningWrites").toInt()!=3||!preview->property("listening").toBool()||!voice->isEnabled()||voice->property("text").toString()!=QStringLiteral("Остановить микрофон")||!hint->property("text").toString().contains(QStringLiteral("включён"))||!hint->property("text").toString().contains(QStringLiteral("готовим"))||!shot("overview-warming-voice")){fail("microphone must work during model preparation");return;}
+            click("overviewVoiceButton");
+        } else if(*phase==21){
+            if(voice->property("text").toString()!=QStringLiteral("Запустить Скотта")||preview->property("listeningWrites").toInt()!=4||preview->property("listening").toBool()||preview->property("voicePreparation").toMap().value("state").toString()!=QStringLiteral("cancelled")){fail("stop must close microphone and preparation");return;}
+            click("overviewVoiceButton");
+            auto ready=preview->property("voicePreparation").toMap();ready["state"]="complete";ready["model_loaded"]=true;preview->setProperty("voicePreparation",ready);
+        } else if(*phase==22){
+            if(!preview->property("listening").toBool()||preview->property("listeningWrites").toInt()!=5){fail("explicit start during warmup");return;}
+            click("overviewVoiceButton"); QMetaObject::invokeMethod(preview,"releaseScottVoice"); click("overviewVoiceButton");
+        } else if(*phase==23){
+            preview->setProperty("online",false);
+            preview->setProperty("listening",false); // Simulate the backend ending its microphone session.
+            auto ready=preview->property("voicePreparation").toMap();ready["state"]="complete";ready["model_loaded"]=true;preview->setProperty("voicePreparation",ready);
+            preview->setProperty("online",true);
+        } else if(*phase==24){
+            if(preview->property("listening").toBool()||preview->property("listeningWrites").toInt()!=7){fail("reconnection or late completion must not reopen microphone");return;}
+            QMetaObject::invokeMethod(preview,"setScottAvailable",Q_ARG(QVariant,false));
+            auto install=preview->property("voiceInstall").toMap(); install["supported"]=false;preview->setProperty("voiceInstall",install);
+        } else if(*phase==25){
+            if(!voice->isEnabled()||voice->property("text").toString()!=QStringLiteral("Запустить Скотта")||!hint->property("text").toString().contains(QStringLiteral("недоступен"))){fail("STT remains available without supported TTS");return;}
+            click("overviewVoiceButton");
+        } else if(*phase==26){
+            if(!preview->property("listening").toBool()||preview->property("listeningWrites").toInt()!=8||preview->property("voiceWarmRequests").toInt()!=4){fail("unsupported TTS must not prevent STT or start model warmup");return;}
+            timer->stop();qInfo("Overview first voice install/warm/cancel/reconnect, microphone states, themed menus, about and Scott-only picker passed");app.exit(0);return;
         }
         ++*phase;
     });timer->start();

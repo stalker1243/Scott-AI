@@ -70,7 +70,16 @@ def test_voice_accuracy_checks_actual_target_and_settings():
 def test_voice_controls_handle_observed_name_and_verb_errors(text, action, value):
     result = decision(text)
     assert (result.kind, result.action, result.parsed.main_param) == ('action', 'voice_settings', action)
-    assert result.parsed.context['voice_value'] == value
+    if action == 'select':
+        # A retired name is still a voice-setting request, never an OS action
+        # or an LLM request; it must not revive the former provider.
+        import scott_voice, voice_commands
+        selected = result.parsed.context['voice_value']
+        assert value not in scott_voice.AVAILABLE_VOICES
+        assert voice_commands.resolve_voice(selected, scott_voice.AVAILABLE_VOICES) is None
+        assert voice_commands.execute(action, selected).startswith('❌')
+    else:
+        assert result.parsed.context['voice_value'] == value
 
 
 @pytest.mark.parametrize('text', ['что такое GitHub', 'как пользоваться YouTube', 'объясни, что такое ютуб',

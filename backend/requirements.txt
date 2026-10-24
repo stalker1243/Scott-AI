@@ -51,19 +51,8 @@ aiohttp==3.14.3
 sqlalchemy==2.0.50
 python-multipart==0.0.32
 
-# ===== СИНТЕЗ РЕЧИ =====
-# Silero (основной, локальный, на видеокарте) приходит вместе с torch ниже.
-#
-# omegaconf нужен именно ему, и это неочевидно: сам backend его не импортирует,
-# он подтягивается внутри модели при torch.hub.load. На машине разработчика он
-# оказался установлен заранее, поэтому пропажа всплыла только у человека,
-# поставившего Scott из установщика: «ModuleNotFoundError: No module named
-# omegaconf» посреди загрузки моделей.
-omegaconf==2.3.0
-# edge-tts — запасной облачный движок, на него синтез откатывается, если
-# локальный не справился. pyttsx3 — последний рубеж внутри scott_voice.
-edge-tts==7.2.7
-pyttsx3==2.99
+# Scott Voice installs its qualified SDK in an isolated component runtime.
+# Retired Silero/Edge/system voices are not installed by the base backend.
 
 # ===== РАСПОЗНАВАНИЕ РЕЧИ =====
 # main.py проверяет наличие SpeechRecognition, прежде чем принимать аудио.
@@ -86,8 +75,7 @@ sounddevice==0.5.5
 # работает по-прежнему, вычитая только свою речь, — отсюда и «необязательно».
 soundcard==0.4.6
 
-# Числа словами. Silero их не проговаривает вовсе: «Запущено 285 процессов»
-# звучит как «запущено процессов», поэтому числа разворачиваются заранее.
+# Числа словами для подготовки речи Scott Voice.
 num2words==0.5.14
 
 # ===== РАСШИРЕННЫЕ ФУНКЦИИ =====
@@ -121,8 +109,7 @@ GPUtil==1.4.0
 # AMD ROCm/HIP ставится отдельно: backend/setup_amd.py и docs/amd-support.md.
 # Обычные GPU-сборки CTranslate2 рассчитаны на NVIDIA. На AMD GPU используется
 # openai-whisper через PyTorch; faster-whisper остаётся доступен на CPU.
-# Устройство: WHISPER_DEVICE=auto|cuda|rocm|cpu,
-# SILERO_DEVICE=auto|cuda|rocm|mps|cpu.
+# Устройство распознавания: WHISPER_DEVICE=auto|cuda|rocm|cpu.
 #
 # Версия torch намеренно без верхней границы и без +cu126 в самом файле: пин с
 # суффиксом сборки не поставится с обычного индекса PyPI, а команда выше ставит

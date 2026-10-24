@@ -52,6 +52,18 @@ def test_manual_start_returns_while_model_loads_and_blocks_duplicate(control):
     assert control.manager.snapshot()['state']=='idle'
 
 
+def test_first_start_waits_for_stock_warmup_without_second_model_or_lost_click(control, monkeypatch):
+    busy = threading.Event(); busy.set()
+    original = control.engine.model_status
+    monkeypatch.setattr(control.engine, 'model_status', lambda: {'active':True,'model_loaded':False} if busy.is_set() else original())
+    state = control.manager.start()
+    assert state['state']=='running' and not control.started.wait(.1)
+    busy.clear()
+    assert control.started.wait(1)
+    control.release.set(); control.manager._thread.join(2)
+    assert control.manager.snapshot()['model_loaded'] and control.manager.snapshot()['state']=='complete'
+
+
 def test_cancel_active_prepare_and_release_complete_model(control):
     first=control.manager.start()
     assert control.started.wait(1)
@@ -128,14 +140,17 @@ def test_idle_preservation_cancels_request_waiting_before_client_entry(control,m
     assert result==['cancelled'] and client.closed and control.engine._requests==0
 
 
-def test_unavailable_or_busy_model_does_not_start_job(control,monkeypatch):
+def test_unavailable_model_rejects_and_busy_model_can_wait_or_cancel(control,monkeypatch):
     monkeypatch.setattr(engine,'inspect_installation',lambda _:'not_installed')
     with pytest.raises(ValueError): control.manager.start()
     assert control.engine._client is None
     monkeypatch.setattr(engine,'inspect_installation',lambda _:'')
     control.engine._client=control.engine.factory()
     control.engine._client.active=True
-    with pytest.raises(voice_prepare.PrepareConflict): control.manager.start()
+    state = control.manager.start()
+    assert state['state']=='running' and not control.started.wait(.1)
+    control.manager.cancel(state['id']); control.manager._thread.join(2)
+    assert control.manager.snapshot()['state']=='cancelled'
 
 
 def test_model_failure_is_reported_without_exception_payload(control,monkeypatch):

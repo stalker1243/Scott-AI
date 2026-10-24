@@ -10,12 +10,32 @@ Item {
     signal petsRequested()
     property bool voiceRequestPending: false
     property bool requestedListening: false
+    property bool monitorEnabled: true
+    onMonitorEnabledChanged: watchInput()
     readonly property bool voiceReady: client.online && client.listeningReady
     readonly property bool voiceActive: voiceReady && client.listening
+    readonly property var voiceInstall: client.voiceInstall || ({})
+    readonly property var voicePreparation: client.voicePreparation || ({})
+    readonly property var scottInfo: ((client.settings.voices || {}).voices || []).find(function(v) { return v.id === "scott-voice" }) || ({})
+    readonly property bool voiceKnown: client.voiceInstallReady && (client.settingsReady || []).indexOf("voices") >= 0
+    readonly property bool voiceMissing: voiceKnown && scottInfo.available === false
+    readonly property bool needsVoiceInstall: voiceMissing && voiceInstall.supported === true
+    readonly property bool installing: ["running", "cancelling"].indexOf(voiceInstall.state) >= 0
+    readonly property bool warming: ["running", "cancelling"].indexOf(voicePreparation.state) >= 0
+    function checkVoice() {
+        if (!visible || !client.online) return
+        if (!client.voiceInstallReady) client.refreshVoiceInstall()
+        if (!client.voicePreparationReady) client.refreshVoicePreparation()
+        if ((client.settingsReady || []).indexOf("voices") < 0 && !client.settingsBusy) client.refreshSettings()
+    }
+    function watchInput() { client.inputMonitoring = monitorEnabled && visible && client.online && client.listening }
+    onVisibleChanged: { if (visible) checkVoice(); watchInput() }
+    Component.onCompleted: { checkVoice(); watchInput() }
     onVoiceReadyChanged: if (!client.online) voiceRequestPending = false
     Connections {
         target: page.client
-        function onListeningChanged() { if (!page.client.listeningBusy) page.voiceRequestPending = false }
+        function onStateChanged() { page.checkVoice(); page.watchInput() }
+        function onListeningChanged() { page.watchInput(); if (!page.client.listeningBusy) page.voiceRequestPending = false }
     }
     ColumnLayout {
         anchors.centerIn: parent
@@ -26,6 +46,7 @@ Item {
             Layout.fillWidth: true; spacing: page.height < 560 ? 8 : 14
             OverviewSignal {
                 objectName: "overviewSignal"; theme: page.theme
+                inputLevel: page.voiceActive ? (page.client.inputLevel || 0) : 0
                 online: page.client.online; active: page.client.busy || page.voiceActive || page.client.starting
                 animate: page.visible && page.theme.motion
                 Layout.alignment: Qt.AlignHCenter
@@ -48,10 +69,17 @@ Item {
                         id: voiceButton
                         objectName: "overviewVoiceButton"
                         theme: page.theme; primary: true; implicitHeight: 40
-                        text: page.voiceRequestPending ? (page.requestedListening ? qsTranslate("Launcher", "Включаю микрофон…") : qsTranslate("Launcher", "Выключаю микрофон…")) : page.voiceActive ? qsTranslate("Launcher", "Остановить микрофон") : qsTranslate("Launcher", "Запустить Скотта")
-                        enabled: page.voiceReady && page.client.listeningAvailable && !page.client.listeningBusy
+                        text: page.installing ? qsTranslate("Launcher", "Отменить")
+                            : page.needsVoiceInstall && !page.voiceActive ? qsTranslate("Launcher", "Установить Scott Voice")
+                            : page.voiceRequestPending ? (page.requestedListening ? qsTranslate("Launcher", "Включаю микрофон…") : qsTranslate("Launcher", "Выключаю микрофон…")) : page.voiceActive ? qsTranslate("Launcher", "Остановить микрофон") : qsTranslate("Launcher", "Запустить Скотта")
+                        enabled: page.client.online && (page.installing ? page.voiceInstall.state === "running" && !!page.voiceInstall.id
+                            : page.voiceActive ? !page.client.listeningBusy
+                            : page.needsVoiceInstall ? true
+                            : page.voiceKnown && page.voiceReady && page.client.listeningAvailable && !page.client.listeningBusy && !page.client.settingsBusy)
                         onClicked: {
                             if (!enabled) return
+                            if (page.installing) { page.client.cancelScottVoice(); return }
+                            if (page.needsVoiceInstall && !page.voiceActive) { page.client.prepareScottVoice(false); return }
                             page.requestedListening = !page.client.listening
                             page.voiceRequestPending = true
                             page.client.setListening(page.requestedListening)
@@ -63,11 +91,22 @@ Item {
                 Text {
                     objectName: "overviewVoiceHint"; Layout.fillWidth: true
                     text: !page.client.online ? (page.client.starting ? qsTranslate("Launcher", "Скотт подключается…") : qsTranslate("Launcher", "Скотт не подключён. Проверьте запуск в настройках."))
-                        : !page.client.listeningReady ? qsTranslate("Launcher", "Проверяю голосовой режим…")
+                        : page.installing ? qsTranslate("Launcher", page.voiceInstall.message || "Подготовка Scott Voice")
+                        : page.warming || page.voicePreparation.state === "failed" ? (page.voiceActive ? qsTranslate("Launcher", "Микрофон включён. Начните фразу со слова «Скотт».") + "\n" : "") + qsTranslate("Launcher", page.voicePreparation.message || "Загружаем модель и готовим голос…")
+                        : page.voiceMissing ? (page.voiceInstall.supported === false
+                            ? qsTranslate("Launcher", "Scott Voice здесь недоступен. Микрофон можно использовать для команд и ответов в чате.")
+                            : qsTranslate("Launcher", page.scottInfo.reason || page.voiceInstall.message || "Scott Voice не установлен. Установите компонент в настройках голоса; чат доступен."))
+                        : !page.voiceKnown || !page.client.listeningReady ? qsTranslate("Launcher", "Проверяю голосовой режим…")
                         : !page.client.listeningAvailable ? qsTranslate("Launcher", "Голосовой режим недоступен. Проверьте настройки звука.")
                         : page.voiceActive ? qsTranslate("Launcher", "Микрофон включён. Начните фразу со слова «Скотт».")
                         : qsTranslate("Launcher", "Включите микрофон и начните фразу со слова «Скотт».")
                     wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: page.theme.muted; font.pixelSize: 12
+                }
+                ProgressBar {
+                    objectName: "overviewVoiceProgress"; Layout.fillWidth: true
+                    visible: page.installing || page.warming
+                    value: Number(page.voiceInstall.progress || 0)
+                    indeterminate: page.warming || value === 0
                 }
             }
         }

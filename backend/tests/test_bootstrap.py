@@ -16,6 +16,50 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+def test_pip_waits_for_install_stage_instead_of_counting_temp_files(boot, monkeypatch):
+    from pathlib import Path
+    from types import SimpleNamespace
+    messages, watchers = [], []
+
+    class Once:
+        def __init__(self):
+            self.calls = 0
+        def wait(self, timeout):
+            self.calls += 1
+            return self.calls > 1
+
+    def enter(watcher):
+        watchers.append(watcher)
+        return watcher
+
+    monkeypatch.setattr(boot._DownloadWatcher, '__enter__', enter)
+    monkeypatch.setattr(boot._DownloadWatcher, '__exit__', lambda *args: None)
+    monkeypatch.setattr(boot.subprocess, 'run', lambda *args, **kwargs:
+                        SimpleNamespace(stdout='', returncode=0))
+
+    def stream(command, consume, timeout, **kwargs):
+        # An earlier package already occupies more space than the next download.
+        (Path(kwargs['env']['TEMP'])/'earlier.whl').write_bytes(b'x'*(1024*1024))
+        watcher = watchers[-1]
+        for line in ('Downloading tiny-1.0.whl (100 kB)', 'Using cached tiny-1.0.whl (100 kB)'):
+            consume(line)
+            watcher._stop = Once()
+            watcher._loop()
+            assert messages[-1][0] == 'Ставлю библиотеки…'
+            assert messages[-1][1] == .2
+        consume('Installing collected packages: tiny')
+        watcher._stop = Once()
+        watcher._loop()
+        assert messages[-1][0] == 'Распаковываю и устанавливаю…'
+        assert .2 < messages[-1][1] < .5
+        return 0
+
+    monkeypatch.setattr(boot, '_stream_process', stream)
+    ok, tail = boot._run_pip('fixture-python', [], lambda text,fraction: messages.append((text,fraction)),
+                            'Ставлю библиотеки…', .2, .3)
+    assert ok and 'Installing collected packages: tiny' in tail
+
+
 @pytest.fixture
 def boot():
     import bootstrap
@@ -189,7 +233,8 @@ def test_ready_check_requires_all_pieces(boot, monkeypatch):
 
 def test_prepare_skips_when_ready(boot, monkeypatch):
     """Если всё стоит, подготовка не повторяется: качать 4 ГБ заново незачем."""
-    monkeypatch.setattr(boot, "is_ready", lambda python=None: True)
+    monkeypatch.setattr(boot, "dependencies_ready", lambda python=None: True)
+    monkeypatch.setattr(boot, "_models_ready_for", lambda python=None: True)
 
     messages = []
     step = boot.prepare(progress=lambda msg, frac: messages.append(msg))
@@ -279,7 +324,6 @@ def test_models_counted_as_readiness(boot, monkeypatch, tmp_path):
     target = tmp_path / 'whisper/small.pt'
     repo = tmp_path / 'silero'
     monkeypatch.setattr(model_setup, 'whisper_spec', lambda: (target, 'url', hashlib.sha256(b'valid').hexdigest()))
-    monkeypatch.setattr(model_setup, 'silero_repo', lambda: repo)
     assert boot.models_ready() is False
 
     target.parent.mkdir()
@@ -513,15 +557,8 @@ def test_old_managed_torch_is_preserved_if_upgrade_has_insufficient_space(boot, 
 
 # ==================== Зависимости моделей ====================
 
-def test_readiness_checks_silero_dependency(boot, monkeypatch):
-    """
-    Готовность проверяет и omegaconf — зависимость, которую тянет Silero.
-
-    Найдено у человека, поставившего Scott из установщика: библиотеки стояли,
-    мастер отчитался бы об успехе, а загрузка модели падала с
-    «ModuleNotFoundError: No module named omegaconf». На машине разработчика
-    пакет оказался установлен заранее, поэтому пропажа и не всплывала.
-    """
+def test_readiness_checks_core_imports_and_all_pins(boot, monkeypatch):
+    """Check core imports and every pin without requiring the retired Silero SDK."""
     checked = []
 
     class FakeResult:
@@ -537,21 +574,18 @@ def test_readiness_checks_silero_dependency(boot, monkeypatch):
     monkeypatch.setattr(boot, "models_ready", lambda: True)
 
     assert boot.is_ready("python") is True
-    assert any('omegaconf' in code for code in checked), "проверка готовности не смотрит на omegaconf"
+    assert any('import torch, whisper, fastapi' in code and 'r.specifier.contains' in code for code in checked)
+    assert all('omegaconf' not in code for code in checked)
 
 
-def test_silero_dependency_pinned_in_requirements():
-    """
-    Пара к тесту выше: пакет перечислен в requirements.txt.
-
-    Сам backend его не импортирует — он нужен внутри модели, — поэтому при
-    чистке зависимостей его легко счесть лишним и удалить.
-    """
+def test_retired_voice_dependencies_not_installed():
+    """Base preparation must not bring back unused voice engines."""
     from pathlib import Path
 
     requirements = Path(__file__).resolve().parent.parent / "requirements.txt"
     text = requirements.read_text(encoding="utf-8")
-    assert "omegaconf" in text, "omegaconf пропал из зависимостей — Silero не загрузится"
+    for package in ('omegaconf', 'edge-tts', 'pyttsx3'):
+        assert not any(line.startswith(package+'==') for line in text.splitlines())
 
 # ==================== Папка данных ====================
 

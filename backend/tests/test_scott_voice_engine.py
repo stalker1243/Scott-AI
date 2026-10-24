@@ -20,6 +20,54 @@ import voice_config
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize('device,expected',[('cuda',2),('cpu',4)])
+@pytest.mark.parametrize('value',[None,'auto',' AUTO ','','0','17','-1','2.5','invalid'])
+def test_worker_thread_defaults_and_invalid_override_are_bounded(tmp_path,monkeypatch,device,expected,value):
+    monkeypatch.setenv('SCOTT_VOICE_DEVICE',device)
+    if value is None:monkeypatch.delenv('SCOTT_VOICE_CPU_THREADS',raising=False)
+    else:monkeypatch.setenv('SCOTT_VOICE_CPU_THREADS',value)
+    config=engine_module.default_config(tmp_path)
+    assert config.device==device and config.cpu_threads==expected
+    assert config.wire()['cpu_threads']==expected
+    assert not config.rms_norm
+
+
+@pytest.mark.parametrize('value',[1,4,16])
+def test_explicit_thread_override_survives_acceleration_changes(tmp_path,monkeypatch,value):
+    monkeypatch.setenv('SCOTT_VOICE_DEVICE','cuda')
+    monkeypatch.setenv('SCOTT_VOICE_CPU_THREADS',str(value))
+    engine=engine_module.ScottVoiceEngine(engine_module.default_config(tmp_path))
+    for accelerated in (True,False):
+        engine.set_acceleration(accelerated)
+        assert engine.config.cpu_threads==value and engine.config.rms_norm is accelerated
+        assert engine_module.VoiceProcessConfig.from_wire(engine.config.wire()).cpu_threads==value
+
+
+@pytest.mark.parametrize('setting,ordinary,accelerated',[('auto',2,4),('',2,4),('1',1,1),('4',4,4),('16',16,16)])
+def test_application_switch_uses_mode_defaults_or_explicit_override(tmp_path,monkeypatch,setting,ordinary,accelerated):
+    monkeypatch.setenv('SCOTT_VOICE_DEVICE','cuda')
+    monkeypatch.setenv('SCOTT_VOICE_CPU_THREADS',setting)
+    monkeypatch.setattr(engine_module,'preferred_config',lambda:engine_module.config_at(tmp_path))
+    engine=engine_module.ScottVoiceEngine()
+    assert engine.config.cpu_threads==ordinary
+    engine.set_acceleration(True)
+    assert engine.config.rms_norm and engine.config.cpu_threads==accelerated
+    engine.set_acceleration(False)
+    assert not engine.config.rms_norm and engine.config.cpu_threads==ordinary
+
+
+def test_saved_rms_preference_keeps_four_threads_without_rewriting_settings(tmp_path,monkeypatch):
+    monkeypatch.setenv('SCOTT_VOICE_DEVICE','cuda')
+    monkeypatch.setenv('SCOTT_VOICE_CPU_THREADS','auto')
+    monkeypatch.setattr(engine_module,'default_config',lambda:engine_module.config_at(tmp_path))
+    voice_config.save_voice('scott-voice',profile='digital',acceleration=True)
+    original=voice_config.CONFIG_PATH.read_bytes()
+    config=engine_module.preferred_config()
+    assert config.rms_norm and config.cpu_threads==4
+    assert engine_module.default_config().cpu_threads==2 and not engine_module.default_config().rms_norm
+    assert voice_config.CONFIG_PATH.read_bytes()==original
+
+
 @pytest.fixture
 def installed_assets(tmp_path, monkeypatch):
     config = engine_module.default_config(tmp_path)
@@ -88,15 +136,17 @@ def integrated(tmp_path, monkeypatch):
     engine.close()
 
 
-def test_uninstalled_engine_is_visible_but_cannot_replace_saved_voice(tmp_path, monkeypatch):
+def test_uninstalled_engine_remains_default_without_starting_worker(tmp_path, monkeypatch):
     engine = engine_module.ScottVoiceEngine(engine_module.default_config(tmp_path))
     monkeypatch.setattr(engine_module, '_engine', engine)
-    scott_voice.set_current_voice('ru-RU-DmitryNeural')
+    original = b'{"voice":"ru-RU-DmitryNeural"}'
+    voice_config.CONFIG_PATH.write_bytes(original)
     info = next(v for v in scott_voice.describe_voices()['voices'] if v['id'] == 'scott-voice')
     assert (info['available'], info['local'], info['engine']) == (False, True, 'qwen')
     assert info['reason'] and info['state'] == 'unavailable'
     assert not scott_voice.set_current_voice('scott-voice')
-    assert scott_voice.get_current_voice() == 'ru-RU-DmitryNeural'
+    assert scott_voice.get_current_voice() == 'scott-voice'
+    assert voice_config.CONFIG_PATH.read_bytes() == original
     assert engine._client is None
 
 
@@ -119,15 +169,15 @@ def test_manifest_cannot_reference_files_outside_model(installed_assets):
     assert engine_module.inspect_installation(installed_assets) == 'invalid_assets'
 
 
-def test_profile_and_previous_voice_are_persisted_independently(integrated):
-    scott_voice.set_current_voice('eugene')
+def test_profile_survives_reselection_and_removes_legacy_fallback_on_save(integrated):
+    voice_config.CONFIG_PATH.write_text('{"voice":"eugene","fallback_voice":"aidar"}',encoding='utf-8')
     assert scott_voice.set_current_voice('scott-voice', 'restrained')
     assert voice_config.get_scott_profile() == 'restrained'
-    assert voice_config.get_fallback_voice('aidar', scott_voice.AVAILABLE_VOICES) == 'eugene'
-    scott_voice.set_current_voice('ru-RU-DmitryNeural')
+    assert 'fallback_voice' not in json.loads(voice_config.CONFIG_PATH.read_text())
+    assert not scott_voice.set_current_voice('ru-RU-DmitryNeural')
     scott_voice.set_current_voice('scott-voice')
     assert voice_config.get_scott_profile() == 'restrained'
-    assert voice_config.get_fallback_voice('aidar', scott_voice.AVAILABLE_VOICES) == 'ru-RU-DmitryNeural'
+    assert 'fallback_voice' not in json.loads(voice_config.CONFIG_PATH.read_text())
     assert integrated.clients == []  # Saving/selecting never synthesizes speech.
 
 
@@ -135,7 +185,7 @@ def test_profile_and_previous_voice_are_persisted_independently(integrated):
 def test_invalid_saved_profile_uses_approved_original(value):
     import json
     voice_config.CONFIG_PATH.write_text(json.dumps({'scott_profile': value}), encoding='utf-8')
-    assert voice_config.get_scott_profile() == 'natural'
+    assert voice_config.get_scott_profile() == 'scott'
 
 
 def test_optional_voice_uses_its_profile_and_keeps_legacy_processing_out(integrated):
@@ -146,36 +196,28 @@ def test_optional_voice_uses_its_profile_and_keeps_legacy_processing_out(integra
     assert integrated.engine.describe()['state'] == 'ready'
 
 
-def test_runtime_failure_uses_previous_voice_without_overwriting_choice(integrated, monkeypatch):
-    scott_voice.set_current_voice('eugene')
+def test_runtime_failure_keeps_scott_choice_and_cooldown_without_fallback(integrated, monkeypatch):
     scott_voice.set_current_voice('scott-voice')
     integrated.engine.synthesize('init')
     integrated.clients[0].failure = 'timeout'
-    fallback = []
-    monkeypatch.setattr(scott_voice, 'HAS_SILERO', True)
-    monkeypatch.setattr(scott_voice.silero_tts, 'synthesize',
-        lambda text, path, voice: fallback.append(voice) or wav(path))
-    assert integrated.voice.speak_to_file('Проверка')
-    assert fallback == ['eugene']
+    assert integrated.voice.speak_to_file('Проверка') is None
     assert scott_voice.get_current_voice() == 'scott-voice'
-    assert integrated.engine.describe()['state'] == 'fallback'
+    assert integrated.engine.describe()['state'] == 'error'
     info = next(v for v in scott_voice.describe_voices()['voices'] if v['id'] == 'scott-voice')
-    assert info['fallback_active'] is True and info['fallback_id'] == 'eugene'
-    assert info['fallback_label'] == scott_voice.AVAILABLE_VOICES['eugene']
+    assert info['error'] == 'timeout' and info['reason']
+    assert 'fallback_id' not in info
     before = len(integrated.calls)
-    assert integrated.voice.speak_to_file('Ещё одна проверка')
+    assert integrated.voice.speak_to_file('Ещё одна проверка') is None
     assert len(integrated.calls) == before  # Cooldown prevents repeated slow failures.
 
 
-def test_missing_runtime_after_restart_uses_saved_fallback(integrated, monkeypatch):
-    voice_config.save_voice('eugene')
-    voice_config.save_voice('scott-voice')
+def test_missing_runtime_after_restart_does_not_use_saved_fallback(integrated, monkeypatch):
+    original=b'{"voice":"scott-voice","fallback_voice":"eugene"}'
+    voice_config.CONFIG_PATH.write_bytes(original)
     monkeypatch.setattr(engine_module, 'inspect_installation', lambda _: 'not_installed')
-    monkeypatch.setattr(scott_voice, 'HAS_SILERO', True)
-    calls = []
-    monkeypatch.setattr(scott_voice.silero_tts, 'synthesize', lambda text, path, voice: calls.append(voice) or wav(path))
-    assert integrated.voice.speak_to_file('Тест')
-    assert calls == ['eugene'] and integrated.clients == []
+    assert integrated.voice.speak_to_file('Тест') is None
+    assert integrated.clients == []
+    assert voice_config.CONFIG_PATH.read_bytes() == original
     assert scott_voice.get_current_voice() == 'scott-voice'
 
 
@@ -185,7 +227,6 @@ def test_cancelled_and_queued_old_requests_never_fall_back(integrated, monkeypat
     client = integrated.clients[0]
     client.block = True
     client.started.clear()
-    monkeypatch.setattr(scott_voice.silero_tts, 'synthesize', lambda *args: pytest.fail('Cancelled speech used fallback'))
     waiting = threading.Event()
     lock = threading.RLock()
     class ObservedLock:
@@ -224,14 +265,14 @@ def test_factory_failure_has_safe_status_and_can_retry(integrated):
     with pytest.raises(VoiceProcessError, match='synthesis_failed'):
         integrated.engine.synthesize('Тест')
     info = integrated.engine.describe()
-    assert info['state'] == 'fallback' and 'private' not in str(info)
+    assert info['state'] == 'error' and 'private' not in str(info)
 
 
 def test_voice_routes_validate_profile_and_preserve_selection(main_module, integrated, monkeypatch):
     async def run():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             catalog = (await client.get('/voice/available?gender=male')).json()
-            assert catalog['scott_profile'] == 'natural'
+            assert catalog['scott_profile'] == 'scott'
             assert all(v['gender'] == 'male' for v in catalog['voices'])
             response = await client.post('/voice/select', json={'voice':'scott-voice', 'profile':'restrained'})
             assert response.json()['success']

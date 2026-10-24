@@ -23,6 +23,16 @@ REQUIRED = {'config.json', 'model.bin', 'tokenizer.json'}
 
 
 def selected_engine():
+    try:
+        from .runtime_profile import compact_mode, ProfileError, REPAIR_MESSAGE
+    except ImportError:
+        from runtime_profile import compact_mode, ProfileError, REPAIR_MESSAGE
+    if compact_mode():
+        try:
+            from faster_whisper import WhisperModel
+        except (ImportError, OSError) as error:
+            raise ProfileError(REPAIR_MESSAGE) from error
+        return 'faster'
     choice = os.getenv('WHISPER_ENGINE', 'auto').strip().lower()
     if choice not in ('auto', 'faster'):
         return 'openai'

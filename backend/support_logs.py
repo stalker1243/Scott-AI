@@ -37,6 +37,10 @@ def report_directory():
 
 
 def _secret_name(name):
+    # SDK switches contain TOKEN in their names, but their values are booleans.
+    # Treating "1" or "false" as credentials corrupts unrelated technical data.
+    if name.upper() in ('HF_HUB_DISABLE_IMPLICIT_TOKEN', 'TOKENIZERS_PARALLELISM'):
+        return False
     return any(word in name.upper() for word in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD', 'AUTHORIZATION'))
 
 
@@ -51,10 +55,12 @@ def secret_values(root=ROOT):
         from storage_paths import layout_for
     layout = layout_for(root)
     # Inspect paths without triggering migration during offline diagnostics.
-    candidates = [(root/'.env', root), (root/'backend/data/ai_config.json', root)]
+    candidates = [(root/'.env', root), (root/'backend/data/ai_config.json', root),
+                  (root/'backend/data/live_voice_config.json', root)]
     if layout.external:
         candidates.extend(((layout.environment, layout.config),
-                           (layout.backend('ai_config.json'), layout.config)))
+                           (layout.backend('ai_config.json'), layout.config),
+                           (layout.backend('live_voice_config.json'), layout.config)))
     for path, boundary in candidates:
         try:
             if any(part.is_symlink() for part in (path, *path.parents)) or not path.resolve().is_relative_to(boundary) or path.stat().st_size > 1024*1024:

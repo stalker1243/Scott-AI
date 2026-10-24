@@ -109,6 +109,20 @@ def installed_known_apps(limit: int = MAX_APPS) -> List[str]:
     return найденные
 
 
+def warm_catalog() -> None:
+    """Prime existing inventories without freezing or changing the speech prompt."""
+    if _cached is not None:
+        return
+    try:
+        try:
+            from . import app_resolver
+        except ImportError:
+            import app_resolver
+        app_resolver.warm_speech_indexes()
+    except Exception:
+        pass  # Optional prefetch; prompt() still has its normal discovery path.
+
+
 def prompt() -> str:
     """
     Подсказка целиком. Собирается один раз: каталог программ стоит почти

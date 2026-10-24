@@ -19,6 +19,10 @@ except ImportError:
     from support_logs import append_log, redact
 
 import psutil
+try:
+    from .performance_trace import measured
+except ImportError:
+    from performance_trace import measured
 
 PYTHON_VERSION = '3.13.7'
 PYTHON_URL = 'https://api.nuget.org/v3-flatcontainer/python/3.13.7/python.3.13.7.nupkg'
@@ -33,6 +37,7 @@ def digest(path):
     return checksum.hexdigest()
 
 
+@measured('voice_setup.python')
 def prepare_python(home, progress=None, package=None, cancelled=None):
     started = time.monotonic()
     def checkpoint():

@@ -11,6 +11,16 @@ Item {
     property bool demo: false // Legacy preview flag; large actions require an explicit event.
     property bool interactive: true
     property bool thinking: false
+    property bool voiceInput: false
+    property real atomPose: motion && voiceHeld && !held ? 1 : 0
+    readonly property real atom: motion ? atomPose : 0
+    property bool voiceHeld: false
+    onVoiceInputChanged: {
+        if (voiceInput) { voiceHeld = true; voiceTail.stop(); noteActivity(); performance.stop(); greeting.stop() }
+        else voiceTail.restart()
+    }
+    Timer { id: voiceTail; interval: 500; onTriggered: { pet.voiceHeld = false; pet.tryApplicationReaction() } }
+    Behavior on atomPose { NumberAnimation { duration: pet.motion ? 280 : 0; easing.type: Easing.InOutCubic } }
     property bool held: false
     property bool attention: pointer.hovered
     property real idleGazeX: 0
@@ -48,7 +58,7 @@ Item {
     readonly property real surprise: motion ? surprisePose : 0
     property real surprisePose: motion && held ? 1 : motion && kind === "spike" && acting ? ease(0.31, 0.38, actionProgress) * (1 - ease(0.45, 0.6, actionProgress)) : 0
     readonly property real sleepy: motion ? sleepyPose : 0
-    property real sleepyPose: motion && !attention && !acting && !held && !thinking && idleSeconds >= 60 ? 0.8 : 0
+    property real sleepyPose: motion && !attention && !acting && !held && !thinking && !voiceHeld && idleSeconds >= 60 ? 0.8 : 0
     readonly property string emotion: !motion ? "calm" : held ? "surprised" : surprise > 0.5 ? "surprised" : joy > 0.3 || wave > 0.3 || heart > 0.3 ? "happy" : acting || thinking || ponder > 0.1 ? "focused" : sleepy > 0.3 ? "sleepy" : attention ? "curious" : "calm"
     readonly property real smile: motion ? Math.min(1, smilePose + joy * 0.85 + wave * 0.45 + wink * 0.55 + Math.abs(nod) * 0.25 + (kind === "spike" ? work * 0.55 : work * 0.12)) : 0
     property real smilePose: motion && attention ? 0.15 : 0
@@ -75,7 +85,7 @@ Item {
         interacted()
     }
     function playAction(action) {
-        if (!motion || held || acting || greeting.running) return false
+        if (!motion || held || voiceHeld || acting || greeting.running) return false
         if (action === "laptop" || action === "popcorn") { noteActivity(); performance.start(); return true }
         if (["wave", "stretch", "think", "heart", "wink", "nod"].indexOf(action) < 0) return false
         noteActivity()
@@ -92,7 +102,7 @@ Item {
     function tryApplicationReaction() {
         if (!pendingApplication) return
         if (!motion || Date.now() > applicationDeadline) { pendingApplication = false; return }
-        if (held || acting || greeting.running) return
+        if (held || voiceHeld || acting || greeting.running) return
         pendingApplication = false; playAction("laptop")
     }
     function replyArrived() {
@@ -103,6 +113,7 @@ Item {
     function petHead() {
         if (!motion || held) return
         noteActivity()
+        if (voiceHeld) { reaction.restart(); return }
         reaction.restart(); affectionAnimation.restart()
         if (!acting) { gesture = kind === "scott" ? "heart" : "wave"; greeting.restart() }
     }

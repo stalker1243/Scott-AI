@@ -17,7 +17,25 @@
 
 BackendClient::BackendClient(QUrl base, QObject *parent) : QObject(parent), m_base(base) {
     backgroundProcess(m_process);
+    m_restartTimer.setSingleShot(true);
+    m_startDeadline.setSingleShot(true); m_startDeadline.setInterval(90000);
+    m_stableTimer.setSingleShot(true); m_stableTimer.setInterval(120000);
+    connect(&m_restartTimer, &QTimer::timeout, this, [this] { launchBackend(false); });
+    connect(&m_stableTimer, &QTimer::timeout, this, [this] { if (m_online && ownsBackend()) m_restartCount = 0; });
+    connect(&m_process, &QProcess::started, this, [this] { m_startDeadline.start(); });
+    connect(&m_startDeadline, &QTimer::timeout, this, [this] {
+        if (m_online || !m_shouldRun) return;
+        m_starting = false; m_lifecycleError = true;
+        m_error = QStringLiteral("Backend запущен, но пока не отвечает. Откройте логи или повторите запуск. Выполнявшиеся команды автоматически не повторяются.");
+        emit stateChanged();
+    });
     m_network.setProxy(QNetworkProxy::NoProxy);
+    m_inputPoll.setInterval(80);
+    connect(&m_inputPoll, &QTimer::timeout, this, &BackendClient::refreshInputLevel);
+    connect(this, &BackendClient::listeningChanged, this, [this] {
+        if (m_online && m_listening && m_listeningReady && m_inputMonitoring) m_inputPoll.start();
+        else { m_inputPoll.stop(); m_inputLevel = 0; emit inputLevelChanged(); }
+    });
     m_poll.setInterval(5000);
     m_browserPoll.setInterval(800);
     connect(&m_browserPoll, &QTimer::timeout, this, &BackendClient::refreshBrowser);
@@ -31,17 +49,23 @@ BackendClient::BackendClient(QUrl base, QObject *parent) : QObject(parent), m_ba
     // Drain both channels immediately; never let Python block on a full pipe.
     connect(&m_process, &QProcess::readyReadStandardOutput, this, [this] { AppLog::appendChunk("backend-process.log", m_outputLog, m_process.readAllStandardOutput()); });
     connect(&m_process, &QProcess::readyReadStandardError, this, [this] { AppLog::appendChunk("backend-process.log", m_errorLog, m_process.readAllStandardError()); });
-    connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+    connect(&m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return; // Crash also emits finished.
+        m_shouldRun = false; m_startDeadline.stop();
         m_starting = false;
-        m_error = QStringLiteral("Не удалось запустить Python: ") + m_process.errorString();
-        AppLog::append("backend-process.log", m_error);
+        m_lifecycleError = true;
+        m_error = QStringLiteral("Не удалось запустить backend. Проверьте файлы установки и откройте логи.");
+        AppLog::append("backend-process.log", m_process.errorString());
         emit stateChanged();
     });
     connect(&m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus) {
         AppLog::appendChunk("backend-process.log", m_outputLog, "\n");
         AppLog::appendChunk("backend-process.log", m_errorLog, "\n");
         m_starting = false;
+        m_startDeadline.stop(); m_stableTimer.stop();
+        ++m_launchGeneration;
         m_online = false;
+        invalidateVoiceState();
         m_browserReady = false; ++m_browserRevision; m_browserPoll.stop(); emit browserChanged();
         m_abilitiesReady = false;
         m_modelsReady = false; ++m_modelsGeneration; emit modelsStateChanged();
@@ -49,13 +73,16 @@ BackendClient::BackendClient(QUrl base, QObject *parent) : QObject(parent), m_ba
         emit protocolsStateChanged(); emit protocolJobChanged();
         emit abilitiesStateChanged();
         m_metrics.clear();
-        if (code != 0) m_error = QStringLiteral("Backend завершился. Код: %1").arg(code);
         AppLog::append("backend-process.log", QString("Backend exit: %1").arg(code));
+        if (m_shouldRun) scheduleBackendRecovery();
         emit metricsChanged();
         emit stateChanged();
     });
 }
 BackendClient::~BackendClient() {
+    disconnect(this, nullptr, nullptr, nullptr);
+    m_poll.stop(); m_browserPoll.stop(); m_protocolPoll.stop();
+    m_voiceInstallPoll.stop(); m_voicePreparationPoll.stop();
     // Replies may finish while QNetworkAccessManager destroys its children,
     // after the chat/state members have already been destroyed.
     for(auto *reply:m_network.findChildren<QNetworkReply *>()) {
@@ -65,7 +92,8 @@ BackendClient::~BackendClient() {
 }
 QString BackendClient::status() const {
     if (m_online) return QStringLiteral("На связи");
-    if (m_starting) return QStringLiteral("Загрузка моделей…");
+    if (m_restartTimer.isActive()) return QStringLiteral("Восстанавливаю подключение…");
+    if (m_starting) return QStringLiteral("Подключаю backend…");
     return QStringLiteral("Нет подключения");
 }
 void BackendClient::configureProcess(const QString &directory, const QString &python) {
@@ -112,14 +140,20 @@ void BackendClient::request(const QString &path, const QJsonObject *body, int ti
 void BackendClient::refresh() {
     if (m_refreshing) return;
     m_refreshing = true;
-    request("/health", nullptr, 4000, [this](const QJsonObject &data, const QString &error) {
+    const auto generation = m_launchGeneration;
+    request("/health", nullptr, 4000, [this, generation](const QJsonObject &data, const QString &error) {
+        if (generation != m_launchGeneration) { m_refreshing = false; return; }
         m_online = error.isEmpty() && data.value("status").toString() == "online";
-        if (m_online) m_starting = false;
+        m_receiptsSupported = m_online && data.value("features").toObject().value("request_receipts").toInt() == 1;
+        if (m_online) {
+            m_starting = false; m_startDeadline.stop();
+            if (m_lifecycleError) { m_error.clear(); m_lifecycleError = false; }
+            if (ownsBackend() && !m_stableTimer.isActive()) m_stableTimer.start();
+        } else m_stableTimer.stop();
         emit stateChanged();
         if (!m_online) {
             m_browserReady = false; ++m_browserRevision; m_browserPoll.stop(); emit browserChanged();
-            m_voiceInstallReady = false; ++m_voiceInstallRevision;
-            emit voiceInstallChanged();
+            invalidateVoiceState();
             m_modelsReady = false; ++m_modelsGeneration; emit modelsStateChanged();
             m_listeningReady = false;
             m_profileReady = false;
@@ -134,15 +168,47 @@ void BackendClient::refresh() {
             emit metricsChanged();
             return;
         }
-        request("/metrics", nullptr, 4000, [this](const QJsonObject &data, const QString &error) {
+        request("/metrics", nullptr, 4000, [this, generation](const QJsonObject &data, const QString &error) {
             m_refreshing = false;
+            if (generation != m_launchGeneration) return;
             m_metrics = error.isEmpty() ? data.value("metrics").toObject().toVariantMap() : QVariantMap{};
             emit metricsChanged();
         });
         refreshListening();
+        reconcileChatRequest();
         refreshBrowser();
         if (!m_voiceInstall.isEmpty() && (!m_voiceInstallReady || m_voiceInstall.value("state").toString() == "running" || m_voiceInstall.value("state").toString() == "cancelling")) refreshVoiceInstall();
         if (protocolRunning()) pollProtocolJob();
+    });
+}
+void BackendClient::invalidateVoiceState() {
+    m_voiceInstallReady = false; ++m_voiceInstallRevision;
+    m_voicePreparationReady = false; ++m_voicePreparationRevision;
+    m_voicePreparation.insert("model_loaded", false);
+    m_voicePreparationPoll.stop();
+    m_settingsReady.removeAll("voices");
+    m_listeningReady = false;
+    emit voiceInstallChanged(); emit voicePreparationChanged(); emit settingsStateChanged();
+}
+void BackendClient::setInputMonitoring(bool enabled) {
+    if (m_inputMonitoring == enabled) return;
+    m_inputMonitoring = enabled;
+    if (enabled && m_online && m_listening && m_listeningReady) m_inputPoll.start();
+    else { m_inputPoll.stop(); m_inputLevel = 0; }
+    emit inputLevelChanged();
+}
+void BackendClient::refreshInputLevel() {
+    if (m_inputPending || !m_inputMonitoring || !m_online || !m_listeningReady || !m_listening) return;
+    m_inputPending = true;
+    request("/listen/level", nullptr, 1000, [this](const QJsonObject &data, const QString &error) {
+        m_inputPending = false;
+        const double value = data.value("level").toDouble();
+        m_inputLevel = error.isEmpty() && m_inputMonitoring && m_online && m_listening &&
+                       qIsFinite(value) ? qBound(0.0, value, 1.0) : 0;
+        if (error.isEmpty() && data.value("listening").isBool() && !data.value("listening").toBool()) {
+            m_listening = false; emit listeningChanged();
+        }
+        emit inputLevelChanged();
     });
 }
 void BackendClient::refreshListening() {
@@ -154,6 +220,9 @@ void BackendClient::refreshListening() {
         if (m_listeningReady) {
             m_listening = data.value("listening").toBool();
             m_listeningAvailable = data.value("available").toBool();
+            const auto voiceError = data.value("last_error").toString();
+            if (!voiceError.isEmpty()) m_listeningError = voiceError;
+            m_listeningPhase = data.value("state").toString(m_listening ? "listening" : "idle");
         }
         emit listeningChanged();
     });
@@ -265,6 +334,11 @@ void BackendClient::setListening(bool enabled) {
         if (valid) {
             m_listening = data.value("listening").toBool();
             m_listeningAvailable = data.value("available").toBool();
+            m_listeningPhase = data.value("state").toString(m_listening ? "listening" : "idle");
+            if (data.value("voice_preparation").isObject()) {
+                ++m_voicePreparationRevision;
+                if (!acceptVoicePreparation(data.value("voice_preparation").toObject())) refreshVoicePreparation();
+            } else refreshVoicePreparation();
         } else {
             m_listeningError = !error.isEmpty() ? error : data.value("message").toString(QStringLiteral("Не удалось переключить микрофон."));
             emit listeningFailed(m_listeningError);
@@ -323,7 +397,7 @@ void BackendClient::loadSettings() {
     refreshVoicePreparation();
     const QList<QPair<QString, QString>> sections{
         {"audio", "/audio/settings"}, {"device", "/settings/device"},
-        {"voices", "/voice/available"}, {"characters", "/audio/characters"},
+        {"voices", "/voice/available"},
         {"versions", "/versions/items"}};
     auto remaining = std::make_shared<int>(sections.size());
     m_settingsReady.clear();
@@ -508,47 +582,7 @@ void BackendClient::applySetting(const QString &group, const QVariantMap &change
     } else if (group == "quiet") {
         path = "/audio/quiet"; required = "audio"; valid = valid && changes.contains("quiet");
     } else if (group == "voice") {
-        path = "/voice/select"; required = "voices"; valid = valid && !changes.value("voice").toString().isEmpty();
-    } else if (group == "voiceStreaming" || group == "voiceAcceleration") {
-        path = "/voice/select"; required = "voices";
-        const auto catalog = m_settings.value("voices").toMap();
-        const QString key = group == "voiceStreaming" ? "streaming" : "acceleration";
-        const QString capability = group == "voiceStreaming" ? "streaming_available" : "acceleration_available";
-        valid = changes.size() == 2 && catalog.value("current").toString() == "scott-voice" &&
-                changes.value("voice").toString() == "scott-voice" && changes.value(key).typeId() == QMetaType::Bool;
-        bool available = false;
-        for (const auto &option : catalog.value("voices").toList()) {
-            const auto entry = option.toMap();
-            if (entry.value("id").toString() == "scott-voice") available = entry.value(capability).toBool();
-        }
-        valid = valid && (available || !changes.value(key).toBool());
-    } else if (group == "voiceBuffer") {
-        path = "/voice/select"; required = "voices";
-        const auto catalog = m_settings.value("voices").toMap();
-        bool known = false, available = false;
-        for (const auto &option : catalog.value("scott_buffers").toList())
-            if (option.toMap().value("id") == changes.value("buffer")) known = true;
-        for (const auto &option : catalog.value("voices").toList()) {
-            const auto entry = option.toMap();
-            if (entry.value("id").toString() == "scott-voice") available = entry.value("available").toBool();
-        }
-        valid = changes.size() == 2 && catalog.value("current").toString() == "scott-voice" &&
-                changes.value("voice").toString() == "scott-voice" &&
-                changes.value("buffer").typeId() == QMetaType::QString && known && available;
-    } else if (group == "voiceProfile") {
-        path = "/voice/select"; required = "voices";
-        const auto catalog = m_settings.value("voices").toMap();
-        bool known = false;
-        for (const auto &option : catalog.value("scott_profiles").toList())
-            if (option.toMap().value("id") == changes.value("profile")) known = true;
-        valid = changes.size() == 2 && catalog.value("current").toString() == "scott-voice" &&
-                changes.value("voice").toString() == "scott-voice" && known;
-        for (const auto &option : catalog.value("voices").toList()) {
-            const auto entry = option.toMap();
-            if (entry.value("id").toString() == "scott-voice" && !entry.value("available", true).toBool()) {
-                valid = false; validationError = entry.value("reason").toString();
-            }
-        }
+        path = "/voice/select"; required = "voices"; valid = valid && changes.value("voice").toString() == "scott-voice";
     } else if (group == "device") {
         path = "/settings/device"; required = "device";
         const auto engine = changes.value("engine").toString();
@@ -596,6 +630,7 @@ void BackendClient::applySetting(const QString &group, const QVariantMap &change
             emit settingsChanged(); emit settingsStateChanged(); return;
         }
         m_settingsNotice = data.value("message").toString(QStringLiteral("Настройка сохранена."));
+        refreshListening();
         loadSettings(); // Show the values that the backend actually accepted.
     });
 }
@@ -608,21 +643,32 @@ void BackendClient::previewVoice() {
     request("/speak", &body, 90000, [this](const QJsonObject &data, const QString &error) {
         m_settingsBusy = false;
         if (!error.isEmpty() || !data.value("success").toBool()) m_settingsError = !error.isEmpty() ? error : data.value("message").toString(QStringLiteral("Не удалось воспроизвести голос."));
-        else m_settingsNotice = data.value("fallback").toBool() ? data.value("message").toString() : QStringLiteral("Пробная фраза воспроизведена.");
+        else m_settingsNotice = QStringLiteral("Пробная фраза воспроизведена.");
         emit settingsStateChanged();
     }, false, true);
 }
 void BackendClient::startBackend() {
-    if (m_starting || m_online || ownsBackend()) return;
+    launchBackend(true);
+}
+void BackendClient::launchBackend(bool manual) {
+    if ((m_starting && !m_restartTimer.isActive() && manual) || m_online || ownsBackend()) return;
+    if (manual) { m_restartTimer.stop(); m_restartCount = 0; }
+    m_shouldRun = true;
+    const auto generation = ++m_launchGeneration;
     m_starting = true; m_error.clear(); emit stateChanged();
     // Recheck ownership immediately before starting a process.
-    request("/health", nullptr, 2500, [this](const QJsonObject &data, const QString &error) {
+    request("/health", nullptr, 2500, [this, generation](const QJsonObject &data, const QString &error) {
+        if (!m_shouldRun || generation != m_launchGeneration || ownsBackend()) return;
         if (error.isEmpty() && data.value("status").toString() == "online") {
-            m_starting = false; m_online = true; emit stateChanged(); refresh(); return;
+            m_shouldRun = false; // This is an external service; never supervise it.
+            m_starting = false; m_online = true;
+            m_receiptsSupported = data.value("features").toObject().value("request_receipts").toInt() == 1;
+            emit stateChanged(); refresh(); return;
         }
         if (!QFileInfo::exists(m_directory + "/main.py") || !QFileInfo::exists(m_python)) {
             m_starting = false;
-            m_error = QStringLiteral("Не найден Python или backend/main.py. Запустите через run.ps1.");
+            m_shouldRun = false; m_lifecycleError = true;
+            m_error = QStringLiteral("Не найдены файлы запуска backend. Повторите установку приложения или откройте логи.");
             emit stateChanged(); return;
         }
         auto env = QProcessEnvironment::systemEnvironment();
@@ -635,7 +681,22 @@ void BackendClient::startBackend() {
         emit stateChanged();
     });
 }
+void BackendClient::scheduleBackendRecovery() {
+    m_lifecycleError = true;
+    if (m_restartCount >= 3) {
+        m_starting = false; m_shouldRun = false;
+        m_error = QStringLiteral("Не удалось восстановить backend после трёх попыток. Откройте логи и повторите запуск вручную. Сообщение сохранено, команды не повторялись.");
+        return;
+    }
+    static const int delays[] = {1000, 3000, 10000};
+    m_restartTimer.start(delays[m_restartCount++]); m_starting = true;
+    m_error = QStringLiteral("Соединение с backend прервалось. Восстанавливаю подключение; отправленные команды автоматически не повторяются.");
+}
 void BackendClient::stopBackend() {
+    m_shouldRun = false; ++m_launchGeneration;
+    m_restartTimer.stop(); m_startDeadline.stop(); m_stableTimer.stop(); m_starting = false;
+    if (m_lifecycleError) { m_error.clear(); m_lifecycleError = false; }
+    emit stateChanged();
     // Never stop a backend started by Avalonia or by the user.
     if (!ownsBackend()) return;
     m_process.terminate();

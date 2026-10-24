@@ -1,3 +1,4 @@
+#include "../tests/ResponsiveChecks.h"
 #include "BackendClient.h"
 #include "ChatContent.h"
 #include "CodeHighlighter.h"
@@ -19,10 +20,10 @@
 #include "../tests/PersonalityChecks.h"
 #include "../tests/LanguagePageChecks.h"
 #include "DesktopSupport.h"
-#include "ProtocolFiles.h"
 #include "../tests/BackdropFixture.h"
 #include "../tests/WindowLifecycleChecks.h"
 #include "../tests/WindowStateChecks.h"
+#include "../tests/WindowStackingChecks.h"
 #include <QApplication>
 #include "AppLanguage.h"
 #include <QQmlApplicationEngine>
@@ -85,9 +86,8 @@ public:
                 {"animations", m_temporary ? true : m_settings.value("animations", true)},
                 {"styleId", m_temporary ? "classic" : m_settings.value("styleId", legacyStyles[qBound(0, m_settings.value("surfaceStyle", 0).toInt(), 2)])},
                 {"transparencyByStyle", m_temporary ? QVariantMap{} : m_settings.value("transparencyByStyle", QVariantMap{})},
-                {"glassFrost", m_temporary ? 40 : qBound(0, m_settings.value("glassFrost", m_settings.value("glassTransparency", 40)).toInt(), 100)},
+                {"glassFrost", m_temporary ? 40 : qBound(1, m_settings.value("glassFrost", m_settings.value("glassTransparency", 40)).toInt(), 100)},
                 {"navigationExpanded", m_temporary ? false : m_settings.value("navigationExpanded", true)},
-                {"alwaysOnTop", m_temporary ? false : m_settings.value("alwaysOnTop", false)},
                 {"trayNotifications", m_temporary ? true : m_settings.value("trayNotifications", true)}};
     }
     Q_INVOKABLE void save(bool dark, const QString &accentOverride, bool lightIcon, bool hideToTray, bool animations, const QString &styleId, const QVariantMap &transparency, int glassFrost) {
@@ -101,13 +101,13 @@ public:
         QVariantMap safeTransparency;
         for (auto it = transparency.begin(); it != transparency.end(); ++it) safeTransparency.insert(it.key(), qBound(0, it.value().toInt(), 100));
         m_settings.setValue("transparencyByStyle", safeTransparency);
-        m_settings.setValue("glassFrost", qBound(0, glassFrost, 100));
+        m_settings.setValue("glassFrost", qBound(1, glassFrost, 100));
         emit iconChanged(lightIcon);
     }
     Q_INVOKABLE void saveWorkspace(bool navigationExpanded, bool alwaysOnTop, bool trayNotifications) {
+        Q_UNUSED(alwaysOnTop); // Session-only; leave legacy preferences untouched.
         if (m_temporary) return;
         m_settings.setValue("navigationExpanded", navigationExpanded);
-        m_settings.setValue("alwaysOnTop", alwaysOnTop);
         m_settings.setValue("trayNotifications", trayNotifications);
     }
 signals:
@@ -144,6 +144,7 @@ int main(int argc, char **argv) {
     QQuickStyle::setStyle("Basic");
     QCommandLineParser parser;
     parser.addHelpOption();
+    parser.addOption({"smoke-responsive", "Check responsive layout, input meter and scroll ownership with synthetic data."});
     parser.addOption({"desktop-pet", "Run the independent desktop companion; backend starts only when mini chat is opened."});
     parser.addOption({"ui-language", "Preview an interface language: ru, en, de or es.", "code"});
     parser.addOption({"pet-backend", "Run a background backend for an existing desktop companion."});
@@ -153,10 +154,9 @@ int main(int argc, char **argv) {
     parser.addOption({"smoke-test", "Render all pages, save screenshots, then exit. No backend requests or settings writes."});
     parser.addOption({"smoke-glass", "Run only the Glass compositor part of the visual test. No backend requests or settings writes."});
     parser.addOption({"smoke-profile", "Run only the profile visual checks using synthetic data and a temporary photo."});
-    parser.addOption({"smoke-actions", "Run only the actions visual checks using synthetic data. No commands are sent."});
-    parser.addOption({"smoke-protocols", "Check the protocol editor and results using synthetic data. No commands or schedules are created."});
-    parser.addOption({"smoke-window", "Check window opening, closing and interrupted animations using synthetic data."});
-    parser.addOption({"smoke-states", "Check animated maximize, full screen, minimize and restore using synthetic data."});
+    parser.addOption({"smoke-window", "Check native window opening, closing and reopening using synthetic data."});
+    parser.addOption({"smoke-states", "Check native maximize, full screen, minimize and restore using synthetic data."});
+    parser.addOption({"smoke-stacking", "Check foreground switching and explicit pin/unpin using two owned windows."});
     parser.addOption({"smoke-models", "Check model settings with synthetic providers and tokens."});
     parser.addOption({"smoke-chat", "Check chat history, attachments and generation UI with synthetic data."});
     parser.addOption({"smoke-chat-layout", "Check initial chat message geometry with synthetic data."});
@@ -165,7 +165,7 @@ int main(int argc, char **argv) {
     parser.addOption({"smoke-voice", "Check optional voice settings with synthetic data. No synthesis or playback."});
     parser.addOption({"check-backend", "Check real backend health, metrics and a harmless memory question; save the chat screenshot and exit."});
     parser.addOption({"start-backend", "Start the backend if it is not already running."});
-    parser.addOption({"tab", "Initial page: home, chat, system, appearance, memory, settings, profile, actions, protocols, models, logs or about.", "name", "home"});
+    parser.addOption({"tab", "Initial page: home, chat, system, appearance, memory, settings, profile, models, logs or about.", "name", "home"});
     parser.addOption({"surface-style", "Preview a style: classic, glass or terminal-pro. Saved selection is used when omitted.", "name"});
     parser.addOption({"python", "Python 3.13 executable for the backend.", "path"});
     parser.addOption({"backend-dir", "Directory containing main.py.", "path", SCOTT_BACKEND_DIR});
@@ -180,12 +180,12 @@ int main(int argc, char **argv) {
         AppLog::directory=(state.isEmpty()?PetController::defaultStateRoot():state)+"/logs";
         return runDesktopPet(app,state);
     }
+    const bool responsiveOnly = parser.isSet("smoke-responsive");
     const bool glassOnly = parser.isSet("smoke-glass");
     const bool profileOnly = parser.isSet("smoke-profile");
-    const bool actionsOnly = parser.isSet("smoke-actions");
-    const bool protocolsOnly = parser.isSet("smoke-protocols");
     const bool windowOnly = parser.isSet("smoke-window");
     const bool statesOnly = parser.isSet("smoke-states");
+    const bool stackingOnly = parser.isSet("smoke-stacking");
     const bool modelsOnly = parser.isSet("smoke-models");
     const bool chatOnly = parser.isSet("smoke-chat") || parser.isSet("smoke-chat-layout");
     const bool setupOnly = parser.isSet("smoke-setup");
@@ -193,7 +193,7 @@ int main(int argc, char **argv) {
     const bool voiceOnly = parser.isSet("smoke-voice");
     const bool personalityOnly=parser.isSet("smoke-personality");
     const bool localizationOnly=parser.isSet("smoke-localization");
-    const bool smoke = parser.isSet("smoke-test") || glassOnly || profileOnly || actionsOnly || protocolsOnly || windowOnly || statesOnly || modelsOnly || chatOnly || setupOnly || voiceOnly || logsOnly || personalityOnly || localizationOnly;
+    const bool smoke = responsiveOnly || parser.isSet("smoke-test") || glassOnly || profileOnly || windowOnly || statesOnly || stackingOnly || modelsOnly || chatOnly || setupOnly || voiceOnly || logsOnly || personalityOnly || localizationOnly;
     const bool integration = parser.isSet("check-backend");
     AppLog::directory = smoke || integration ? QDir::currentPath() + "/test-logs" : AppLog::defaultDirectory();
     BackendClient client;
@@ -221,11 +221,19 @@ int main(int argc, char **argv) {
     SetupController setup;
     DiagnosticsController diagnostics;
     diagnostics.configure(pythonExecutable, backendDirectory);
-    QObject::connect(&setup, &SetupController::ready, &client, &BackendClient::startBackend);
+    QObject::connect(&setup, &SetupController::ready, &client, [&] {
+        if (client.online()) { setup.backendReady(); return; }
+        if (client.ownsBackend() && !client.starting()) client.stopBackend();
+        client.startBackend();
+    });
+    QObject::connect(&client, &BackendClient::stateChanged, &setup, [&] {
+        if (!setup.launching()) return;
+        if (client.online()) setup.backendReady();
+        else if (!client.starting() && !client.error().isEmpty()) setup.backendFailed(client.error());
+    });
     Preferences prefs(smoke || integration);
     PetController pets(smoke || integration,parser.value("pet-state"));
     pets.configureChat(backendDirectory,pythonExecutable);
-    ProtocolFiles protocolFiles;
     const auto previousAvatar = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/profile";
 #ifdef Q_OS_LINUX
     const auto avatarDirectory = AppPaths::avatarDirectory(installedRoot, previousAvatar, "linux");
@@ -273,7 +281,6 @@ int main(int argc, char **argv) {
     engine.rootContext()->setContextProperty("appVersion", app.applicationVersion());
     engine.rootContext()->setContextProperty("appBuild", SCOTT_BUILD_NUMBER);
     engine.rootContext()->setContextProperty("profileAvatar", &avatar);
-    engine.rootContext()->setContextProperty("protocolFiles", &protocolFiles);
     engine.rootContext()->setContextProperty("chatContent", &chatContent);
     engine.rootContext()->setContextProperty("windowEffects", &windowEffects);
     engine.rootContext()->setContextProperty("windowMotion", &windowMotion);
@@ -291,7 +298,7 @@ int main(int argc, char **argv) {
     if (!smoke && !integration) {
         const QStringList tabs{"home", "chat", "system", "appearance", "memory", "settings", "profile", "actions", "protocols", "models", "logs", "about"};
         const int tab = tabs.indexOf(parser.value("tab"));
-        window->setProperty("selectedTab", tab < 0 ? 0 : tab);
+        window->setProperty("selectedTab", tab < 0 || tab == 7 || tab == 8 ? 0 : tab);
         const QString requestedStyle = parser.value("surface-style");
         if (QStringList{"classic", "glass", "terminal-pro"}.contains(requestedStyle)) window->setProperty("styleId", requestedStyle);
     }
@@ -302,6 +309,7 @@ int main(int argc, char **argv) {
     QObject::connect(&desktop, &DesktopSupport::trayAvailableChanged, &trayController, &TrayController::availabilityChanged);
     QObject::connect(&windowMotion, &WindowMotion::minimizedRestoreRequested, &trayController, &TrayController::restoreWindow);
     if (modelsOnly) window->setProperty("selectedTab", 9);
+    if (responsiveOnly) runResponsiveChecks(app,window,previewData.get(),qmlErrors);
     if (personalityOnly) startPersonalityChecks(app,window,pets,previewData.get(),qmlErrors);
     if (localizationOnly) startLanguageChecks(app,window,previewData.get(),language,qmlErrors);
     if (chatOnly) { window->setProperty("selectedTab", 1); startChatPageChecks(app, window, previewData.get(), qmlErrors, parser.isSet("smoke-chat-layout")); }
@@ -342,7 +350,7 @@ int main(int argc, char **argv) {
             auto *button = window->findChild<QObject *>("prepareScottButton");
             if (!fixture || !button || qmlErrors || window->isVisible()) { qWarning("Setup UI warning, missing controls or visible main window"); app.exit(43); return; }
             if (!fixture->property("checking").toBool()) {
-                for (const char *name : {"setupStorageInfo", "prepareScottButton", "cancelSetupButton", "setupLogsButton"}) {
+                for (const char *name : {"runtimeSetupOption", "setupModeDescription", "setupStorageInfo", "prepareScottButton", "cancelSetupButton", "setupLogsButton"}) {
                     auto *item = window->findChild<QQuickItem *>(name);
                     if (!item || !item->isVisible()) continue;
                     const auto point = item->mapToItem(setupWindow->contentItem(), QPointF());
@@ -356,11 +364,18 @@ int main(int argc, char **argv) {
             QDir().mkpath("screenshots"); setupWindow->grabWindow().save(QString("screenshots/setup-%1.png").arg(*phase));
             if (*phase == 0) { fixture->setProperty("checking", true); fixture->setProperty("busy", true); fixture->setProperty("message", QStringLiteral("Проверяем готовность…")); }
             else if (*phase == 1) {
-                auto *option = window->findChild<QObject *>("compactSetupOption");
+                auto *option = window->findChild<QObject *>("runtimeSetupOption");
                 if (setupWindow->height() != 220 || button->property("visible").toBool() || !option || option->property("visible").toBool()) { app.exit(43); return; }
                 fixture->setProperty("checking", false); fixture->setProperty("progress", 0.65); fixture->setProperty("message", QStringLiteral("Загружаем модели речи…"));
             }
-            else if (*phase == 2) { if (button->property("enabled").toBool() || setupWindow->height() != 490) { app.exit(43); return; } fixture->setProperty("busy", false); fixture->setProperty("error", QStringLiteral("Сервис загрузки не отвечает. Скачанные части сохранены.")); }
+            else if (*phase == 2) { if (button->property("enabled").toBool() || setupWindow->height() != 550) { app.exit(43); return; } fixture->setProperty("busy", false); fixture->setProperty("runtimeMode", "compact"); fixture->setProperty("error", QStringLiteral("Сервис загрузки ответил кодом 503. Скачанная часть сохранена.")); }
+            else if (*phase == 3) {
+                auto *option = window->findChild<QObject *>("runtimeSetupOption");
+                if (!button->property("enabled").toBool() || !option || option->property("count").toInt()!=2 ||
+                    option->property("currentIndex").toInt()!=-1 || option->property("displayText").toString()!=AppLanguage::text(QStringLiteral("Сохранённый режим"))) { app.exit(43); return; }
+                option->setProperty("currentIndex",1);
+                if (!QMetaObject::invokeMethod(option,"activated",Q_ARG(int,1)) || fixture->property("runtimeMode").toString()!="cpu") { app.exit(43); return; }
+            }
             else { if (!button->property("enabled").toBool()) { app.exit(43); return; }
                 timer->stop(); fixture->setProperty("visible", false);
                 QTimer::singleShot(500, &app, [&] {
@@ -385,18 +400,12 @@ int main(int argc, char **argv) {
     bool voiceChecksPassed = false;
     if (windowOnly) runWindowLifecycleChecks(app, window, trayController, windowEffects, qmlErrors, windowChecksPassed);
     if (statesOnly) runWindowStateChecks(app, window, windowMotion, windowEffects, trayController, qmlErrors, stateChecksPassed);
+    if (stackingOnly) runWindowStackingChecks(app, window, trayController, qmlErrors);
     if (modelsOnly) runModelPageChecks(app, window, previewData.get(), qmlErrors, modelChecksPassed);
     if (voiceOnly) runVoicePageChecks(app, window, previewData.get(), qmlErrors, voiceChecksPassed);
-    if (smoke && !windowOnly && !statesOnly && !modelsOnly && !chatOnly && !setupOnly && !voiceOnly && !logsOnly && !personalityOnly && !localizationOnly) {
+    if (smoke && !responsiveOnly && !windowOnly && !statesOnly && !stackingOnly && !modelsOnly && !chatOnly && !setupOnly && !voiceOnly && !logsOnly && !personalityOnly && !localizationOnly) {
         // Capture the actual Qt scene, including each loaded page and a light theme.
-        auto step = std::make_shared<int>(protocolsOnly ? 100 : actionsOnly ? 74 : profileOnly ? 67 : glassOnly ? 51 : 0);
-        if (protocolsOnly) {
-            window->setProperty("animationsEnabled", false); window->setProperty("selectedTab", 8); window->resize(800, 560);
-        }
-        if (actionsOnly) {
-            window->setProperty("animationsEnabled", false);
-            window->resize(800, 560); window->setProperty("selectedTab", 7);
-        }
+        auto step = std::make_shared<int>(profileOnly ? 67 : glassOnly ? 51 : 0);
         if (profileOnly) {
             window->setProperty("animationsEnabled", false);
             window->resize(800, 560); window->setProperty("selectedTab", 6);
@@ -620,7 +629,7 @@ int main(int argc, char **argv) {
                     auto *button = visualItem(window->contentItem(), QString("navTab%1").arg(tab));
                     if (!button || !QMetaObject::invokeMethod(button, "clicked") || window->property("displayedTab").toInt() != tab) { qWarning("Grouped navigation opened the wrong page"); app.exit(17); return; }
                 }
-                for (int tab : {2, 7, 10, 11}) {
+                for (int tab : {2, 10, 11}) {
                     auto *more = visualItem(window->contentItem(), "navigationMore");
                     if (!more || !QMetaObject::invokeMethod(more, "clicked")) { app.exit(17); return; }
                     QCoreApplication::processEvents();
@@ -683,7 +692,7 @@ int main(int argc, char **argv) {
                 window->setGeometry(available.x() + 16, available.y() + 16, 960, 680);
                 window->setProperty("selectedTab", 0);
                 window->setProperty("glassFrost", 0);
-                if (windowEffects.active()) { qWarning("Clear Glass retained a native blur"); app.exit(18); return; }
+                if (window->property("glassFrost").toInt() != 1 || (windowEffects.available() && !windowEffects.active())) { qWarning("Minimum Glass must clamp to 1% and retain blur"); app.exit(18); return; }
                 glassProbe->setPosition(available.x() + 16, available.y() + 16);
                 setUnderlayColor(QColor("#a04c56"));
                 underlay->presentBehind(glassProbe.get());
@@ -713,7 +722,7 @@ int main(int argc, char **argv) {
                 const auto clearFrame = captureComposite();
                 if (!clearFrame.save("screenshots/glass-clear.png")) { app.exit(18); return; }
                 *clearContrast = stripeContrast(clearFrame);
-                if (*clearContrast < 65) { qWarning("Clear Glass obscured the test pattern: contrast=%g", *clearContrast); app.exit(18); return; }
+                if (window->property("glassFrost").toInt() != 1) { qWarning("Minimum Glass lost 1% limit"); app.exit(18); return; }
                 window->setProperty("glassFrost", 40);
             }
             if (current == 56) {
@@ -726,7 +735,7 @@ int main(int argc, char **argv) {
                 qInfo("Desktop Glass: native=%d active=%d clear contrast=%g frosted contrast=%g colors=%s/%s", windowEffects.available(), windowEffects.active(), *clearContrast, *frostedContrast, qPrintable(left.name()), qPrintable(right.name()));
 #ifdef Q_OS_WIN
                 // Supported Windows must blur the pattern beyond alpha blending alone.
-                if (windowEffects.available() && (!windowEffects.active() || *frostedContrast > *clearContrast * 0.35 ||
+                if (windowEffects.available() && (!windowEffects.active() || *frostedContrast > *clearContrast + 2 ||
                     left.red() - right.red() < 8 || right.blue() - left.blue() < 8)) {
                     qWarning("Acrylic did not blur the actual desktop backdrop"); app.exit(18); return;
                 }
@@ -789,10 +798,10 @@ int main(int argc, char **argv) {
                 if (!window->isVisible() || window->property("revealProgress").toDouble() != 1) { qWarning("Tray restore left the scene hidden"); app.exit(19); return; }
                 window->setProperty("animationsEnabled", true);
                 QMetaObject::invokeMethod(window, "hideToBackground");
-                if (!window->property("pendingHide").toBool()) { qWarning("Animated hide did not start"); app.exit(19); return; }
+                if (!window->isVisible() || !window->property("pendingHide").toBool()) { qWarning("Animated tray hide did not start"); app.exit(19); return; }
             }
             if (current == 64) {
-                if (window->isVisible() || window->property("pendingHide").toBool()) { qWarning("Animated hide did not finish"); app.exit(19); return; }
+                if (window->isVisible() || window->property("pendingHide").toBool()) { qWarning("Native hide left a pending transition"); app.exit(19); return; }
                 QMetaObject::invokeMethod(window, "restoreFromTray");
             }
             if (current == 65) {
@@ -858,208 +867,7 @@ int main(int argc, char **argv) {
                 auto *save = visualItem(window->contentItem(), "saveProfile");
                 if (!save || save->isEnabled() || previewData->property("profileWrites").toInt() != 1) { qWarning("Profile length limit failed"); app.exit(20); return; }
                 if (profileOnly) { timer->stop(); app.exit(qmlErrors ? 4 : 0); return; }
-                window->setProperty("selectedTab", 7); window->setProperty("styleId", "classic"); window->setProperty("darkMode", true);
-            }
-            if (current >= 74 && current <= 84) {
-                auto *actions = window->findChild<QObject *>("actionsPage");
-                auto *search = window->findChild<QObject *>("actionsSearch");
-                auto *composer = window->findChild<QObject *>("chatComposer");
-                auto *category = window->findChild<QObject *>("actionsCategory");
-                const auto fail = [&](const char *message) { qWarning("Actions: %s at step %d", message, current); app.exit(21); };
-                if (!actions || !search || !composer || !category) { fail("page controls missing"); return; }
-                if (current == 74) {
-                    QMetaObject::invokeMethod(visualItem(window->contentItem(), "navigationMore"), "clicked");
-                    QCoreApplication::processEvents();
-                    auto *nav = visualItem(window->contentItem(), "navTab7");
-                    if (actions->property("resultCount").toInt() != 4 || !nav || !nav->isVisible() || nav->mapToItem(window->contentItem(), QPointF()).y() < 0) { fail("catalog or navigation missing"); return; }
-                    QMetaObject::invokeMethod(window->findChild<QObject *>("navigationMoreMenu"), "close");
-                    search->setProperty("text", QStringLiteral("МИКРОФОНОВ"));
-                }
-                if (current == 75) {
-                    auto *reason = visualItem(window->contentItem(), "actionReason_voice");
-                    if (actions->property("resultCount").toInt() != 1 || !reason || !reason->isVisible() || visualItem(window->contentItem(), "actionExample_voice_0")) { fail("unavailable action or search incorrect"); return; }
-                    search->setProperty("text", QStringLiteral("компьютер"));
-                    composer->setProperty("text", QStringLiteral("Мой черновик"));
-                }
-                if (current == 76) {
-                    auto *example = visualItem(window->contentItem(), "actionExample_power_0");
-                    if (actions->property("resultCount").toInt() != 1 || !example || !example->isEnabled()) { fail("example is missing"); return; }
-                    QMetaObject::invokeMethod(example, "clicked");
-                    if (window->property("selectedTab").toInt() != 1 || composer->property("text").toString() != QStringLiteral("Мой черновик\nвыключи компьютер") || previewData->property("messagesSent").toInt()) { fail("example replaced draft or sent a command"); return; }
-                    window->setProperty("selectedTab", 7); search->setProperty("text", "");
-                    category->setProperty("currentIndex", 3); QMetaObject::invokeMethod(category, "activated", Q_ARG(int, 3));
-                }
-                if (current == 77) {
-                    if (actions->property("resultCount").toInt() != 1 || actions->property("activeGroup").toString() != QStringLiteral("Компьютер")) { fail("category filter incorrect"); return; }
-                    previewData->setProperty("online", false);
-                    auto *example = visualItem(window->contentItem(), "actionExample_power_0");
-                    auto *refresh = visualItem(window->contentItem(), "refreshActions");
-                    if (!example || example->isEnabled() || !refresh || refresh->isEnabled()) { fail("offline controls enabled"); return; }
-                    window->setProperty("navigationExpanded", true);
-                }
-                if (current == 78) {
-                    previewData->setProperty("online", true); previewData->setProperty("abilitiesReady", false);
-                    previewData->setProperty("abilitiesError", QStringLiteral("Не удалось обновить действия. Показан последний список."));
-                    auto *example = visualItem(window->contentItem(), "actionExample_power_0");
-                    if (!example || example->isEnabled()) { fail("stale example enabled"); return; }
-                    window->setProperty("styleId", "glass");
-                }
-                if (current == 79) {
-                    previewData->setProperty("abilitiesError", ""); previewData->setProperty("abilitiesReady", true); previewData->setProperty("abilitiesBusy", true);
-                    actions->setProperty("activeGroup", ""); category->setProperty("currentIndex", 0); actions->setProperty("readyOnly", true);
-                    window->setProperty("darkMode", false);
-                }
-                if (current == 80) {
-                    if (actions->property("resultCount").toInt() != 3 || visualItem(window->contentItem(), "refreshActions")->isEnabled()) { fail("available filter or loading guard incorrect"); return; }
-                    previewData->setProperty("abilitiesBusy", false); search->setProperty("text", "no-matching-example");
-                    window->setProperty("styleId", "terminal-pro"); window->setProperty("darkMode", true);
-                }
-                if (current == 81) {
-                    if (actions->property("resultCount").toInt() || !visualItem(window->contentItem(), "actionsEmpty")->isVisible()) { fail("empty search missing"); return; }
-                    search->setProperty("text", ""); actions->setProperty("readyOnly", false);
-                }
-                if (current == 82) {
-                    QMetaObject::invokeMethod(window->findChild<QObject *>("actionsList"), "positionViewAtEnd");
-                }
-                if (current == 83) {
-                    auto *last = visualItem(window->contentItem(), "actionExample_reminders_0");
-                    const QPointF point = last ? last->mapToItem(window->contentItem(), QPointF()) : QPointF();
-                    if (!last || !last->isEnabled() || point.y() < 0 || point.y() + last->height() > window->height() || point.x() + last->width() > window->width()) { fail("last example does not fit compact window"); return; }
-                    previewData->setProperty("abilities", QVariantList{}); previewData->setProperty("abilitiesTotal", 0); previewData->setProperty("abilitiesReadyCount", 0);
-                }
-                if (current == 84) {
-                    if (actions->property("resultCount").toInt() || previewData->property("messagesSent").toInt()) { fail("empty catalog or read-only browsing incorrect"); return; }
-                    timer->stop(); app.exit(qmlErrors ? 4 : 0); return;
-                }
-            }
-            if (current >= 100 && current <= 118) {
-                auto *page = window->findChild<QObject *>("protocolsPage");
-                auto *search = window->findChild<QObject *>("protocolSearch");
-                auto *save = visualItem(window->contentItem(), "saveProtocol");
-                const auto fail = [&](const char *message) { qWarning("Protocols: %s at step %d", message, current); app.exit(22); };
-                const auto draft = [page]() { QVariant value; QMetaObject::invokeMethod(page, "payload", Q_RETURN_ARG(QVariant, value)); return fixtureMap(value); };
-                if (!page || !search || !save) { fail("controls missing"); return; }
-                if (current == 100) {
-                    auto *disabled = visualItem(window->contentItem(), "runProtocol_off-protocol");
-                    if (page->property("resultCount").toInt() != 2 || !disabled || disabled->isEnabled() || previewData->property("protocolWrites").toInt() || previewData->property("protocolRuns").toInt()) { fail("catalog state incorrect"); return; }
-                    search->setProperty("text", QStringLiteral("за работу"));
-                }
-                if (current == 101) {
-                    if (page->property("resultCount").toInt() != 1) { fail("search does not match phrases"); return; }
-                    search->setProperty("text", "");
-                    const auto record = fixtureList(previewData->property("protocols")).first();
-                    QMetaObject::invokeMethod(page, "loadDraft", Q_ARG(QVariant, record), Q_ARG(QVariant, false));
-                }
-                if (current == 102) {
-                    if (!page->property("validDraft").toBool() || page->property("dirty").toBool() || draft().value("steps").toList().first().toMap().value("pause").toInt() != 2) { fail("editor lost saved settings"); return; }
-                    page->setProperty("nameDraft", QStringLiteral("Черновик")); page->setProperty("dirty", true);
-                    window->setProperty("selectedTab", 1); window->setProperty("selectedTab", 8);
-                    window->setProperty("styleId", "glass"); window->setProperty("navigationExpanded", true);
-                    previewData->setProperty("protocolsBusy", true);
-                }
-                if (current == 103) {
-                    if (save->isEnabled() || page->property("nameDraft").toString() != QStringLiteral("Черновик")) { fail("draft or busy guard incorrect"); return; }
-                    previewData->setProperty("protocolsBusy", false); previewData->setProperty("protocolsError", QStringLiteral("Не удалось сохранить. Черновик остаётся в редакторе."));
-                    QMetaObject::invokeMethod(page, "cloneStep", Q_ARG(QVariant, 0)); page->setProperty("nameDraft", "");
-                }
-                if (current == 104) {
-                    if (save->isEnabled() || page->property("validDraft").toBool() || draft().value("steps").toList().size() != 3) { fail("name validation or clone failed"); return; }
-                    page->setProperty("nameDraft", QStringLiteral("Черновик")); page->setProperty("repeatDraft", 3); page->setProperty("stopDraft", false);
-                    page->setProperty("scheduleDraft", QStringLiteral("пн, ср, пт в 18:00")); window->setProperty("darkMode", false);
-                    QMetaObject::invokeMethod(window->findChild<QObject *>("protocolBulkDialog"), "open");
-                }
-                if (current == 105) {
-                    window->findChild<QObject *>("protocolBulkText")->setProperty("text", QStringLiteral("  открой документы \n\nнапомни через час сделать перерыв"));
-                    QMetaObject::invokeMethod(visualItem(window->contentItem(), "protocolBulkAdd"), "clicked");
-                    if (draft().value("steps").toList().size() != 5) { fail("bulk paste incorrect"); return; }
-                    QMetaObject::invokeMethod(window->findChild<QObject *>("protocolActionsDialog"), "open");
-                }
-                if (current == 106) {
-                    auto *dialog = window->findChild<QObject *>("protocolActionsDialog");
-                    auto *content = qobject_cast<QQuickItem *>(dialog->property("contentItem").value<QObject *>());
-                    auto *example = visualItem(content, "actionExample_open_app_1");
-                    if (!example || dialog->property("height").toDouble() > window->height() - 24) { fail("action picker does not fit"); return; }
-                    QMetaObject::invokeMethod(example, "clicked");
-                    if (draft().value("steps").toList().size() != 6 || previewData->property("protocolRuns").toInt()) { fail("action picker executed a command"); return; }
-                    previewData->setProperty("protocolsError", "");
-                }
-                if (current == 107) {
-                    if (!save->isEnabled()) { fail("valid draft cannot be saved"); return; }
-                    QMetaObject::invokeMethod(save, "clicked");
-                    const auto sent = fixtureMap(previewData->property("protocolDraftSent"));
-                    if (previewData->property("protocolWrites").toInt() != 1 || sent.value("repeat_count").toInt() != 3 || sent.value("stop_on_error").toBool() || sent.value("steps").toList().size() != 6) { fail("save payload incorrect"); return; }
-                    previewData->setProperty("protocolsError", QStringLiteral("Пример ошибки записи. Изменения сохранены в черновике."));
-                }
-                if (current == 108) {
-                    if (!page->property("dirty").toBool() || page->property("nameDraft").toString() != QStringLiteral("Черновик")) { fail("failed save erased draft"); return; }
-                    auto list = fixtureList(previewData->property("protocols")); auto record = list.first().toMap();
-                    const auto sent = fixtureMap(previewData->property("protocolDraftSent"));
-                    for (auto it = sent.begin(); it != sent.end(); ++it) if (it.key() != "schedule") record[it.key()] = it.value();
-                    record["name"] = QStringLiteral("Подтверждено"); record["schedule_text"] = sent.value("schedule"); list[0] = record;
-                    previewData->setProperty("protocols", list); previewData->setProperty("protocolsError", "");
-                    QMetaObject::invokeMethod(previewData.get(), "protocolSaved", Q_ARG(QVariant, record));
-                }
-                if (current == 109) {
-                    if (page->property("dirty").toBool() || page->property("nameDraft").toString() != QStringLiteral("Подтверждено")) { fail("confirmed record not displayed"); return; }
-                    page->setProperty("pendingDelete", fixtureList(previewData->property("protocols")).first());
-                    QMetaObject::invokeMethod(window->findChild<QObject *>("confirmDeleteProtocol"), "open");
-                }
-                if (current == 110) {
-                    QMetaObject::invokeMethod(window->findChild<QObject *>("confirmDeleteProtocol"), "close");
-                    if (previewData->property("protocolDeletes").toInt()) { fail("delete ran without confirmation"); return; }
-                    previewData->setProperty("online", false); page->setProperty("dirty", true);
-                    if (save->isEnabled()) { fail("offline save enabled"); return; }
-                    window->setProperty("styleId", "terminal-pro"); window->setProperty("darkMode", true);
-                    QTimer::singleShot(0, &app, [window] { auto *scroll = window->findChild<QObject *>("protocolEditorScroll"); auto *flick = scroll->property("contentItem").value<QObject *>(); flick->setProperty("contentY", qMax(0.0, flick->property("contentHeight").toDouble() - flick->property("height").toDouble())); });
-                }
-                if (current == 111) {
-                    previewData->setProperty("online", true); page->setProperty("section", 0);
-                    auto *run = visualItem(window->contentItem(), "runProtocol_demo-protocol");
-                    if (!run || !run->isEnabled()) { fail("run button missing"); return; }
-                    QMetaObject::invokeMethod(run, "clicked");
-                }
-                if (current == 112) {
-                    auto *cancel = visualItem(window->contentItem(), "cancelProtocol");
-                    if (!previewData->property("protocolRunning").toBool() || !cancel || !cancel->isEnabled() || previewData->property("protocolRuns").toInt() != 1) { fail("run state incorrect"); return; }
-                    QMetaObject::invokeMethod(cancel, "clicked");
-                }
-                if (current == 113) {
-                    if (previewData->property("protocolRunning").toBool() || previewData->property("protocolCancels").toInt() != 1) { fail("cancel failed"); return; }
-                    QMetaObject::invokeMethod(window->findChild<QObject *>("confirmDeleteProtocol"), "open");
-                    QMetaObject::invokeMethod(visualItem(window->contentItem(), "deleteProtocolConfirmed"), "clicked");
-                    if (previewData->property("protocolDeletes").toInt() != 1) { fail("confirmed delete missing"); return; }
-                    auto imported = fixtureMap(previewData->property("protocolDraftSent")); imported["enabled"] = false; imported["schedule"] = "";
-                    emit protocolFiles.imported(imported);
-                }
-                if (current == 114) {
-                    if (!page->property("editId").toString().isEmpty() || page->property("enabledDraft").toBool() || !page->property("scheduleDraft").toString().isEmpty() || !page->property("dirty").toBool()) { fail("import restored automatic execution"); return; }
-                    page->setProperty("nameDraft", QString(101, QChar('x')));
-                }
-                if (current == 115) {
-                    if (save->isEnabled() || previewData->property("protocolWrites").toInt() != 1) { fail("length limit or unintended write"); return; }
-                    previewData->setProperty("protocols", QVariantList{}); page->setProperty("section", 0); page->setProperty("dirty", false);
-                    search->setProperty("text", ""); page->setProperty("listFilter", "all");
-                }
-                if (current == 116) {
-                    auto *button = visualItem(window->contentItem(), "protocolEmptyTemplate0");
-                    if (!button || !button->isVisible()) { fail("empty catalog template missing"); return; }
-                    const auto position = button->mapToItem(window->contentItem(), QPointF(button->width() / 2, button->height() / 2));
-                    const auto global = window->mapToGlobal(position.toPoint());
-                    QMouseEvent press(QEvent::MouseButtonPress, position, global, Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
-                    QMouseEvent release(QEvent::MouseButtonRelease, position, global, Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-                    // Dispatch to our own QQuickWindow; never click the desktop foreground.
-                    QApplication::sendEvent(window, &press); QApplication::sendEvent(window, &release);
-                }
-                if (current == 117) {
-                    if (page->property("section").toInt() != 1 || page->property("nameDraft").toString() != QStringLiteral("Рабочий день") || draft().value("steps").toList().size() != 3) { fail("template click was intercepted"); return; }
-                    QMetaObject::invokeMethod(visualItem(window->contentItem(), "newProtocol"), "clicked");
-                }
-                if (current == 118) {
-                    auto *dialog = window->findChild<QObject *>("discardProtocolDraft");
-                    if (!dialog->property("visible").toBool() || page->property("nameDraft").toString() != QStringLiteral("Рабочий день") || previewData->property("protocolWrites").toInt() != 1) { fail("draft replacement lacked confirmation"); return; }
-                    QMetaObject::invokeMethod(dialog, "close");
-                    timer->stop(); app.exit(qmlErrors ? 4 : 0); return;
-                }
+                timer->stop(); app.exit(qmlErrors ? 4 : 0); return;
             }
             if (current < 10) window->setProperty("selectedTab", current < 5 ? current : current == 5 ? 0 : 4);
             if (current == 5) window->setProperty("darkMode", false);
@@ -1125,9 +933,8 @@ int main(int argc, char **argv) {
                 auto *draft = qobject_cast<QQuickItem *>(window->findChild<QObject *>("memoryDraft"));
                 QTimer::singleShot(350, &app, [draft] { draft->forceActiveFocus(); });
             }
-            if (current == 20) QMetaObject::invokeMethod(window->findChild<QObject *>("memoryKindPopup"), "open");
+            if (current == 20 && window->findChild<QObject *>("memoryKindPopup")) { qWarning("Retired memory categories are visible"); app.exit(14); return; }
             if (current == 21) {
-                QMetaObject::invokeMethod(window->findChild<QObject *>("memoryKindPopup"), "close");
                 previewData->setProperty("memoryError", QStringLiteral("Проверочный пример ошибки. Повторите загрузку, когда соединение восстановится."));
             }
             if (current == 22) {

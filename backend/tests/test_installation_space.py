@@ -41,9 +41,12 @@ def test_separate_temporary_volume_is_checked(tmp_path, monkeypatch):
 
 def test_setup_retains_both_cpu_and_gpu_estimates(tmp_path):
     result = space.setup_budgets(tmp_path)
-    assert set(result) == {'cpu', 'auto'}
+    assert set(result) == {'cpu', 'auto', 'compact'}
     assert result['cpu']['required_free_bytes'] < result['auto']['required_free_bytes']
     assert 'Scott Voice' in result['auto']['hint']
+    assert result['compact']['required_free_bytes'] == result['cpu']['required_free_bytes']
+    assert 'На других системах размер может отличаться' in result['compact']['hint']
+    assert 'Уже установленные пакеты не удаляются' in result['compact']['hint']
 
 
 def test_linux_cpu_budget_covers_measured_dependencies_before_models(tmp_path,monkeypatch):

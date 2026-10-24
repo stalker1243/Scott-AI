@@ -1,5 +1,11 @@
 # Scott AI на Linux
 
+Начиная с 2.2.0 единственный голос — Scott Voice. Его штатная установка
+пока поддерживает Windows/NVIDIA CUDA; на Linux доступны чат и распознавание,
+поддержка синтеза Scott Voice ещё не подтверждена. Прежние пакеты 2.1.1
+сохраняют прежние голоса. Матрицы и размеры ниже относятся к указанным в них
+проверенным пакетам, а не к новому варианту без Silero.
+
 Экспериментальный Qt-пакет для Linux x86-64. Он включает приложение,
 библиотеки Qt, QML-модули, backend и отдельный Python 3.13.16. Системный Python
 для установки не нужен; зависимости и модели речи устанавливаются при первом
@@ -9,10 +15,11 @@ Debian 12/13, Fedora 44 и Arch. В текущих исходниках допо
 Настоящие GNOME/KDE, AMD, микрофон и звук ещё требуют проверки.
 Scott Voice остаётся экспериментом Windows/NVIDIA.
 
-В 2.0.1 улучшены загрузка моделей и выбор компактной CPU-установки:
-[первая подготовка и размер](installation.md).
-Опубликованный пакет 2.0.1 включает X11-плагин XCB и использует XWayland
-в сеансе Wayland. В 2.1.0 упакованы оба варианта.
+## Режим распознавания
+
+Мастер предлагает автоматический выбор ускорения или обычный CPU.
+Прежние сохранённые профили распознавания поддерживаются. Чат и локальные
+команды работают независимо от установки Scott Voice; для RX580 используется CPU.
 
 ## Установка
 
@@ -59,14 +66,14 @@ sudo pacman -S --needed xorg-xwayland
 
 ### Установка приложения
 
-Скачайте [архив Linux x86-64](https://github.com/stalker1243/Scott-AI/releases/download/v2.1.0/ScottAI-2.1.0-Qt-linux-x86_64.tar.gz)
-и [файл SHA256](https://github.com/stalker1243/Scott-AI/releases/download/v2.1.0/ScottAI-2.1.0-Qt-linux-x86_64.tar.gz.sha256).
+Скачайте [архив Linux x86-64](https://github.com/stalker1243/Scott-AI/releases/download/v2.2.0/ScottAI-2.2.0-Qt-linux-x86_64.tar.gz)
+и [файл SHA256](https://github.com/stalker1243/Scott-AI/releases/download/v2.2.0/ScottAI-2.2.0-Qt-linux-x86_64.tar.gz.sha256).
 Вход в GitHub для скачивания выпуска не нужен.
 
 ```bash
-sha256sum -c ScottAI-2.1.0-Qt-linux-x86_64.tar.gz.sha256
-tar -xzf ScottAI-2.1.0-Qt-linux-x86_64.tar.gz
-cd ScottAI-2.1.0-Qt-linux-x86_64
+sha256sum -c ScottAI-2.2.0-Qt-linux-x86_64.tar.gz.sha256
+tar -xzf ScottAI-2.2.0-Qt-linux-x86_64.tar.gz
+cd ScottAI-2.2.0-Qt-linux-x86_64
 ./install.sh
 ~/.local/share/ScottAI/run.sh
 ```

@@ -13,6 +13,12 @@ import psutil
 import subprocess
 import sys
 import time
+import urllib.error
+from urllib.parse import quote
+try:
+    from .performance_trace import measured, phase, environment as trace_environment
+except ImportError:
+    from performance_trace import measured, phase, environment as trace_environment
 
 try:
     from .scott_voice_sdk import REQUIREMENTS, TORCH, TORCHAUDIO, WHEEL, WHEEL_SHA256
@@ -29,6 +35,8 @@ MODEL = 'Qwen/Qwen3-TTS-12Hz-0.6B-Base'
 REVISION = '5d83992436eae1d760afd27aff78a71d676296fc'
 REFERENCE_SHA = '78f48237579b5323bd5e738095fa17f4c30f1f76d8976e66ef128b850eea42f3'
 TORCH_INDEX = 'https://download.pytorch.org/whl/cu126'
+# Installed asset IDs stay unchanged so existing SDKs and weights remain usable.
+# Repository sources live in voice/runtime; asset_sources maps them to these IDs.
 ASSETS = tuple('experiments/voice_design/'+name for name in (
     'voice_worker.py', 'trial_utils.py', 'generate_samples.py', 'evaluate_samples.py',
     'create_scott_voice.py', 'robotic_profiles.json', 'stream_voice.py')) + (
@@ -41,6 +49,7 @@ MODEL_FILES = ('config.json', 'generation_config.json', 'merges.txt', 'model.saf
     'preprocessor_config.json', 'tokenizer_config.json', 'vocab.json',
     'speech_tokenizer/config.json', 'speech_tokenizer/configuration.json',
     'speech_tokenizer/model.safetensors', 'speech_tokenizer/preprocessor_config.json')
+DIRECT_LFS_BYTES = 16*1024*1024
 
 
 def preflight_nvidia():
@@ -100,6 +109,10 @@ def asset_sources(root=ROOT):
     source = packed if packed.is_dir() else root
     result = {name: source/name for name in ASSETS}
     if source == root:
+        runtime = root/'voice/runtime'
+        if runtime.is_dir():
+            for name in ASSETS[:7]:
+                result[name] = runtime/Path(name).name
         public = root/'assets/scott-voice/reference'
         for name in ASSETS[-2:]:
             candidate = public/Path(name).name
@@ -188,9 +201,82 @@ def clean_environment():
     env.update(PYTHONUTF8='1', PYTHONNOUSERSITE='1', HF_HUB_DISABLE_IMPLICIT_TOKEN='1',
                HF_HUB_DISABLE_XET='1', HF_HUB_DOWNLOAD_TIMEOUT='60', HF_HUB_ETAG_TIMEOUT='30',
                PIP_CONFIG_FILE=os.devnull)
-    return env
+    return trace_environment(env)
 
 
+def _retire_web_packages(home, run, env):
+    """Remove the former SDK web UI only from this owned, isolated voice venv."""
+    import csv
+    import io
+    from importlib.metadata import distributions
+    home = Path(home).resolve()
+    venv = python_path(home).parent.parent
+    site = venv/'Lib/site-packages'
+    if not site.exists():
+        return
+    message = 'Не удалось безопасно обновить библиотеки голоса. Повторите установку Scott Voice в отдельную папку.'
+    if (not venv.resolve().is_relative_to(home) or not site.resolve().is_relative_to(venv.resolve())
+            or 'include-system-site-packages = false' not in (venv/'pyvenv.cfg').read_text(encoding='utf8').lower()):
+        raise ValueError(message)
+    retired = set()
+    for distribution in distributions(path=[str(site)]):
+        name = (distribution.metadata.get('Name') or '').lower().replace('_', '-')
+        if name not in ('gradio', 'gradio-client', 'hf-gradio'):
+            continue
+        # Read every RECORD entry, including missing files; metadata.files may
+        # filter those out while pip still interprets the original paths.
+        files = list(csv.reader(io.StringIO(distribution.read_text('RECORD') or '')))
+        if (name in retired or not files or not all(len(row) == 3 and row[0] and
+                distribution.locate_file(row[0]).resolve().is_relative_to(venv.resolve()) for row in files)):
+            raise ValueError(message)
+        retired.add(name)
+    if retired:
+        run([str(python_path(home)), '-m', 'pip', 'uninstall', '--yes', *sorted(retired)],
+            check=True, env=env, timeout=120)
+
+
+def _download_weight(target, name, item, emit, fraction):
+    """Use durable app-owned partials for large files, without SDK temp deletion."""
+    try:
+        from .model_download import download_file, DownloadError
+    except ImportError:
+        from model_download import download_file, DownloadError
+    try:
+        from .torch_download import _safe
+    except ImportError:
+        from torch_download import _safe
+    for suffix in ('', '.part', '.part.json', '.part.json.tmp', '.download.lock'):
+        path = target.with_name(target.name+suffix)
+        _safe(path)
+        if path.exists() and not path.is_file():
+            raise DownloadError('Вместо файла загрузки находится папка. Выберите отдельную папку установки.')
+    last = [float('-inf')]
+    current = [fraction]
+    span = .28/(len(MODEL_FILES)+1)
+    def progress(done, total):
+        now = time.monotonic()
+        if now-last[0] < .5 and done != item.size:
+            return
+        last[0] = now
+        current[0] = fraction+span*min(1, max(0, done/item.size))
+        emit('model', f'{name}: {done/1024**2:.1f} / {item.size/1024**2:.1f} МиБ', current[0])
+    progress(0, item.size)
+    url = f'https://huggingface.co/{MODEL}/resolve/{REVISION}/{quote(name, safe="/")}'
+    try:
+        return download_file(url, target, expected_sha256=item.lfs.sha256, progress=progress,
+            status=lambda message: emit('model', f'{name}: {message}', current[0]))
+    except DownloadError as error:
+        cause = error.__cause__
+        status = cause.code if isinstance(cause, urllib.error.HTTPError) else None
+        code = ('download_access' if status in (401,403,404) else
+                'download_server' if status == 429 or isinstance(status,int) and status >= 500 else
+                failure_code(cause) if cause is not None else '')
+        if code:
+            raise InstallationError(MESSAGES[code], code) from error
+        raise
+
+
+@measured('voice_setup.models')
 def download_model(home, model_source=None, progress=None):
     """Pin the accepted revision; verify official LFS hashes before publishing."""
     # Called with the optional interpreter after installing its dependencies.
@@ -276,8 +362,13 @@ def download_model(home, model_source=None, progress=None):
             backup = target.with_name(target.name+'.corrupt-'+uuid.uuid4().hex)
             os.replace(target, backup)
         try:
-            path = target if verified(target) else Path(retry(lambda: hf_hub_download(MODEL, name, revision=REVISION, token=False,
-                        local_dir=destination, cache_dir=Path(home)/'download-cache', force_download=False, etag_timeout=30), name, fraction))
+            if verified(target):
+                path = target
+            elif item.lfs and isinstance(item.size, int) and item.size >= DIRECT_LFS_BYTES:
+                path = _download_weight(target, name, item, emit, fraction)
+            else:
+                path = Path(retry(lambda: hf_hub_download(MODEL, name, revision=REVISION, token=False,
+                            local_dir=destination, cache_dir=Path(home)/'download-cache', force_download=False, etag_timeout=30), name, fraction))
             if path.resolve() != (destination/name).resolve() or not path.is_file():
                 raise ValueError('Загрузчик вернул неверный путь.')
             actual = checksum(path)
@@ -291,7 +382,7 @@ def download_model(home, model_source=None, progress=None):
             if backup:
                 backup.unlink()
         hashes[name] = actual
-        emit('model', 'Проверен файл модели: '+name, fraction)
+        emit('model', 'Проверен файл модели: '+name, fraction+.28/(len(MODEL_FILES)+1))
     write_json(destination/'scott-model.json', dict(model=MODEL, revision=REVISION,
                 files=list(hashes), sha256=hashes))
 
@@ -320,6 +411,7 @@ def check(home, deep=False):
                 home=str(Path(home).resolve()), deep=deep)
 
 
+@measured('voice_setup.total', success=lambda result: result.get('available', False))
 def install(home, python, root=ROOT, **options):
     home = Path(home).resolve()
     if os.name != 'nt' or struct.calcsize('P') != 8:
@@ -456,7 +548,8 @@ def _install_owned(home, python, root=ROOT, auto_python=False, progress=None, ru
     commands = plan(home, python, root=root)['commands']
     emit('environment', 'Подготавливаем окружение', .15)
     if not python_path(home).is_file():
-        run(commands[0], check=True, env=env, timeout=120)
+        with phase('voice_setup.environment'):
+            run(commands[0], check=True, env=env, timeout=120)
     shared = configure(home, root, run=run, env=env)
     if fresh and not shared:
         require_space('voice', home)
@@ -484,11 +577,25 @@ def _install_owned(home, python, root=ROOT, auto_python=False, progress=None, ru
             framework_ready = True
         except (OSError,subprocess.SubprocessError):
             pass
+    try:
+        from . import setup_cache
+    except ImportError:
+        import setup_cache
+    cache = None
+    try:
+        cache = setup_cache.prepare(home/'download-cache/pip')
+    except (OSError, ValueError, setup_cache.DownloadError):
+        pass  # Optional cache must never adopt unrelated data or block setup.
     for index, command in enumerate(commands[1:]):
         if libraries_ready and index < 2 or framework_ready and index == 0:
             continue
         emit('libraries', 'Устанавливаем библиотеки голоса', .2+index*.12)
+        if index == 2:
+            _retire_web_packages(home, run, env)
         if index < 2:
+            if cache is not None:
+                flag = command.index('--no-cache-dir')
+                command[flag:flag+1] = ['--cache-dir', str(cache)]
             help_result = run([str(python_path(home)), '-m', 'pip', 'install', '--help'], check=True, capture_output=True, text=True, env=env, timeout=30)
             if '--resume-retries' in (getattr(help_result, 'stdout', '') or ''):
                 command[4:4] = ['--resume-retries', '5']
@@ -513,8 +620,9 @@ def _install_owned(home, python, root=ROOT, auto_python=False, progress=None, ru
                         last[0]=now
                         emit('libraries',f'Загружаем PyTorch: {done/1024**2:.1f} / {total/1024**2:.1f} МиБ',.2+.1*done/total)
                 try:
-                    downloaded=torch_download.fetch(wheel,home/'download-cache/torch',progress=transfer,
-                        cancelled=runner.cancelled if runner is not None else None)
+                    with phase('voice_setup.framework_download_verify'):
+                        downloaded=torch_download.fetch(wheel,home/'download-cache/torch',progress=transfer,
+                            cancelled=runner.cancelled if runner is not None else None)
                 except torch_download.DownloadError:
                     if runner is not None and runner.cancelled.is_set():
                         try:
@@ -524,16 +632,23 @@ def _install_owned(home, python, root=ROOT, auto_python=False, progress=None, ru
                         raise InstallationCancelled() from None
                     raise
                 command=[str(downloaded) if item=='torch=='+TORCH else item for item in command]
-        run(command, check=True, env=env, timeout=3600 if index == 0 else 1800 if index == 1 else 60)
+        try:
+            with phase('voice_setup.framework' if index == 0 else 'voice_setup.libraries' if index == 1 else 'voice_setup.library_check'):
+                run(command, check=True, env=env, timeout=3600 if index == 0 else 1800 if index == 1 else 60)
+        finally:
+            setup_cache.maintain(cache)
         if downloaded is not None:
             torch_download.discard(wheel,home/'download-cache/torch')
+    setup_cache.maintain(cache, complete=True)
     emit('model', 'Подготавливаем файлы голоса', .6)
     download = [str(python_path(home)), str(Path(__file__).resolve()), '--download-model', '--json', '--home', str(home)]
     if model_source:
         download += ['--model-source', str(model_source)]
-    run(download, check=True, env=env, timeout=3600)
+    with phase('voice_setup.model_worker'):
+        run(download, check=True, env=env, timeout=3600)
     emit('verification', 'Проверяем готовность голоса', .9)
-    result = check(home, deep=True)
+    with phase('voice_setup.verification'):
+        result = check(home, deep=True)
     if not result['available']:
         raise ValueError('Окружение подготовлено, но проверка не прошла: '+result['error'])
     if runner is not None and runner.cancelled.is_set():

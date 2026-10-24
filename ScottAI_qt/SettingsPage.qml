@@ -28,7 +28,6 @@ ColumnLayout {
     readonly property var audioState: audio.settings || ({})
     readonly property var device: client.settings.device || ({})
     readonly property var voices: client.settings.voices || ({})
-    readonly property var characters: client.settings.characters || ({})
     readonly property bool scottSelected: voices.current === "scott-voice"
     readonly property var scottInfo: (voices.voices || []).find(function(v) { return v.id === "scott-voice" }) || ({})
     function editable(group) { return client.online && !client.settingsBusy && client.settingsReady.indexOf(group) >= 0 }
@@ -63,7 +62,9 @@ ColumnLayout {
     Component.onCompleted: { sectionReady = true; syncVolume(); settleSection() }
     onSectionChanged: changeSection()
     onVisibleChanged: if (sectionReady && !visible) settleSection()
-    Connections { target: page.client; function onSettingsChanged() { page.syncVolume() } }
+    Connections { target: page.client; function onSettingsChanged() {
+        page.syncVolume()
+    } }
     Connections { target: page.theme; function onMotionChanged() { if (!page.theme.motion && page.sectionReady) page.settleSection() } }
     spacing: 14
 
@@ -257,31 +258,11 @@ ColumnLayout {
                             visible: !page.voiceInstall.installed && page.voiceInstall.supported === true
                             text: (page.voiceInstall.space || {}).hint || qsTranslate("Launcher", "Scott Voice: около 7–8 ГиБ дополнительно. На время подготовки оставьте 10 ГиБ свободно.")
                         }
-                        Hint { text: qsTranslate("Launcher", "Локальные голоса работают без интернета. Scott Voice — собственный мужской тембр. Выбор сохраняется.") }
                         RowLayout {
-                            Option {
-                                objectName: "voiceChoice"
-                                model: (page.voices.voices || []).map(function(v) { return {id:v.id, title:qsTranslate("Launcher", v.label) + (v.available === false ? qsTranslate("Launcher", " · недоступен") : v.local ? qsTranslate("Launcher", " · локальный") : qsTranslate("Launcher", " · облачный"))} })
-                                currentIndex: page.indexOf(model, page.voices.current)
-                                enabled: page.editable("voices") && count > 0
-                                onActivated: client.applySetting("voice", {voice: currentValue})
-                            }
-                            UiButton { theme: page.theme; text: qsTranslate("Launcher", "Прослушать"); enabled: page.editable("voices"); onClicked: client.previewVoice() }
+                            Text { objectName: "scottVoiceName"; text: "Scott Voice"; color: page.theme.ink; font.family: page.theme.fontFamily; font.bold: true; Layout.fillWidth: true }
+                            UiButton { objectName: "previewScottVoice"; theme: page.theme; text: qsTranslate("Launcher", "Прослушать"); enabled: page.editable("voices") && page.scottInfo.available === true; onClicked: client.previewVoice() }
                         }
                         Hint { visible: page.scottSelected || page.scottInfo.available === false; text: qsTranslate("Launcher", page.scottInfo.reason || qsTranslate("Launcher", "Scott Voice работает локально. Новая фраза может готовиться дольше её звучания; готовые ответы берутся из кеша.")) }
-                        Hint {
-                            visible: page.scottSelected && page.scottInfo.fallback_active === true
-                            text: qsTranslate("Launcher", "Scott Voice временно недоступен. Резервный голос: ") + (page.scottInfo.fallback_label || qsTranslate("Launcher", "обычный голос")) + qsTranslate("Launcher", ". Проверьте или подготовьте Scott Voice.")
-                        }
-                        Hint { text: page.scottSelected ? qsTranslate("Launcher", "Характер Scott Voice") : qsTranslate("Launcher", "Характер звучания") }
-                        Option {
-                            objectName: "voiceCharacter"
-                            model: page.scottSelected ? (page.voices.scott_profiles || []) : (page.characters.characters || [])
-                            currentIndex: page.indexOf(model, page.scottSelected ? page.voices.scott_profile : page.characters.current)
-                            enabled: page.editable(page.scottSelected ? "voices" : "characters") && count > 0 && (!page.scottSelected || page.scottInfo.available === true)
-                            onActivated: page.scottSelected ? client.applySetting("voiceProfile", {voice:"scott-voice", profile:currentValue}) : client.applySetting("audio", {character: currentValue})
-                        }
-                        Hint { text: page.scottSelected ? qsTranslate("Launcher", "Оцените цифровую окраску кнопкой «Прослушать». При сбое Scott использует резервный голос.") : qsTranslate("Launcher", "«Спокойный» смягчает резкие звуки, сохраняя высоту и темп. Оцените кнопкой «Прослушать».") }
                         Hint {
                             objectName: "voicePreparationMessage"
                             visible: page.scottSelected
@@ -305,45 +286,6 @@ ColumnLayout {
                                 onClicked: client.releaseScottVoice()
                             }
                         }
-                        UiSwitch {
-                            objectName: "scottStreaming"
-                            theme: page.theme; text: qsTranslate("Launcher", "Раннее начало речи")
-                            Layout.fillWidth: true
-                            visible: page.scottSelected
-                            checked: page.voices.scott_streaming === true
-                            enabled: page.editable("voices") && page.scottInfo.streaming_available === true
-                            onToggled: client.applySetting("voiceStreaming", {voice:"scott-voice", streaming:checked})
-                        }
-                        Hint {
-                            visible: page.scottSelected
-                            text: qsTranslate("Launcher", "Эксперимент: Scott начинает говорить во время подготовки ответа. Между фрагментами возможны паузы.")
-                        }
-                        Hint { visible: page.scottSelected && page.voices.scott_streaming === true; text: qsTranslate("Launcher", "Запас звука") }
-                        Option {
-                            objectName: "scottBuffer"
-                            visible: page.scottSelected && page.voices.scott_streaming === true
-                            model: page.voices.scott_buffers || []
-                            currentIndex: page.indexOf(model, page.voices.scott_buffer || "immediate")
-                            enabled: page.editable("voices") && page.scottInfo.available === true && count > 0
-                            onActivated: client.applySetting("voiceBuffer", {voice:"scott-voice", buffer:currentValue})
-                        }
-                        Hint {
-                            visible: page.scottSelected && page.voices.scott_streaming === true
-                            text: qsTranslate("Launcher", "Больше запаса — позже начало, меньше ожидания блоков. «Вся фраза» готовит её целиком перед воспроизведением.")
-                        }
-                        UiSwitch {
-                            objectName: "scottAcceleration"
-                            theme: page.theme; text: qsTranslate("Launcher", "Ускоренный синтез")
-                            Layout.fillWidth: true
-                            visible: page.scottSelected
-                            checked: page.voices.scott_acceleration === true
-                            enabled: page.editable("voices") && (page.scottInfo.acceleration_available === true || checked)
-                            onToggled: client.applySetting("voiceAcceleration", {voice:"scott-voice", acceleration:checked})
-                        }
-                        Hint {
-                            visible: page.scottSelected
-                            text: qsTranslate("Launcher", "Эксперимент: ускорение может изменить тембр и паузы. Сравните звучание кнопкой «Прослушать».")
-                        }
                     }
                 }
             }
@@ -352,7 +294,7 @@ ColumnLayout {
                 ColumnLayout {
                     width: processingScroll.availableWidth; spacing: 16
                     Repeater {
-                        model: [{id:"whisper", title:qsTranslate("Launcher", "Распознавание речи")}, {id:"silero", title:qsTranslate("Launcher", "Синтез речи")}]
+                        model: [{id:"whisper", title:qsTranslate("Launcher", "Распознавание речи")}]
                         SettingCard {
                             id: engineCard
                             required property var modelData

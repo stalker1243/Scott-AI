@@ -11,6 +11,119 @@
 class ClientTests : public QObject {
     Q_OBJECT
 private slots:
+    void inputMeterIsBoundedAndSubscriptionStops() {
+        QTcpServer server;QVERIFY(server.listen(QHostAddress::LocalHost,0));
+        int polls=0;double level=.65;bool listening=true;
+        connect(&server,&QTcpServer::newConnection,this,[&]{
+            auto *socket=server.nextPendingConnection();auto buffer=std::make_shared<QByteArray>();
+            connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
+            connect(socket,&QTcpSocket::readyRead,socket,[&,socket,buffer]{
+                *buffer+=socket->readAll();if(!buffer->contains("\r\n\r\n"))return;
+                const auto path=buffer->split(' ').value(1);QJsonObject data;
+                if(path=="/health")data={{"status","online"}};
+                if(path=="/listen/status")data={{"listening",listening},{"available",true}};
+                if(path=="/listen/level"){++polls;data={{"listening",listening},{"level",level}};}
+                const auto body=QJsonDocument(data).toJson(QJsonDocument::Compact);
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: "+QByteArray::number(body.size())+"\r\n\r\n"+body);socket->disconnectFromHost();
+            });
+        });
+        BackendClient client(QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort())));
+        client.refresh();QTRY_VERIFY(client.listeningReady());QVERIFY(client.listening());
+        QTest::qWait(180);QCOMPARE(polls,0);QCOMPARE(client.inputLevel(),0.0);
+        client.setInputMonitoring(true);QTRY_VERIFY(client.inputLevel()>.6);level=10;QTRY_COMPARE(client.inputLevel(),1.0);
+        level=-5;QTRY_COMPARE(client.inputLevel(),0.0);level=.5;QTRY_COMPARE(client.inputLevel(),.5);
+        client.setInputMonitoring(false);QTest::qWait(150);const auto stopped=polls;QTest::qWait(200);QCOMPARE(polls,stopped);QCOMPARE(client.inputLevel(),0.0);
+        client.setInputMonitoring(true);QTRY_COMPARE(client.inputLevel(),.5);
+        listening=false;QTRY_VERIFY(!client.listening());QCOMPARE(client.inputLevel(),0.0);
+    }
+
+    void localVoiceAndRetiredSettings() {
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost,0));
+        bool listening=false; int writes=0; QJsonObject posted;
+        QString error;
+        connect(&server,&QTcpServer::newConnection,this,[&] {
+            auto *socket=server.nextPendingConnection(); auto buffer=std::make_shared<QByteArray>();
+            connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
+            connect(socket,&QTcpSocket::readyRead,socket,[&,socket,buffer] {
+                *buffer+=socket->readAll(); const int split=buffer->indexOf("\r\n\r\n"); if(split<0)return;
+                int length=0; for(const auto &line:buffer->left(split).split('\n'))
+                    if(line.toLower().startsWith("content-length:"))length=line.mid(15).trimmed().toInt();
+                if(buffer->size()<split+4+length)return;
+                const auto path=buffer->left(split).split(' ').value(1);
+                if(buffer->startsWith("POST ")) {
+                    posted=QJsonDocument::fromJson(buffer->mid(split+4,length)).object();
+                    ++writes;
+                    if(path=="/listen/start")listening=true;
+                    if(path=="/listen/stop")listening=false;
+                }
+                QJsonObject result{{"success",true}};
+                if(path=="/health")result["status"]="online";
+                if(path=="/metrics")result["metrics"]=QJsonObject{};
+                if(path.startsWith("/listen/")) {result["available"]=true;result["listening"]=listening;result["last_error"]=error;result["state"]=listening ? "listening" : "idle";}
+                if(path=="/voice/available")result={{"current","scott-voice"},{"voices",QJsonArray{}}};
+                if(path=="/audio/settings")result={{"success",true},{"settings",QJsonObject{}},{"devices",QJsonObject{}}};
+                if(path=="/settings/device")result={{"success",true},{"engines",QJsonObject{}}};
+                if(path=="/versions/items")result["data"]=QJsonArray{};
+                const auto body=QJsonDocument(result).toJson(QJsonDocument::Compact);
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: "+QByteArray::number(body.size())+"\r\n\r\n"+body);
+                socket->disconnectFromHost();
+            });
+        });
+        BackendClient client(QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort())));
+        client.refresh();QTRY_VERIFY(client.online());QTRY_VERIFY(client.listeningReady());
+        client.refreshSettings();QTRY_VERIFY(!client.settingsBusy());
+        for(const auto &group : {"voiceMode", "voiceStreaming", "voiceAcceleration", "voiceBuffer", "voiceProfile"}) {
+            client.applySetting(group, {{"voice", "scott-voice"}});
+            QVERIFY(!client.settingsBusy()); QVERIFY(!client.settingsError().isEmpty()); QCOMPARE(writes,0);
+        }
+        client.setListening(true);QTRY_VERIFY(client.listening());
+        QCOMPARE(client.listeningPhase(),"listening");
+        listening=false;error=QString::fromUtf8("Ошибка аудиоустройства.");
+        client.refreshListening();QTRY_COMPARE(client.listeningError(),error);QVERIFY(!client.listening());
+    }
+    void listeningStartsBeforeVoiceIsReady() {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+        bool listening=false;
+        int starts=0,stops=0;
+        QJsonObject preparation{{"id",""},{"state","idle"},{"model_loaded",false},{"message",""}};
+        connect(&server,&QTcpServer::newConnection,this,[&] {
+            auto *socket=server.nextPendingConnection();
+            auto buffer=std::make_shared<QByteArray>();
+            connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
+            connect(socket,&QTcpSocket::readyRead,socket,[&,socket,buffer] {
+                *buffer+=socket->readAll();
+                const int split=buffer->indexOf("\r\n\r\n");
+                if(split<0)return;
+                QJsonObject body{{"success",true}};
+                if(buffer->startsWith("GET /health "))body={{"status","online"}};
+                else if(buffer->startsWith("GET /metrics "))body={{"metrics",QJsonObject{}}};
+                else if(buffer->startsWith("GET /listen/status "))body={{"listening",listening},{"available",true}};
+                else if(buffer->startsWith("GET /voice/prepare "))body=preparation;
+                else if(buffer->startsWith("POST /listen/start ")||buffer->startsWith("POST /listen/stop ")) {
+                    listening=buffer->startsWith("POST /listen/start ");
+                    if(listening)++starts;else ++stops;
+                    preparation={{"id","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"state",listening?"running":"cancelled"},
+                        {"model_loaded",false},{"message",listening?"Loading":"Cancelled"}};
+                    body={{"success",true},{"listening",listening},{"available",true},{"voice_preparation",preparation}};
+                }
+                const auto bytes=QJsonDocument(body).toJson(QJsonDocument::Compact);
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: "+QByteArray::number(bytes.size())+"\r\n\r\n"+bytes);
+                socket->disconnectFromHost();
+            });
+        });
+        BackendClient client(QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort())));
+        client.refresh();QTRY_VERIFY(client.online()&&client.listeningReady()&&!client.listeningBusy());
+        client.setListening(true);
+        QTRY_VERIFY(client.listening()&&!client.listeningBusy());
+        QCOMPARE(starts,1);QCOMPARE(client.voicePreparation().value("state").toString(),QString("running"));
+        QVERIFY(!client.voicePreparation().value("model_loaded").toBool());
+        client.setListening(false);QTRY_VERIFY(!client.listening()&&!client.listeningBusy());
+        QCOMPARE(stops,1);QCOMPARE(client.voicePreparation().value("state").toString(),QString("cancelled"));
+        preparation["state"]="complete";preparation["model_loaded"]=true;
+        client.refreshVoicePreparation();QTRY_VERIFY(client.voicePreparation().value("model_loaded").toBool());
+        QVERIFY(!client.listening());QCOMPARE(starts,1); // Late readiness never starts the microphone.
+    }
     void settingsContractAndFailures() {
         QTcpServer server;
         QVERIFY(server.listen(QHostAddress::LocalHost, 0));
@@ -18,7 +131,7 @@ private slots:
         QJsonObject engines{{"whisper", QJsonObject{{"choice", "auto"}, {"device", "cpu"}, {"locked_by_env", false}}},
                                   {"silero", QJsonObject{{"choice", "cpu"}, {"device", "cpu"}, {"locked_by_env", true}}}};
         bool amdAvailable = false;
-        int posts = 0, voiceReads = 0;
+        int posts = 0, voiceReads = 0, characterReads = 0;
         bool failWrite = false, failRead = false, scottAvailable = false, selectedStreaming = false, selectedAcceleration = false;
         QString selectedVoice = "demo", selectedProfile = "natural", selectedBuffer = "immediate";
         QJsonObject voiceJob{{"id", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, {"state", "idle"}, {"installed", false}, {"supported", true}};
@@ -86,8 +199,7 @@ private slots:
                 else if (path == "/voice/install") response = voiceJob;
                 else if (path == "/voice/prepare") response = voicePreparation;
                 else if (path == "/voice/available") { ++voiceReads; response = {
-                    {"voices", QJsonArray{QJsonObject{{"id", "demo"}, {"label", "Demo"}},
-                        QJsonObject{{"id", "scott-voice"}, {"label", "Scott Voice"}, {"available", scottAvailable}, {"streaming_available", scottAvailable}, {"acceleration_available", scottAvailable}}}},
+                    {"voices", QJsonArray{QJsonObject{{"id", "scott-voice"}, {"label", "Scott Voice"}, {"available", scottAvailable}, {"streaming_available", scottAvailable}, {"acceleration_available", scottAvailable}}}},
                     {"current", selectedVoice}, {"scott_profile", selectedProfile}, {"scott_streaming", selectedStreaming},
                     {"scott_acceleration", selectedAcceleration}, {"scott_buffer", selectedBuffer},
                     {"scott_buffers", QJsonArray{QJsonObject{{"id", "immediate"}, {"title", "Immediate"}},
@@ -95,7 +207,7 @@ private slots:
                         QJsonObject{{"id", "complete"}, {"title", "Complete"}}}},
                     {"scott_profiles", QJsonArray{QJsonObject{{"id", "natural"}, {"title", "Original"}},
                         QJsonObject{{"id", "digital"}, {"title", "Digital"}}}}}; }
-                else if (path == "/audio/characters") response = {{"success", true}, {"characters", QJsonArray{QJsonObject{{"id", "natural"}, {"title", "Natural"}}}}, {"current", "natural"}};
+                else if (path == "/audio/characters") { ++characterReads; response = {{"success", false}}; }
                 else if (path == "/versions/items") response = {{"success", true}, {"data", QJsonArray{}}};
                 else response = {{"success", false}, {"error", "Unexpected request"}};
                 const auto body = QJsonDocument(response).toJson(QJsonDocument::Compact);
@@ -106,7 +218,9 @@ private slots:
         BackendClient client(QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort())));
         client.refresh(); QTRY_VERIFY(client.online());
         client.refreshSettings(); QTRY_VERIFY(!client.settingsBusy());
-        QCOMPARE(client.settingsReady().size(), 5);
+        QCOMPARE(client.settingsReady().size(), 4);
+        QVERIFY(!client.settingsReady().contains("characters"));
+        QCOMPARE(characterReads, 0);
         QCOMPARE(posts, 0); QCOMPARE(voiceReads, 1); // Loading must never write preferences.
         client.applySetting("audio", {{"volume", 30}});
         client.applySetting("audio", {{"volume", 99}}); // Double click is blocked while saving.
@@ -124,10 +238,11 @@ private slots:
         client.applySetting("quiet", {{"quiet", true}});
         QTRY_VERIFY(!client.settingsBusy()); QCOMPARE(postedPath, QByteArray("/audio/quiet"));
         QVERIFY(client.settings().value("audio").toMap().value("settings").toMap().value("quiet").toBool());
+        const int beforeRetired = posts;
         client.applySetting("voice", {{"voice", "demo"}});
-        QTRY_VERIFY(!client.settingsBusy()); QCOMPARE(postedPath, QByteArray("/voice/select"));
+        QVERIFY(!client.settingsError().isEmpty());
         client.applySetting("audio", {{"character", "natural"}});
-        QTRY_VERIFY(!client.settingsBusy()); QCOMPARE(posted.value("character").toString(), "natural");
+        QTRY_VERIFY(!client.settingsBusy()); QCOMPARE(posts, beforeRetired);
         client.previewVoice(); QTRY_VERIFY(!client.settingsBusy());
         QVERIFY(previewHeaders.toLower().contains("content-type: application/x-www-form-urlencoded"));
         QVERIFY(previewBody.contains("force=true")); QVERIFY(previewBody.contains("text="));
@@ -175,37 +290,10 @@ private slots:
         client.applySetting("voice", {{"voice", "scott-voice"}});
         QTRY_VERIFY(!client.settingsBusy()); QCOMPARE(selectedVoice, "scott-voice");
         const int scottPosts = posts;
-        client.applySetting("voiceProfile", {{"voice", "scott-voice"}, {"profile", "unknown"}});
-        QCOMPARE(posts, scottPosts);
-        client.applySetting("voiceProfile", {{"voice", "scott-voice"}, {"profile", "digital"}});
-        QTRY_VERIFY(!client.settingsBusy());
-        QCOMPARE(postedPath, QByteArray("/voice/select"));
-        QCOMPARE(selectedProfile, "digital");
-        const int beforeStream = posts;
-        client.applySetting("voiceStreaming", {{"voice", "scott-voice"}, {"streaming", "true"}});
-        QCOMPARE(posts, beforeStream);
-        client.applySetting("voiceStreaming", {{"voice", "scott-voice"}, {"streaming", true}});
-        QTRY_VERIFY(!client.settingsBusy());
-        QVERIFY(selectedStreaming);
-        QCOMPARE(posted, (QJsonObject{{"voice", "scott-voice"}, {"streaming", true}}));
-        const int beforeAcceleration = posts;
-        client.applySetting("voiceAcceleration", {{"voice", "scott-voice"}, {"acceleration", "true"}});
-        QCOMPARE(posts, beforeAcceleration);
-        client.applySetting("voiceAcceleration", {{"voice", "scott-voice"}, {"acceleration", true}});
-        QTRY_VERIFY(!client.settingsBusy());
-        QVERIFY(selectedAcceleration);
-        QCOMPARE(posted, (QJsonObject{{"voice", "scott-voice"}, {"acceleration", true}}));
-        client.applySetting("voiceAcceleration", {{"voice", "scott-voice"}, {"acceleration", false}});
-        QTRY_VERIFY(!client.settingsBusy());
-        QVERIFY(!selectedAcceleration);
-        const int beforeBuffer = posts;
-        client.applySetting("voiceBuffer", {{"voice", "scott-voice"}, {"buffer", "unknown"}});
-        client.applySetting("voiceBuffer", {{"voice", "scott-voice"}, {"buffer", 4}});
-        QCOMPARE(posts, beforeBuffer);
-        client.applySetting("voiceBuffer", {{"voice", "scott-voice"}, {"buffer", "4s"}});
-        QTRY_VERIFY(!client.settingsBusy());
-        QCOMPARE(selectedBuffer, QString("4s"));
-        QCOMPARE(posted, (QJsonObject{{"voice", "scott-voice"}, {"buffer", "4s"}}));
+        for(const auto &group : {"voiceProfile", "voiceStreaming", "voiceAcceleration", "voiceBuffer"}) {
+            client.applySetting(group, {{"voice", "scott-voice"}});
+            QCOMPARE(posts,scottPosts); QVERIFY(!client.settingsError().isEmpty());
+        }
         client.previewVoice();
         QVERIFY(client.settingsNotice().contains(QStringLiteral("Готовим Scott Voice")));
         QTRY_VERIFY(!client.settingsBusy());

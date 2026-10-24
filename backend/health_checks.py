@@ -77,27 +77,28 @@ def _динамики() -> Dict:
 
 
 def _голос() -> Dict:
-    """Синтез речи: тот ли он, на который рассчитывали, и на чём считает."""
+    """Describe the actual voice without loading its model."""
     try:
-        from . import device_settings
+        from .scott_voice_engine import get_engine
     except ImportError:
-        import device_settings
-
-    устройство = device_settings.resolve_device("silero")
-
-    try:
-        from . import silero_tts
-    except ImportError:
-        import silero_tts
-
-    if not getattr(silero_tts, "SILERO_AVAILABLE", True):
-        return {"state": WARN,
-                "detail": "Silero недоступен — Scott говорит запасным облачным голосом"}
-
-    return {"state": OK, "detail": f"Silero, считает {device_settings.device_label(устройство)}"}
+        from scott_voice_engine import get_engine
+    info = get_engine().describe()
+    if not info['available'] or info.get('error'):
+        return {'state': WARN, 'detail': info.get('reason') or 'Проверьте Scott Voice в настройках голоса.'}
+    return {'state': OK, 'detail': 'Scott Voice, локальный синтез'}
 
 
 def _распознавание() -> Dict:
+    try:
+        from .runtime_profile import compact_mode, REPAIR_MESSAGE
+    except ImportError:
+        from runtime_profile import compact_mode, REPAIR_MESSAGE
+    if compact_mode():
+        try:
+            from faster_whisper import WhisperModel
+        except (ImportError, OSError):
+            return {'state': FAIL, 'detail': REPAIR_MESSAGE}
+        return {'state': WARN, 'detail': 'faster-whisper на CPU, компактный режим. Резервный движок не установлен.'}
     try:
         from . import device_settings
     except ImportError:
@@ -125,6 +126,12 @@ def _распознавание() -> Dict:
 
 
 def _видеокарта() -> Dict:
+    try:
+        from .runtime_profile import compact_mode
+    except ImportError:
+        from runtime_profile import compact_mode
+    if compact_mode():
+        return {'state': WARN, 'detail': 'Компактный режим использует процессор для распознавания. Scott Voice проверяется отдельно.'}
     try:
         from . import device_settings
     except ImportError:

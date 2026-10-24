@@ -36,7 +36,13 @@ class ChatStore:
                 CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, chat_id TEXT NOT NULL
                     REFERENCES chats(id) ON DELETE CASCADE, mime TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT);
+                CREATE TABLE IF NOT EXISTS requests(id TEXT PRIMARY KEY, chat_id TEXT NOT NULL
+                    REFERENCES chats(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL,
+                    question TEXT NOT NULL, state TEXT NOT NULL, owner TEXT NOT NULL, phase TEXT NOT NULL DEFAULT 'pending');
+                CREATE INDEX IF NOT EXISTS request_chat ON requests(chat_id);
             ''')
+            if 'phase' not in {row[1] for row in db.execute('PRAGMA table_info(requests)')}:
+                db.execute("ALTER TABLE requests ADD COLUMN phase TEXT NOT NULL DEFAULT 'effect'")
 
     @contextmanager
     def connect(self):
@@ -102,6 +108,13 @@ class ChatStore:
                 entry['attachments'] = json.loads(entry['attachments'])
                 entry.pop('content')
                 chat['messages'].append(entry)
+            pending = db.execute('SELECT * FROM requests WHERE chat_id=? ORDER BY rowid DESC LIMIT 1', (ident,)).fetchone()
+            if pending and pending['state'] in ('pending', 'uncertain', 'failed'):
+                try:
+                    from .request_receipts import public_state
+                except ImportError:
+                    from request_receipts import public_state
+                chat['pending_request'] = dict(id=pending['id'], question=pending['question'], state=public_state(pending))
         return chat
 
     def context(self, ident, images=False):
@@ -151,6 +164,9 @@ class ChatStore:
             if ident:
                 self.get(ident)
             if clear and ident:
+                # Keep only a tombstone so an old HTTP retry cannot repeat an
+                # action after the user clears its history. No text remains.
+                db.execute("UPDATE requests SET state='cleared',question='',fingerprint='',owner='',phase='' WHERE chat_id=?", (ident,))
                 db.execute('DELETE FROM messages WHERE chat_id=?', (ident,))
                 db.execute('DELETE FROM assets WHERE chat_id=?', (ident,))
                 db.execute('UPDATE chats SET updated=? WHERE id=?', (now(), ident))
@@ -173,6 +189,11 @@ class ChatStore:
                 chat = db.execute('SELECT * FROM chats WHERE id=?', (ident,)).fetchone()
                 if not chat:
                     raise KeyError('Диалог не найден')
+                try:
+                    from .request_receipts import commit
+                except ImportError:
+                    from request_receipts import commit
+                commit(db, self, ident)
                 for role, name, mime, data in media:
                     asset_id = uuid.uuid4().hex
                     (self.assets / asset_id).write_bytes(data)

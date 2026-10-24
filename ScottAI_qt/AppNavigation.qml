@@ -62,7 +62,7 @@ Item {
     }
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 8; spacing: 4
-        Repeater { id: workLinks; model: [0, 1, 4, 8, 9]; Link { required property int modelData; tab: modelData } }
+        Repeater { id: workLinks; model: [0, 1, 4, 9]; Link { required property int modelData; tab: modelData } }
         ChatToolButton {
             id: toolsLink
             objectName: "navigationMore"
@@ -72,7 +72,7 @@ Item {
             UiMenu {
                 id: toolsMenu; objectName: "navigationMoreMenu"; theme: navigation.theme; x: navigation.width - 10; y: 0
                 Repeater {
-                    model: [7, 2, 10, 11]
+                    model: [2, 10, 11]
                     UiMenuItem {
                         theme: navigation.theme
                         required property int modelData

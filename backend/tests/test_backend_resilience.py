@@ -73,7 +73,7 @@ def voice_runtime(main_module, monkeypatch):
                                expect_interruption=lambda text: expecting.append(text),
                                stop_expecting=lambda: expecting.append(None))
     voice = SimpleNamespace(speak_to_file=lambda text: synthesized.append(text) or text,
-                            play_audio=lambda path: played.append(path))
+                            play_audio=lambda path, **options: played.append(path))
     monkeypatch.setattr(main.scott_runtime, "listener", listener)
     monkeypatch.setattr(main.scott_runtime, "scott_voice", voice)
     return main, listener, voice, played, synthesized, expecting
@@ -136,7 +136,7 @@ def test_stop_during_synthesis_prevents_playback(voice_runtime, monkeypatch):
             release.set()
         assert not await reply
         assert played == []
-        assert expecting == []
+        assert expecting == ["Ответ", None]
         assert stopped == [True]
 
     asyncio.run(check())
@@ -168,13 +168,19 @@ def test_voice_failure_is_reported_in_listener_state(voice_runtime, monkeypatch)
     asyncio.run(check())
 
 
-def test_thinking_cue_runs_while_command_is_pending(voice_runtime, monkeypatch):
+def test_pending_command_does_not_spend_scott_synthesis_on_thinking_cue(voice_runtime, monkeypatch):
     main, _, _, played, _, _ = voice_runtime
     monkeypatch.setattr(main, "THINKING_CUE_AFTER_SECONDS", 0.01)
 
     async def check():
         monkeypatch.setattr(main, "_main_loop", asyncio.get_running_loop())
         release = asyncio.Event()
+        attempted = asyncio.Event()
+        say_thinking = main._say_thinking
+        async def cue(generation=None):
+            await say_thinking(generation)
+            attempted.set()
+        monkeypatch.setattr(main, '_say_thinking', cue)
 
         async def command(*args, **kwargs):
             await release.wait()
@@ -183,10 +189,8 @@ def test_thinking_cue_runs_while_command_is_pending(voice_runtime, monkeypatch):
         monkeypatch.setattr(main.scott_ai, "process_command", command)
         task = main._listener_handle("Тест")
         try:
-            async with asyncio.timeout(1):
-                while not played:
-                    await asyncio.sleep(0.005)
-            assert played[0] in main.THINKING_CUES
+            await asyncio.wait_for(attempted.wait(), 1)
+            assert played == []
             assert not task.done()
             assert (await main.health())["status"] == "online"
         finally:

@@ -33,7 +33,7 @@ def main():
         shutil.copytree(backend, isolated, ignore=ignore)
         # Distribution tests inspect the actual builders and public resources.
         # Copy only these known source files; release/cache/data stay excluded.
-        for name in ('installer/build.py', 'tools/audit_dependencies.py', 'tools/build_voice_sdk.py',
+        for name in ('installer/build.py', 'tools/audit_dependencies.py', 'tools/build_voice_sdk.py', 'tools/analyze_timings.py',
                      'tools/voice_compat/manifest.json', 'tools/voice_compat/qwen-transformers5.patch',
                      'assets/scott-voice/vendor/qwen_tts-0.1.1+scott.1-py3-none-any.whl',
                      'assets/scott-voice/vendor/provenance.json', 'assets/scott-voice/vendor/NOTICE.txt',
@@ -43,17 +43,22 @@ def main():
                      'installer/linux/install.sh', 'installer/linux/uninstall.sh',
                      'installer/linux/run.sh',
                      'installer/linux/python-environment.sh',
-                     'VERSION.json', 'README.md', '.env.example', 'docs/installation.md', 'docs/models.md',
+                     'VERSION.json', 'README.md', '.env.example', 'docs/guide.md', 'docs/installation.md', 'docs/models.md',
                      'docs/voice-check.md', 'docs/desktop-control.md', 'docs/interface.md', 'docs/security.md', 'docs/performance.md',
+                     'docs/memory.md', 'docs/protocols.md', 'docs/recognition.md', 'docs/reliability.md', 'docs/release-notes-next.md',
+                     'docs/release-notes-2.2.0.md',
                      'assets/brand/scott-logo.png',
+                     'assets/scott-voice/reference/reference.json',
+                     'assets/scott-voice/reference/scott-reference.wav',
                      'assets/brand/scott-logo-light.png',
-                     'experiments/voice_design/stream_voice.py',
-                     'experiments/voice_design/requirements.txt',
-                     'experiments/voice_design/create_scott_voice.py',
-                     'experiments/voice_design/robotic_profiles.json',
-                     'experiments/voice_design/trial_utils.py',
-                     'experiments/voice_design/generate_samples.py',
-                     'experiments/voice_design/evaluate_samples.py'):
+                     'voice/runtime/stream_voice.py',
+                     'voice/runtime/voice_worker.py',
+                     'voice/runtime/requirements.txt',
+                     'voice/runtime/create_scott_voice.py',
+                     'voice/runtime/robotic_profiles.json',
+                     'voice/runtime/trial_utils.py',
+                     'voice/runtime/generate_samples.py',
+                     'voice/runtime/evaluate_samples.py'):
             source = backend.parent / name
             if source.is_file():
                 target = root / name
@@ -67,10 +72,17 @@ def main():
         for key in ('OPENAI_API_KEY', 'GROQ_API_KEY', 'DEEPSEEK_API_KEY',
                     'ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY', 'AI_PROVIDER', 'AI_MODEL'):
             env[key] = ''
-        env.update(WARMUP_MODELS='0', SCOTT_SEMANTIC_MEMORY='0', SCOTT_DESKTOP_DISABLED='1', WHISPER_MODEL='small', WHISPER_ENGINE='auto',
+        env.update(WARMUP_MODELS='0', SCOTT_SEMANTIC_MEMORY='0', SCOTT_DESKTOP_DISABLED='1', WHISPER_MODEL='small', WHISPER_ENGINE='auto', SCOTT_RUNTIME_PROFILE='full',
                    SCOTT_STORAGE_MODE='legacy',
-                   SCOTT_VOICE_HOME='', SCOTT_VOICE_DEVICE='cuda', SCOTT_LOG_DIR=str(root/'logs'),
+                   SCOTT_VOICE_HOME='', SCOTT_VOICE_DEVICE='cuda', SCOTT_VOICE_CPU_THREADS='auto', SCOTT_LOG_DIR=str(root/'logs'),
                    PYTHONPATH=str(root)+os.pathsep+str(isolated), PYTHONDONTWRITEBYTECODE='1')
+        # Readiness checks must not see or repair the caller's real model cache.
+        cache = root/'cache'
+        env.update(XDG_CACHE_HOME=str(cache), HF_HOME=str(cache/'huggingface'),
+                   HF_HUB_CACHE=str(cache/'huggingface/hub'),
+                   HUGGINGFACE_HUB_CACHE=str(cache/'huggingface/hub'),
+                   TORCH_HOME=str(cache/'torch'), NUMBA_CACHE_DIR=str(cache/'numba'))
+        env.pop('TRANSFORMERS_CACHE', None)
         args = sys.argv[1:] or ['tests', '-q', '-m', 'not integration and not slow']
         print('Tests use an isolated copy; personal data and API settings are excluded.', flush=True)
         protected = [str(backend/'data'), str(backend.parent/'data'),

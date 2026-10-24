@@ -32,6 +32,10 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 import numpy as np
+try:
+    from .performance_trace import session, phase
+except ImportError:
+    from performance_trace import session, phase
 
 try:
     import sounddevice as sd
@@ -345,6 +349,7 @@ class VoiceListener:
         # считается порог перебивания, поэтому громкость колонок значения не
         # имеет.
         self._playback_level = 0.0
+        self._meter = (0.0, 0.0)
 
         # Сколько блоков ответа уже прошло. Первые несколько — заведомо голос
         # Scott, по ним и замеряется громкость колонок.
@@ -504,6 +509,11 @@ class VoiceListener:
         self._playback_level = self._noise_floor
         self._playback_blocks = 0
 
+    def extend_interruption(self, spoken_text: str) -> None:
+        """Include queued continuation in echo matching without recalibration."""
+        if self._expecting_interrupt and spoken_text:
+            self._speaking_text += ' ' + spoken_text.lower()
+
     def stop_expecting(self) -> None:
         """
         Scott договорил — слушать как обычно.
@@ -544,6 +554,13 @@ class VoiceListener:
     @property
     def is_suspended(self) -> bool:
         return self._suspended
+
+    def input_level(self) -> float:
+        # One atomic tuple snapshot, no audio or transcript leaves the listener.
+        value, updated = self._meter
+        if not self._running or self._suspended or time.monotonic() - updated > 0.35:
+            return 0.0
+        return round(value, 3)
 
     def status(self) -> dict:
         return {
@@ -876,6 +893,8 @@ class VoiceListener:
                 )
 
             loud = level > threshold
+            self._meter = (min(1.0, max(0.0, (level - threshold) / max(0.02, threshold * 3)))
+                           if loud and not self._suspended else 0.0, time.monotonic())
 
             # После замера планка только опускается — вслед за тем, как ответ
             # становится тише. Подниматься ей нельзя, и это выяснилось не
@@ -1061,7 +1080,7 @@ class VoiceListener:
                             self._phrases.put_nowait(
                                 (audio,
                                  начата_под_речь or self._expecting_interrupt,
-                                 time.time()))
+                                 time.time(), time.perf_counter()))
                         except queue.Full:
                             self.stats.last_error = "Не успеваю обрабатывать — фраза пропущена"
                     phrase = []
@@ -1104,54 +1123,50 @@ class VoiceListener:
     def _process_loop(self) -> None:
         while self._running:
             try:
-                audio, while_speaking, закрыта = self._phrases.get(timeout=0.5)
+                audio, while_speaking, закрыта, *clock = self._phrases.get(timeout=0.5)
             except queue.Empty:
                 continue
 
-            try:
+            with session('voice', started=clock[0] if clock else None, fresh=True) as trace:
+                trace.mark('capture_queue_ready')
+                self._process_phrase(audio, while_speaking, закрыта)
+
+    def _process_phrase(self, audio, while_speaking, закрыта):
+        try:
+            with phase('voice.recognition'):
                 text = (self.transcribe(audio) or "").strip()
-            except Exception as e:
-                self.stats.last_error = f"Распознавание не удалось: {e}"
-                print(f"⚠️ {self.stats.last_error}")
-                continue
+        except Exception as e:
+            self.stats.last_error = f"Распознавание не удалось: {e}"
+            print(f"⚠️ {self.stats.last_error}")
+            return
 
-            if not self._running:
-                break
+        if not self._running or not text:
+            return
 
-            if not text:
-                continue
+        # Фраза во время ответа остаётся перебиванием или эхом.
+        if while_speaking:
+            self._handle_interruption(text)
+            return
 
-            # Фраза, услышанная во время речи Scott, — особый случай: это либо
-            # просьба замолчать, либо его собственное эхо. Обычной командой она
-            # быть не может, и разбирать её как команду нельзя.
-            if while_speaking:
-                self._handle_interruption(text)
-                continue
+        with self._lock:
+            self.stats.phrases_heard += 1
+            self.stats.last_text = text
+            self.stats.recent.append(text)
+            del self.stats.recent[:-20]
 
-            with self._lock:
-                self.stats.phrases_heard += 1
-                self.stats.last_text = text
-                self.stats.recent.append(text)
-                del self.stats.recent[:-20]
+        # Новая фраза останавливает предыдущую озвучку и её очередь.
+        try:
+            from speech_player import get_player
+        except ImportError:
+            from .speech_player import get_player
 
-            # Человек заговорил снова — значит прошлый ответ ему больше не
-            # нужен. Обрываем всё, что ещё звучит и ждёт очереди: иначе
-            # ответы копятся, и Scott выпаливает их подряд, один поверх
-            # другого.
-            try:
-                from speech_player import get_player
-            except ImportError:
-                from .speech_player import get_player
+        get_player().stop()
 
-            get_player().stop()
-
+        with phase('voice.dispatch'):
             self._dispatch(text)
 
-            # Сколько прошло от конца речи до готового ответа. Это и есть
-            # «быстро» или «медленно» с точки зрения человека: он не знает и
-            # знать не хочет, сколько заняли распознавание, разбор и синтез по
-            # отдельности.
-            self.stats.last_answer_seconds = round(time.time() - закрыта, 2)
+        # Асинхронный обработчик обновит значение после завершения ответа.
+        self.stats.last_answer_seconds = round(time.time() - закрыта, 2)
 
     def _handle_interruption(self, text: str) -> None:
         """

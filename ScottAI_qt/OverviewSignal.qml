@@ -6,42 +6,46 @@ Item {
     property bool online: false
     property bool active: false
     property bool animate: true
+    property real inputLevel: 0
+    property real energy: animate && active ? Math.max(0, Math.min(1, inputLevel)) : 0
+    Behavior on energy { NumberAnimation { duration: 95; easing.type: Easing.OutCubic } }
     property real phase: 0
     readonly property color tone: online ? theme.accent : theme.muted
     Accessible.role: Accessible.Graphic
     Accessible.name: "ScottAI"
     NumberAnimation on phase {
-        from: 0; to: Math.PI * 2; duration: signal.active ? 3600 : 8400
-        loops: Animation.Infinite; running: signal.visible && signal.animate
+        from: 0; to: Math.PI * 2; duration: 4200
+        loops: Animation.Infinite; running: signal.visible && signal.animate && signal.active
     }
     Repeater {
-        model: 3
+        model: 2
         Rectangle {
             required property int index
             anchors.centerIn: parent
-            width: signal.width * (0.62 + index * 0.18); height: width; radius: width / 2
-            color: Qt.alpha(signal.tone, index === 0 ? 0.07 : 0.015)
-            border.color: Qt.alpha(signal.tone, 0.13 - index * 0.025)
-            scale: signal.animate ? 1 + Math.sin(signal.phase - index * 0.7) * (signal.active ? 0.035 : 0.012) : 1
+            width: signal.width * (0.79 + index * 0.18); height: width; radius: width / 2
+            color: Qt.alpha(signal.tone, index === 0 ? 0.045 : 0.008)
+            border.color: Qt.alpha(signal.tone, index === 0 ? 0.09 : 0.05)
+            scale: signal.active && signal.animate ? 1 + Math.sin(signal.phase - index * 0.8) * 0.025 + signal.energy * 0.13 : 1
         }
     }
-    Image {
-        anchors.centerIn: parent; width: signal.width * 0.31; height: width
-        source: signal.theme.dark ? "qrc:/brand/scott-logo.png" : "qrc:/brand/scott-logo-light.png"
-        fillMode: Image.PreserveAspectFit; smooth: true; opacity: signal.online ? 1 : 0.5
+    ScottMark {
+        objectName: "overviewBrandMark"
+        anchors.centerIn: parent; width: signal.width * 0.56; height: signal.height * 0.58
+        color: signal.online ? signal.theme.ink : signal.theme.muted
+        opacity: signal.online ? 1 : 0.55
+        scale: signal.active && signal.animate ? 1 + Math.sin(signal.phase) * 0.012 : 1
         Behavior on opacity { enabled: signal.animate; NumberAnimation { duration: 250 } }
     }
     Repeater {
-        model: 28
+        model: 5
         Rectangle {
             required property int index
-            readonly property real angle: index * Math.PI * 2 / 28
-            readonly property real energy: signal.active && signal.animate ? (1 + Math.sin(signal.phase * 2 + index * 0.73)) / 2 : 0
-            width: 2; height: 3 + energy * 8; radius: 1
-            x: signal.width / 2 + Math.cos(angle) * signal.width * 0.46 - width / 2
-            y: signal.height / 2 + Math.sin(angle) * signal.height * 0.46 - height / 2
-            rotation: index * 360 / 28 + 90
-            color: signal.tone; opacity: 0.2 + energy * 0.65
+            readonly property real energy: signal.animate ? (1 + Math.sin(signal.phase * 2 + index * 0.9)) / 2 : 0.4
+            visible: signal.active
+            width: 3; height: 3 + signal.energy * (12 + energy * 15); radius: 1.5
+            x: signal.width / 2 + (index - 2) * 7 - width / 2
+            y: signal.height * 0.9 - height / 2
+            color: signal.tone; opacity: 0.35 + signal.energy * 0.65
         }
     }
 }

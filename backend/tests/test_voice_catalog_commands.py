@@ -52,7 +52,8 @@ def test_every_catalog_name_can_be_selected(name, label):
 def test_russian_cloud_voice_names(spoken, expected):
     command = voice_commands.parse('выбери голос ' + spoken)
     voice_commands.execute(command.action, command.value)
-    assert scott_voice.get_current_voice() == expected
+    assert scott_voice.get_current_voice() == 'scott-voice'
+    assert voice_commands.execute(command.action, command.value).startswith('❌')
 
 
 def test_catalog_command_uses_actual_available_names():

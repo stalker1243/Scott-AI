@@ -319,10 +319,6 @@
       <translation>Белый</translation>
     </message>
     <message>
-      <source>Больше запаса — позже начало, меньше ожидания блоков. «Вся фраза» готовит её целиком перед воспроизведением.</source>
-      <translation>Больше запаса — позже начало, меньше ожидания блоков. «Вся фраза» готовит её целиком перед воспроизведением.</translation>
-    </message>
-    <message>
       <source>Браузер Scott</source>
       <translation>Браузер Scott</translation>
     </message>
@@ -703,10 +699,6 @@
       <translation>Загрузка…</translation>
     </message>
     <message>
-      <source>Задача</source>
-      <translation>Задача</translation>
-    </message>
-    <message>
       <source>Закройте Scott перед обновлением.</source>
       <translation>Закройте Scott перед обновлением.</translation>
     </message>
@@ -733,10 +725,6 @@
     <message>
       <source>Заметка</source>
       <translation>Заметка</translation>
-    </message>
-    <message>
-      <source>Запас звука</source>
-      <translation>Запас звука</translation>
     </message>
     <message>
       <source>Записи · </source>
@@ -2195,10 +2183,6 @@
       <translation>Размытие недоступно: меняется плотность фона.</translation>
     </message>
     <message>
-      <source>Раннее начало речи</source>
-      <translation>Раннее начало речи</translation>
-    </message>
-    <message>
       <source>Раскрыть навигацию</source>
       <translation>Раскрыть навигацию</translation>
     </message>
@@ -2655,14 +2639,6 @@
     <message>
       <source>Шаги · </source>
       <translation>Шаги · </translation>
-    </message>
-    <message>
-      <source>Эксперимент: Scott начинает говорить во время подготовки ответа. Между фрагментами возможны паузы.</source>
-      <translation>Эксперимент: Scott начинает говорить во время подготовки ответа. Между фрагментами возможны паузы.</translation>
-    </message>
-    <message>
-      <source>Эксперимент: ускорение может изменить тембр и паузы. Сравните звучание кнопкой «Прослушать».</source>
-      <translation>Эксперимент: ускорение может изменить тембр и паузы. Сравните звучание кнопкой «Прослушать».</translation>
     </message>
     <message>
       <source>Экспорт</source>
@@ -3165,14 +3141,6 @@
       <translation>Факты</translation>
     </message>
     <message>
-      <source>2 секунды звука</source>
-      <translation>2 секунды звука</translation>
-    </message>
-    <message>
-      <source>4 секунды звука</source>
-      <translation>4 секунды звука</translation>
-    </message>
-    <message>
       <source>Scott Voice не смог подготовить звук. Используется резервный голос.</source>
       <translation>Scott Voice не смог подготовить звук. Используется резервный голос.</translation>
     </message>
@@ -3187,10 +3155,6 @@
     <message>
       <source>Scott — умеренная цифровая окраска</source>
       <translation>Scott — умеренная цифровая окраска</translation>
-    </message>
-    <message>
-      <source>Вся фраза</source>
-      <translation>Вся фраза</translation>
     </message>
     <message>
       <source>Для Scott Voice не найден доступный CUDA GPU. CPU пока экспериментален.</source>
@@ -3255,10 +3219,6 @@
     <message>
       <source>Спокойный — мягкий и чёткий</source>
       <translation>Спокойный — мягкий и чёткий</translation>
-    </message>
-    <message>
-      <source>Сразу</source>
-      <translation>Сразу</translation>
     </message>
     <message>
       <source>Файлы Scott Voice неполные или повреждены.</source>
@@ -3508,5 +3468,193 @@
       <source>Ответ остановлен. Проверьте историю перед повторной отправкой.</source>
       <translation>Ответ остановлен. Проверьте историю перед повторной отправкой.</translation>
     </message>
-  </context>
+    <message>
+      <source>Scott Voice не установлен. Установите компонент в настройках голоса; чат доступен.</source>
+      <translation>Scott Voice не установлен. Установите компонент в настройках голоса; чат доступен.</translation>
+    </message>
+    <message>
+      <source>Scott Voice не успел подготовить звук. Повторите попытку или проверьте голос в настройках; ответ доступен в чате.</source>
+      <translation>Scott Voice не успел подготовить звук. Повторите попытку или проверьте голос в настройках; ответ доступен в чате.</translation>
+    </message>
+    <message>
+      <source>Scott Voice не смог подготовить звук. Проверьте голос в настройках; ответ доступен в чате.</source>
+      <translation>Scott Voice не смог подготовить звук. Проверьте голос в настройках; ответ доступен в чате.</translation>
+    </message>
+    <message>
+      <source>Распознавание готово. Scott Voice настраивается отдельно в разделе голоса.</source>
+      <translation>Распознавание готово. Scott Voice настраивается отдельно в разделе голоса.</translation>
+    </message>
+    <message>
+      <source>Backend запущен, но пока не отвечает. Откройте логи или повторите запуск. Выполнявшиеся команды автоматически не повторяются.</source>
+      <translation>Backend запущен, но пока не отвечает. Откройте логи или повторите запуск. Выполнявшиеся команды автоматически не повторяются.</translation>
+    </message>
+    <message>
+      <source>Не удалось запустить backend. Проверьте файлы установки и откройте логи.</source>
+      <translation>Не удалось запустить backend. Проверьте файлы установки и откройте логи.</translation>
+    </message>
+    <message>
+      <source>Восстанавливаю подключение…</source>
+      <translation>Восстанавливаю подключение…</translation>
+    </message>
+    <message>
+      <source>Подключаю backend…</source>
+      <translation>Подключаю backend…</translation>
+    </message>
+    <message>
+      <source>Не найдены файлы запуска backend. Повторите установку приложения или откройте логи.</source>
+      <translation>Не найдены файлы запуска backend. Повторите установку приложения или откройте логи.</translation>
+    </message>
+    <message>
+      <source>Не удалось восстановить backend после трёх попыток. Откройте логи и повторите запуск вручную. Сообщение сохранено, команды не повторялись.</source>
+      <translation>Не удалось восстановить backend после трёх попыток. Откройте логи и повторите запуск вручную. Сообщение сохранено, команды не повторялись.</translation>
+    </message>
+    <message>
+      <source>Соединение с backend прервалось. Восстанавливаю подключение; отправленные команды автоматически не повторяются.</source>
+      <translation>Соединение с backend прервалось. Восстанавливаю подключение; отправленные команды автоматически не повторяются.</translation>
+    </message>
+    <message>
+      <source>Сохранено незавершённое сообщение. Проверяем результат запроса.</source>
+      <translation>Сохранено незавершённое сообщение. Проверяем результат запроса.</translation>
+    </message>
+    <message>
+      <source>Ответ восстановлен после переподключения. Запрос повторно не выполнялся.</source>
+      <translation>Ответ восстановлен после переподключения. Запрос повторно не выполнялся.</translation>
+    </message>
+    <message>
+      <source>Результат предыдущего запроса не подтверждён. Проверьте историю и обновите backend перед повторной отправкой.</source>
+      <translation>Результат предыдущего запроса не подтверждён. Проверьте историю и обновите backend перед повторной отправкой.</translation>
+    </message>
+    <message>
+      <source>Подключаем backend…</source>
+      <translation>Подключаем backend…</translation>
+    </message>
+    <message>
+      <source>Чат и распознавание: около 2 ГиБ. На время подготовки оставьте 2,5 ГиБ свободно.</source>
+      <translation>Чат и распознавание: около 2 ГиБ. На время подготовки оставьте 2,5 ГиБ свободно.</translation>
+    </message>
+    <message>
+      <source>Чат и распознавание: около 2 ГиБ на CPU или 5–7 ГиБ на GPU. Scott Voice готовится отдельно.</source>
+      <translation>Чат и распознавание: около 2 ГиБ на CPU или 5–7 ГиБ на GPU. Scott Voice готовится отдельно.</translation>
+    </message>
+    <message>
+      <source>Подготовим чат и распознавание.
+Scott Voice можно подготовить на главном экране.</source>
+      <translation>Подготовим чат и распознавание.
+Scott Voice можно подготовить на главном экране.</translation>
+    </message>
+    <message>
+      <source>Повторить запуск</source>
+      <translation>Повторить запуск</translation>
+    </message>
+    <message>
+      <source>Идентификатор уже относится к другому сообщению. Создайте новый запрос.</source>
+      <translation>Идентификатор уже относится к другому сообщению. Создайте новый запрос.</translation>
+    </message>
+    <message>
+      <source>Запрос ещё выполняется. Повторно отправлять его не нужно.</source>
+      <translation>Запрос ещё выполняется. Повторно отправлять его не нужно.</translation>
+    </message>
+    <message>
+      <source>История этого запроса очищена. Он не будет выполнен повторно.</source>
+      <translation>История этого запроса очищена. Он не будет выполнен повторно.</translation>
+    </message>
+    <message>
+      <source>Запрос не завершён. Сообщение сохранено, можно повторить отправку.</source>
+      <translation>Запрос не завершён. Сообщение сохранено, можно повторить отправку.</translation>
+    </message>
+    <message>
+      <source>Связь прервалась, результат запроса неизвестен. Проверьте действие и историю перед новым запросом. Автоматического повтора нет.</source>
+      <translation>Связь прервалась, результат запроса неизвестен. Проверьте действие и историю перед новым запросом. Автоматического повтора нет.</translation>
+    </message>
+    <message>
+      <source>Запрос уже завершён или больше не актуален.</source>
+      <translation>Запрос уже завершён или больше не актуален.</translation>
+    </message>
+    <message>
+      <source>Scott Voice здесь недоступен. Микрофон можно использовать для команд и ответов в чате.</source>
+      <translation>Scott Voice здесь недоступен. Микрофон можно использовать для команд и ответов в чате.</translation>
+    </message>
+    <message>
+      <source>Обычный CPU</source>
+      <translation>Обычный CPU</translation>
+    </message>
+    <message>
+      <source>Полный набор движков распознавания на CPU. Scott Voice можно подготовить отдельно на главном экране.</source>
+      <translation>Полный набор движков распознавания на CPU. Scott Voice можно подготовить отдельно на главном экране.</translation>
+    </message>
+    <message>
+      <source>Ускорение подбирается для вашего компьютера. Сохраняются прежние настройки распознавания. Scott Voice готовится отдельно.</source>
+      <translation>Ускорение подбирается для вашего компьютера. Сохраняются прежние настройки распознавания. Scott Voice готовится отдельно.</translation>
+    </message>
+    <message>
+      <source>Не удалось прочитать режим подготовки. Проверьте права и выберите режим заново.</source>
+      <translation>Не удалось прочитать режим подготовки. Проверьте права и выберите режим заново.</translation>
+    </message>
+    <message>
+      <source>Сохранённый режим подготовки повреждён. Выберите режим в мастере и повторите подготовку.</source>
+      <translation>Сохранённый режим подготовки повреждён. Выберите режим в мастере и повторите подготовку.</translation>
+    </message>
+    <message>
+      <source>Неизвестный режим подготовки. Выберите auto, cpu или compact.</source>
+      <translation>Неизвестный режим подготовки. Выберите auto, cpu или compact.</translation>
+    </message>
+    <message>
+      <source>Выберите режим подготовки: auto, cpu или compact.</source>
+      <translation>Выберите режим подготовки: auto, cpu или compact.</translation>
+    </message>
+    <message>
+      <source>Не удалось сохранить режим подготовки. Проверьте права и свободное место, затем повторите.</source>
+      <translation>Не удалось сохранить режим подготовки. Проверьте права и свободное место, затем повторите.</translation>
+    </message>
+    <message>
+      <source>Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 2,5 ГиБ свободно. На Linux размер пока не измерен. Уже установленные пакеты не удаляются.</source>
+      <translation>Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 2,5 ГиБ свободно. На Linux размер пока не измерен. Уже установленные пакеты не удаляются.</translation>
+    </message>
+    <message>
+      <source>Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 4,5 ГиБ свободно. На Linux размер пока не измерен. Уже установленные пакеты не удаляются.</source>
+      <translation>Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 4,5 ГиБ свободно. На Linux размер пока не измерен. Уже установленные пакеты не удаляются.</translation>
+    </message>
+    <message>
+      <source>Локальное распознавание недоступно в компактном режиме. Повторите подготовку приложения. Для резервного движка выберите обычный CPU-режим и повторите подготовку; чат доступен.</source>
+      <translation>Локальное распознавание недоступно в компактном режиме. Повторите подготовку приложения. Для резервного движка выберите обычный CPU-режим и повторите подготовку; чат доступен.</translation>
+    </message>
+    <message>
+      <source>Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 2,5 ГиБ свободно. На других системах размер может отличаться. Уже установленные пакеты не удаляются.</source>
+      <translation>Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 2,5 ГиБ свободно. На других системах размер может отличаться. Уже установленные пакеты не удаляются.</translation>
+    </message>
+    <message>
+      <source>Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 4,5 ГиБ свободно. На других системах размер может отличаться. Уже установленные пакеты не удаляются.</source>
+      <translation>Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 4,5 ГиБ свободно. На других системах размер может отличаться. Уже установленные пакеты не удаляются.</translation>
+    </message>
+    <message>
+      <source>Не удалось проверить среду Python приложения. Повторите установку в свою папку.</source>
+      <translation>Не удалось проверить среду Python приложения. Повторите установку в свою папку.</translation>
+    </message>
+    <message>
+      <source>Путь Python отличается от зарегистрированной среды приложения. Повторите установку в свою папку.</source>
+      <translation>Путь Python отличается от зарегистрированной среды приложения. Повторите установку в свою папку.</translation>
+    </message>
+    <message>
+      <source>Голосовой режим</source>
+      <translation>Голосовой режим</translation>
+    </message>
+    <message>
+      <source>Голосовой режим сохранён.</source>
+      <translation>Голосовой режим сохранён.</translation>
+    </message>
+    <message>
+      <source>Остановите микрофон перед сменой голосового режима или API Token.</source>
+      <translation>Остановите микрофон перед сменой голосового режима или API Token.</translation>
+    </message>
+    <message>
+      <source>Не удалось безопасно обновить библиотеки голоса. Повторите установку Scott Voice в отдельную папку.</source>
+      <translation>Не удалось безопасно обновить библиотеки голоса. Повторите установку Scott Voice в отдельную папку.</translation>
+    </message>
+    <message>
+      <source>Не удалось сохранить голосовой режим. Проверьте доступ к папке настроек.</source>
+      <translation>Не удалось сохранить голосовой режим. Проверьте доступ к папке настроек.</translation>
+    </message>
+        <message><source>Запоминать автоматически</source><translation>Запоминать автоматически</translation></message>
+    <message><source>К последнему сообщению</source><translation>К последнему сообщению</translation></message>
+</context>
 </TS>

@@ -48,8 +48,12 @@ LOG_FILES = {
     "backend_errors.log": support_logs.backend_error_path(),
     "dangerous_actions.log": Path(os.getenv('EXECUTE_LOG_DIR') or support_logs.backend_log_directory()) / "dangerous_actions.log",
     "secure_exec.log": Path(os.getenv('EXECUTE_LOG_DIR') or support_logs.backend_log_directory()) / "secure_exec.log",
-    "timings.jsonl": Path(os.getenv('TIMING_LOG_DIR') or support_logs.backend_log_directory()) / "timings.jsonl",
+    "timings.jsonl": Path(os.getenv('TIMING_LOG_DIR') or os.getenv('SCOTT_LOG_DIR') or support_logs.backend_log_directory()) / "timings.jsonl",
 }
+for _index in (1, 2):
+    LOG_FILES[f'timings.jsonl.{_index}'] = Path(str(LOG_FILES['timings.jsonl'])+f'.{_index}')
+if LOG_FILES['timings.jsonl'] != BACKEND_DIR/'logs/timings.jsonl':
+    LOG_FILES['timings-legacy.jsonl'] = BACKEND_DIR/'logs/timings.jsonl'
 if os.name != 'nt':
     LOG_FILES['backend-errors-legacy.log'] = PROJECT_DIR/'backend_errors.log'
     LOG_FILES['timings-legacy.jsonl'] = BACKEND_DIR/'logs/timings.jsonl'
@@ -143,7 +147,7 @@ def collect_system_info(lightweight=False) -> Dict:
         pass
 
     versions = {}
-    for package in ("torch", "openai-whisper", "fastapi", "numpy", "edge-tts"):
+    for package in ("torch", "openai-whisper", "fastapi", "numpy"):
         try:
             from importlib.metadata import version
 

@@ -7,7 +7,6 @@ Item {
     id: bar
     required property Window windowHost
     required property QtObject theme
-    required property string logoSource
     property string pageTitle: ""
     property bool navigationExpanded: false
     property string statusText: ""
@@ -31,7 +30,7 @@ Item {
             Layout.fillWidth: true; Layout.fillHeight: true
             Row {
                 anchors.verticalCenter: parent.verticalCenter; spacing: 10
-                Image { width: 24; height: 24; source: bar.logoSource; sourceSize: Qt.size(56, 56) }
+                ScottMark { width: 19; height: 24; color: bar.theme.ink }
                 Text { text: "ScottAI"; color: bar.theme.ink; font.family: bar.theme.fontFamily; font.pixelSize: 14; font.weight: Font.DemiBold; height: 24; verticalAlignment: Text.AlignVCenter }
                 Text { text: " / " + bar.pageTitle; color: bar.theme.muted; font.family: bar.theme.fontFamily; font.pixelSize: 13; height: 24; verticalAlignment: Text.AlignVCenter }
             }

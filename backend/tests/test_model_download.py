@@ -216,7 +216,7 @@ def test_model_manifest_respects_choice_and_xdg_cache(tmp_path, monkeypatch, nam
     assert model_setup.whisper_spec()[0] == local
 
 
-def test_readiness_rejects_valid_zip_without_silero_model(tmp_path, monkeypatch):
+def test_readiness_ignores_unrelated_retired_voice_cache(tmp_path, monkeypatch):
     import model_setup
     monkeypatch.setenv('WHISPER_ENGINE', 'openai')
     whisper = tmp_path / 'small.pt'
@@ -227,5 +227,6 @@ def test_readiness_rejects_valid_zip_without_silero_model(tmp_path, monkeypatch)
     with zipfile.ZipFile(voice, 'w') as archive:
         archive.writestr('unrelated', b'data')
     monkeypatch.setattr(model_setup, 'whisper_spec', lambda: (whisper, 'url', DIGEST))
-    monkeypatch.setattr(model_setup, 'silero_repo', lambda: repo)
+    assert model_setup.models_ready()
+    whisper.write_bytes(b'corrupt')
     assert not model_setup.models_ready()

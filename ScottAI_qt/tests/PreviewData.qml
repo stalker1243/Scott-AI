@@ -7,11 +7,17 @@ QtObject {
         property bool visible: true
         property bool busy: false
         property bool checking: false
+        property bool prepared: false
         property double progress: 0
         property string message: "Подготовим библиотеки и модели речи для вашего компьютера."
         property string error: ""
         property bool compact: false
-        property string sizeHint: "Чат и голос: около 2 ГиБ на CPU или 5–7 ГиБ на GPU. На время подготовки оставьте 2,5 ГиБ для CPU или 9 ГиБ для GPU. Дополнительные модели и Scott Voice устанавливаются отдельно."
+        property string runtimeMode: "auto"
+        property string sizeHint: runtimeMode === "compact"
+            ? "Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. Для подготовки оставьте 2,5 ГиБ свободно. На других системах размер может отличаться. Уже установленные пакеты не удаляются."
+            : runtimeMode === "cpu"
+              ? "Чат и распознавание: около 2 ГиБ. На время подготовки оставьте 2,5 ГиБ свободно."
+              : "Чат и голос: около 2 ГиБ на CPU или 5–7 ГиБ на GPU. На время подготовки оставьте 2,5 ГиБ для CPU или 9 ГиБ для GPU. Дополнительные модели и Scott Voice устанавливаются отдельно."
         function prepare() {}
         function cancel() { busy = false }
     }
@@ -33,18 +39,28 @@ QtObject {
     property bool ownsBackend: false
     property string status: "На связи"
     property string error: ""
+    property bool inputMonitoring: false
+    property real inputLevel: 0
     property bool listening: false
     property bool listeningAvailable: true
     property bool listeningReady: true
     property bool listeningBusy: false
     property string listeningError: ""
+    property string listeningPhase: "idle"
     property int listeningWrites: 0
     function setListening(enabled) {
         if (!online || !listeningReady || !listeningAvailable || listeningBusy || listening === enabled) return
         listeningWrites++
         listening = enabled
+        if (enabled) {
+            const scott = settings.voices.voices.find(function(v) { return v.id === "scott-voice" })
+            if (scott && scott.available && voicePreparation.model_loaded !== true) warmScottVoice()
+        } else releaseScottVoice()
     }
+    signal chatSubmitted(string text)
     signal chatSent()
+    signal restoreChatDraft(string text)
+    signal chatRecovered(string text)
     property var chats: [{id:"11111111111111111111111111111111",title:"Дизайн Scott",count:2,updated:"2026-10-06T12:00:00Z"}, {id:"22222222222222222222222222222222",title:"Рабочие заметки",count:8,updated:"2026-10-05T12:00:00Z"}]
     property string chatId: "11111111111111111111111111111111"
     property string chatTitle: "Дизайн Scott"
@@ -79,7 +95,7 @@ QtObject {
     function saveChatImage(url) {}
     property string lastChatText: ""
     property bool lastChatImageMode: false
-    function sendChatMessage(text, image) { lastChatText = text; lastChatImageMode = image === true; ++messagesSent; chatSent() }
+    function sendChatMessage(text, image) { lastChatText = text; lastChatImageMode = image === true; ++messagesSent; chatSubmitted(text); chatSent() }
     property var metrics: ({cpu: 24, ram: 48, gpu: 12, disk: 6})
     property var messages: [{role: "user", text: "Что ты умеешь?"}, {role: "assistant", text: "Могу помочь с вопросами, программами и повседневными задачами."}]
     property bool memoryBusy: false
@@ -145,12 +161,18 @@ QtObject {
     property var voicePreparation: ({id:"",state:"idle",model_loaded:false,message:""})
     property bool voicePreparationReady: true
     function refreshVoicePreparation() {}
-    function warmScottVoice() { voicePreparation = {id:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",state:"complete",model_loaded:true,message:"Scott Voice готов к речи."} }
+    property bool deferVoiceWarmup: false
+    property int voiceWarmRequests: 0
+    function warmScottVoice() {
+        ++voiceWarmRequests
+        voicePreparation = {id:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",state:deferVoiceWarmup ? "running" : "complete",model_loaded:!deferVoiceWarmup,message:deferVoiceWarmup ? "Загружаем модель и готовим голос…" : "Scott Voice готов к речи."}
+    }
     function releaseScottVoice() { voicePreparation = {id:"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",state:"cancelled",model_loaded:false,message:"Модель освобождена."} }
     property bool voiceInstallReady: true
     function refreshVoiceInstall() {}
     function prepareScottVoice(checkOnly) { voiceInstall = {id:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",state:"running",installed:false,supported:true,message:"Устанавливаем библиотеки голоса"} }
     function cancelScottVoice() { voiceInstall = {state:"cancelled",installed:false,supported:true,message:"Подготовка отменена. Её можно продолжить позже."} }
+    function setScottAvailable(available) { settings = Object.assign({}, settings, {voices:Object.assign({}, settings.voices, {voices:[{id:"scott-voice",label:"Scott Voice",local:true,available:available}]})}) }
     property string settingsError: ""
     property string settingsNotice: ""
     property int settingsWrites: 0
@@ -167,7 +189,7 @@ QtObject {
                 {id:"auto",title:"Авто",available:true}, {id:"cuda",title:"NVIDIA",available:false},
                 {id:"rocm",title:"AMD",available:true}, {id:"mps",title:"Apple",available:false},
                 {id:"cpu",title:"Процессор",available:true}]}}},
-        voices: {current:"demo", voices:[{id:"demo", label:"Пробный голос", local:true}, {id:"cloud", label:"Облачный голос", local:false}]},
+        voices: {current:"scott-voice", scott_profile:"scott", voices:[{id:"scott-voice", label:"Scott Voice", local:true, available:true}]},
         characters: {current:"calm", characters:[{id:"natural", title:"Естественный"}, {id:"calm", title:"Спокойный — мягкий и чёткий"}, {id:"radio", title:"Радио"}]},
         versions: {data:[{item_id:"example_macro", item_type:"macro", versions_count:3}]}
     })
@@ -216,18 +238,7 @@ QtObject {
     function saveProfile(name, about, style, interests) { ++profileWrites }
     function applySetting(group, changes) {
         ++settingsWrites; settingsLastGroup = group; settingsLastChanges = changes
-        if (group === "voiceStreaming") {
-            settings = Object.assign({}, settings, {voices:Object.assign({}, settings.voices, {scott_streaming:changes.streaming})})
-        }
-        if (group === "voiceAcceleration") {
-            settings = Object.assign({}, settings, {voices:Object.assign({}, settings.voices, {scott_acceleration:changes.acceleration})})
-        }
-        if (group === "voiceBuffer") {
-            settings = Object.assign({}, settings, {voices:Object.assign({}, settings.voices, {scott_buffer:changes.buffer})})
-        }
-        if (group === "voiceProfile") {
-            settings = Object.assign({}, settings, {voices:Object.assign({}, settings.voices, {scott_profile:changes.profile})})
-        }
+
     }
     function previewVoice() { ++settingsWrites }
     function sendMessage(text) { ++messagesSent }

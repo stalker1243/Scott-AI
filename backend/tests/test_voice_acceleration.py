@@ -25,13 +25,13 @@ def test_acceleration_requires_an_explicit_boolean_true(value):
 
 def test_acceleration_is_preserved_across_voice_and_profile_changes():
     assert not voice_config.get_scott_acceleration()
-    voice_config.save_voice('eugene')
+    voice_config.CONFIG_PATH.write_text('{"voice":"eugene","fallback_voice":"eugene"}')
     voice_config.save_voice('scott-voice',acceleration=True)
     voice_config.save_voice('scott-voice',profile='digital',streaming=True)
-    voice_config.save_voice('eugene')
+    voice_config.save_voice('scott-voice')
     assert voice_config.get_scott_acceleration() and voice_config.get_scott_streaming()
     assert voice_config.get_scott_profile()=='digital'
-    assert voice_config.get_fallback_voice('demo',['demo','eugene'])=='eugene'
+    assert 'fallback_voice' not in json.loads(voice_config.CONFIG_PATH.read_text())
 
 
 def test_benchmark_defaults_are_independent_of_application_preferences(monkeypatch):
@@ -83,7 +83,7 @@ def test_mode_change_cancels_in_flight_and_queued_generation(integrated):
 
 
 def test_api_validates_and_applies_acceleration_without_losing_other_preferences(main_module,integrated,monkeypatch):
-    voice_config.save_voice('eugene')
+    voice_config.CONFIG_PATH.write_text('{"voice":"eugene","fallback_voice":"eugene"}')
     voice_config.save_voice('scott-voice',profile='restrained',streaming=True)
     monkeypatch.setattr(integrated.engine,'describe',lambda:dict(available=True,acceleration_available=True))
     async def run():
@@ -94,7 +94,7 @@ def test_api_validates_and_applies_acceleration_without_losing_other_preferences
             assert (await client.post('/voice/select',json={'voice':'scott-voice','acceleration':True})).status_code==200
             assert integrated.engine.config.rms_norm and voice_config.get_scott_acceleration()
             assert voice_config.get_scott_profile()=='restrained' and voice_config.get_scott_streaming()
-            assert voice_config.get_fallback_voice('demo',['demo','eugene'])=='eugene'
+            assert 'fallback_voice' not in json.loads(voice_config.CONFIG_PATH.read_text())
             catalog=(await client.get('/voice/available')).json()
             assert catalog['scott_acceleration'] is True
             monkeypatch.setattr(integrated.engine,'describe',lambda:dict(available=True,acceleration_available=False))

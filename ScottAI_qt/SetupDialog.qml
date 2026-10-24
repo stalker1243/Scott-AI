@@ -13,10 +13,10 @@ ApplicationWindow {
         return typeof appLanguage !== "undefined" && appLanguage.language ? qsTranslate("Launcher", source) : source
     }
     transientParent: null
-    title: checking ? qsTranslate("Launcher", "Запуск ScottAI") : qsTranslate("Launcher", "Подготовка ScottAI")
+    title: checking || controller.prepared ? qsTranslate("Launcher", "Запуск ScottAI") : qsTranslate("Launcher", "Подготовка ScottAI")
     flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowSystemMenuHint | Qt.WindowCloseButtonHint | Qt.MSWindowsFixedSizeDialogHint
-    width: checking ? 440 : 500; height: checking ? 220 : 490
-    minimumWidth: 440; maximumWidth: 500; minimumHeight: 220; maximumHeight: 490
+    width: checking ? 440 : 520; height: checking ? 220 : 550
+    minimumWidth: 440; maximumWidth: 520; minimumHeight: 220; maximumHeight: 550
     color: theme.popup
     visible: controller.visible
     onClosing: function(close) { controller.cancel(); Qt.quit() }
@@ -28,25 +28,38 @@ ApplicationWindow {
         anchors.fill: parent; anchors.margins: 28; spacing: 10
         RowLayout {
             spacing: 14
-            Image { source: "qrc:/brand/scott-logo.png"; Layout.preferredWidth: 54; Layout.preferredHeight: 54 }
+            ScottMark { color: theme.ink; Layout.preferredWidth: 54; Layout.preferredHeight: 54 }
             ColumnLayout {
                 spacing: 5
                 Text { text: "SCOTT AI"; color: setupDialog.theme.muted; font.pixelSize: 11; font.letterSpacing: 2 }
-                Text { text: setupDialog.checking ? qsTranslate("Launcher", "Запускаем ScottAI") : qsTranslate("Launcher", "Готовим всё к работе"); color: setupDialog.theme.ink; font.family: setupDialog.theme.fontFamily; font.pixelSize: 23; font.weight: Font.DemiBold }
+                Text { text: setupDialog.checking || controller.prepared ? qsTranslate("Launcher", "Запускаем ScottAI") : qsTranslate("Launcher", "Готовим всё к работе"); color: setupDialog.theme.ink; font.family: setupDialog.theme.fontFamily; font.pixelSize: 23; font.weight: Font.DemiBold }
             }
         }
-        Text { visible: !setupDialog.checking; text: qsTranslate("Launcher", "Чат и голос будут готовы после загрузки.\nЭто нужно сделать один раз."); color: setupDialog.theme.muted; font.pixelSize: 13; lineHeight: 1.3; Layout.fillWidth: true }
         Rectangle { visible: !setupDialog.checking; Layout.fillWidth: true; height: 1; color: setupDialog.theme.line }
-        UiSwitch {
-            objectName: "compactSetupOption"; theme: setupDialog.theme
-            visible: !setupDialog.checking
-            text: qsTranslate("Launcher", "Компактная установка (CPU)")
-            checked: setupDialog.controller.compact; enabled: !setupDialog.controller.busy
-            onToggled: setupDialog.controller.compact = checked
+        UiComboBox {
+            id: modePicker
+            objectName: "runtimeSetupOption"; theme: setupDialog.theme
+            Layout.fillWidth: true
+            visible: !setupDialog.checking && !controller.prepared
+            model: [qsTranslate("Launcher", "Автоматически"), qsTranslate("Launcher", "Обычный CPU")]
+            translateDisplay: false
+            currentIndex: ["auto", "cpu"].indexOf(setupDialog.controller.runtimeMode)
+            displayText: currentIndex < 0 ? qsTranslate("Launcher", "Сохранённый режим") : currentText
+            enabled: !setupDialog.controller.busy
+            onActivated: setupDialog.controller.runtimeMode = ["auto", "cpu"][currentIndex]
+        }
+        Text {
+            objectName: "setupModeDescription"
+            visible: modePicker.visible
+            text: setupDialog.controller.runtimeMode === "cpu"
+                  ? qsTranslate("Launcher", "Полный набор движков распознавания на CPU. Scott Voice можно подготовить отдельно на главном экране.")
+                  : qsTranslate("Launcher", "Ускорение подбирается для вашего компьютера. Сохраняются прежние настройки распознавания. Scott Voice готовится отдельно.")
+            color: setupDialog.theme.ink; font.pixelSize: 12; lineHeight: 1.2
+            wrapMode: Text.Wrap; Layout.fillWidth: true
         }
         Text {
             objectName: "setupStorageInfo"
-            visible: !setupDialog.checking
+            visible: !setupDialog.checking && !controller.prepared
             text: setupDialog.uiText(setupDialog.controller.sizeHint) || qsTranslate("Launcher", "Чат и голос: около 2 ГиБ на CPU или 5–7 ГиБ на GPU.")
             wrapMode: Text.Wrap
             color: setupDialog.theme.muted; font.pixelSize: 12; lineHeight: 1.25; Layout.fillWidth: true
@@ -84,7 +97,7 @@ ApplicationWindow {
         RowLayout {
             visible: !setupDialog.checking
             Layout.fillWidth: true
-            UiButton { objectName: "prepareScottButton"; theme: setupDialog.theme; Layout.fillWidth: true; primary: true; text: setupDialog.controller.busy ? qsTranslate("Launcher", "Подготовка…") : setupDialog.controller.error.length ? qsTranslate("Launcher", "Повторить") : qsTranslate("Launcher", "Продолжить"); enabled: !setupDialog.controller.busy; onClicked: setupDialog.controller.prepare() }
+            UiButton { objectName: "prepareScottButton"; theme: setupDialog.theme; Layout.fillWidth: true; primary: true; text: setupDialog.controller.busy ? qsTranslate("Launcher", "Подготовка…") : controller.prepared ? qsTranslate("Launcher", "Повторить запуск") : setupDialog.controller.error.length ? qsTranslate("Launcher", "Повторить") : qsTranslate("Launcher", "Продолжить"); enabled: !setupDialog.controller.busy; onClicked: setupDialog.controller.prepare() }
             UiButton { objectName: "cancelSetupButton"; theme: setupDialog.theme; text: qsTranslate("Launcher", "Остановить"); visible: setupDialog.controller.busy; onClicked: setupDialog.controller.cancel() }
             UiButton { objectName: "setupLogsButton"; theme: setupDialog.theme; text: diagnosticsController.busy ? qsTranslate("Launcher", "Сбор…") : qsTranslate("Launcher", "Логи"); enabled: !diagnosticsController.busy; onClicked: diagnosticsController.exportArchive() }
         }

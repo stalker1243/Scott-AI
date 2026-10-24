@@ -15,7 +15,7 @@ from test_scott_voice_engine import integrated, wav
 from types import SimpleNamespace
 
 pytestmark=pytest.mark.unit
-sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'experiments/voice_design'))
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'voice/runtime'))
 from stream_voice import ColourStream,StreamVolume
 from create_scott_voice import colour_voice
 
@@ -48,6 +48,10 @@ for line in sys.stdin:
     publish_audio(c.cache_dir,r['key'],req,temporary)
     emit(dict(event='audio',id=req,key=r['key'],cached=False))
 '''
+
+
+STREAM_WORKER=STREAM_WORKER.replace('from scott_voice_process import',
+    'sys.path.insert(0,'+repr(str(Path(__file__).resolve().parents[1]))+')\nfrom scott_voice_process import',1)
 
 
 @pytest.fixture
@@ -181,7 +185,7 @@ def test_digital_colour_matches_full_processor_across_arbitrary_boundaries(mix):
 
 @pytest.mark.parametrize('rate',[16000,24000,48000])
 def test_selected_scott_colour_keeps_filter_and_carrier_state(rate):
-    profiles=json.loads((Path(__file__).resolve().parents[2]/'experiments/voice_design/robotic_profiles.json').read_text(encoding='utf-8'))
+    profiles=json.loads((Path(__file__).resolve().parents[2]/'voice/runtime/robotic_profiles.json').read_text(encoding='utf-8'))
     profile=next(row for row in profiles if row['id']=='scott')
     assert profile['processor']=='soft-v2'
     timebase=np.arange(rate//2)/rate
@@ -226,7 +230,6 @@ def test_bad_pcm_never_reaches_stream_callback(values):
 @pytest.fixture
 def sink(integrated,monkeypatch):
     import audio_settings, speech_player, voice_config
-    voice_config.save_voice('eugene')
     voice_config.save_voice('scott-voice',streaming=True)
     player=SimpleNamespace(generation=0,calls=[])
     player.play=lambda path,**options:player.calls.append((path,False)) or True
@@ -276,7 +279,6 @@ def test_voice_streaming_is_opt_in_and_persists_independently(monkeypatch):
     voice_config.CONFIG_PATH.write_text('{}')
     assert not voice_config.get_scott_streaming()
     voice_config.save_voice('scott-voice',streaming=True)
-    voice_config.save_voice('eugene')
     voice_config.save_voice('scott-voice',profile='digital')
     assert voice_config.get_scott_streaming() and voice_config.get_scott_profile()=='digital'
 

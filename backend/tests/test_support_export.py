@@ -46,6 +46,29 @@ def test_logs_rotate_and_mask_short_credentials(fixture_root, tmp_path, monkeypa
     assert all(' xy ' not in p.read_text(encoding='utf-8') for p in files)
 
 
+@pytest.mark.parametrize('source', ['environment', 'dotenv', 'saved-config'])
+def test_sdk_control_flags_preserve_package_versions(fixture_root, monkeypatch, source):
+    flags = {'HF_HUB_DISABLE_IMPLICIT_TOKEN': '1', 'TOKENIZERS_PARALLELISM': 'false'}
+    if source == 'environment':
+        for name, value in flags.items():
+            monkeypatch.setenv(name, value)
+    elif source == 'dotenv':
+        with (fixture_root/'.env').open('a', encoding='utf-8') as stream:
+            stream.write(''.join(f'{name}={value}\n' for name,value in flags.items()))
+    else:
+        (fixture_root/'backend/data/ai_config.json').write_text(json.dumps(flags))
+    line = 'torch-2.14.1+cu126 Python 3.13.7: 1.3 MB; ready=false'
+    assert support_logs.redact(line, fixture_root) == line
+
+
+@pytest.mark.parametrize('value', ['1', 'false', 'opaque-fixture-credential'])
+def test_real_credentials_still_mask_sdk_flag_values(fixture_root, monkeypatch, value):
+    monkeypatch.setenv('HF_HUB_DISABLE_IMPLICIT_TOKEN', '1')
+    monkeypatch.setenv('TOKENIZERS_PARALLELISM', 'false')
+    monkeypatch.setenv('CUSTOM_API_TOKEN', value)
+    assert support_logs.redact('ERROR '+value, fixture_root) == 'ERROR ***СКРЫТО***'
+
+
 def test_saved_provider_key_ring_is_masked_including_inactive_keys(fixture_root):
     (fixture_root/'backend/data/ai_config.json').write_text(json.dumps({
         'provider':'Groq','keys':{'Groq':'opaque-active-fixture','OpenAI':'opaque-inactive-fixture'}}))

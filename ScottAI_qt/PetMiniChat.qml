@@ -28,7 +28,12 @@ Popup {
         target: chat.controller
         function onSent() { input.clear(); messages.positionViewAtEnd(); if(chat.visible) Qt.callLater(function(){input.forceActiveFocus()}) }
     }
-    Connections { target: chat.backend; function onMessagesChanged() { Qt.callLater(function(){ messages.positionViewAtEnd() }) } }
+    Connections {
+        target: chat.backend
+        function onMessagesChanged() { Qt.callLater(function(){ messages.positionViewAtEnd() }) }
+        function onRestoreChatDraft(text) { if (!input.text.trim().length) input.text = text }
+        function onChatRecovered(text) { if (input.text.trim() === text) input.clear() }
+    }
     background: Rectangle { color: chat.theme.popup; radius: 18; border.color: chat.theme.line }
     enter: Transition {
         ParallelAnimation {

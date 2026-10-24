@@ -368,6 +368,90 @@ def test_download_reuses_only_verified_files_and_replaces_corrupt_partial(tmp_pa
     assert set(setup.MODEL_FILES).issubset(manifest['sha256'])
 
 
+def test_large_weight_keeps_partial_and_uses_verified_app_transfer(tmp_path, fake_hub, monkeypatch):
+    import model_download
+    payload = b'qualified synthetic weight'*128
+    item = next(item for item in fake_hub.items if item.rfilename == 'model.safetensors')
+    item.size = len(payload)
+    item.lfs.sha256 = hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(setup, 'DIRECT_LFS_BYTES', 1024, raising=False)
+    model = tmp_path/'experiments/voice_design/models/base'
+    model.mkdir(parents=True)
+    target = model/'model.safetensors'
+    target.write_bytes(b'previous corrupt file, retained until success')
+    calls, updates = [], []
+
+    def transfer(url, path, **kwargs):
+        assert url == f'https://huggingface.co/{setup.MODEL}/resolve/{setup.REVISION}/model.safetensors'
+        assert path == target and kwargs['expected_sha256'] == item.lfs.sha256
+        calls.append(True)
+        part = path.with_name(path.name+'.part')
+        if len(calls) == 1:
+            part.write_bytes(payload[:512])
+            raise model_download.DownloadError('controlled interruption')
+        assert part.read_bytes() == payload[:512]
+        kwargs['progress'](512, len(payload))
+        path.write_bytes(payload)
+        part.unlink()
+        kwargs['progress'](len(payload), len(payload))
+        return path
+
+    monkeypatch.setattr(model_download, 'download_file', transfer)
+    with pytest.raises(model_download.DownloadError, match='controlled interruption'):
+        setup.download_model(tmp_path, progress=lambda *event: updates.append(event))
+    assert target.read_bytes() == b'previous corrupt file, retained until success'
+    assert not (model/'scott-model.json').exists()
+    restarted = len(updates)
+    setup.download_model(tmp_path, progress=lambda *event: updates.append(event))
+    manifest = json.loads((model/'scott-model.json').read_text())
+    assert manifest['sha256']['model.safetensors'] == item.lfs.sha256
+    assert target.read_bytes() == payload and len(calls) == 2
+    assert all(name != 'model.safetensors' for name, force in fake_hub.calls)
+    assert any('МиБ' in event[1] for event in updates)
+    assert all(.6 <= event[2] <= .9 for event in updates if event[0] == 'model')
+    fractions = [event[2] for event in updates[restarted:] if event[0] == 'model']
+    assert fractions == sorted(fractions), 'Completing a file must not roll progress back'
+
+
+@pytest.mark.parametrize('status', [401, 403, 404])
+def test_direct_weight_access_failure_is_precise_and_not_retried(tmp_path, fake_hub, monkeypatch, status):
+    import model_download
+    from urllib.error import HTTPError
+    item = next(item for item in fake_hub.items if item.rfilename == 'model.safetensors')
+    item.size = 4096
+    monkeypatch.setattr(setup, 'DIRECT_LFS_BYTES', 1024, raising=False)
+    calls = []
+    def denied(request, **kwargs):
+        calls.append(request.full_url)
+        raise HTTPError(request.full_url, status, 'denied', {}, None)
+    monkeypatch.setattr(model_download.urllib.request, 'urlopen', denied)
+    monkeypatch.setattr(model_download, 'time', SimpleNamespace(
+        sleep=lambda _: pytest.fail('Access failures must not retry'), monotonic=model_download.time.monotonic))
+    with pytest.raises(setup.InstallationError) as caught:
+        setup.download_model(tmp_path)
+    assert caught.value.code == 'download_access' and len(calls) == 1
+    assert not (tmp_path/'experiments/voice_design/models/base/scott-model.json').exists()
+
+
+@pytest.mark.parametrize('suffix', ['.part', '.part.json', '.part.json.tmp', '.download.lock'])
+def test_large_weight_rejects_linked_download_sidecars(tmp_path, fake_hub, monkeypatch, suffix):
+    import model_download
+    item = next(item for item in fake_hub.items if item.rfilename == 'model.safetensors')
+    item.size = 4096
+    monkeypatch.setattr(setup, 'DIRECT_LFS_BYTES', 1024)
+    model = tmp_path/'experiments/voice_design/models/base'
+    model.mkdir(parents=True)
+    protected = tmp_path/'unrelated.txt'
+    protected.write_bytes(b'preserved')
+    (model/('model.safetensors'+suffix)).hardlink_to(protected)
+    monkeypatch.setattr(model_download.urllib.request, 'urlopen', lambda *a,**kw:
+                        pytest.fail('Unsafe sidecars must fail before networking'))
+    with pytest.raises(model_download.DownloadError, match='Файл загрузки связан с другим файлом'):
+        setup.download_model(tmp_path)
+    assert protected.read_bytes() == b'preserved'
+    assert not (model/'scott-model.json').exists()
+
+
 @pytest.mark.parametrize('name', ['config.json', 'model.safetensors'])
 def test_incorrect_official_hash_never_publishes_model_manifest(tmp_path, fake_hub, name):
     item = next(item for item in fake_hub.items if item.rfilename == name)
@@ -389,7 +473,7 @@ def test_metadata_timeout_and_bounded_retry(tmp_path, fake_hub, monkeypatch):
             raise TimeoutError('read timed out')
         return original().model_info(*args, **kwargs)
     fake_hub.hub.HfApi = lambda **kw: SimpleNamespace(model_info=info)
-    monkeypatch.setattr(setup.time, 'sleep', waits.append)
+    monkeypatch.setattr(setup, 'time', SimpleNamespace(sleep=waits.append, monotonic=setup.time.monotonic))
     setup.download_model(tmp_path, progress=lambda *event: updates.append(event))
     assert len(attempts) == 3 and all(a['timeout'] == 30 for a in attempts)
     assert waits == [1, 2] and any('3/3' in event[1] for event in updates)
@@ -405,7 +489,7 @@ def test_transient_file_failure_keeps_preceding_downloads(tmp_path, fake_hub, mo
                 raise ConnectionResetError('connection aborted')
         return original(repo, name, **kwargs)
     fake_hub.hub.hf_hub_download = fetch
-    monkeypatch.setattr(setup.time, 'sleep', lambda _: None)
+    monkeypatch.setattr(setup, 'time', SimpleNamespace(sleep=lambda _: None, monotonic=setup.time.monotonic))
     setup.download_model(tmp_path)
     assert len(attempts) == 3 and fake_hub.calls.count(('config.json', False)) == 1
     assert all(not a['force_download'] for a in attempts)
@@ -417,7 +501,7 @@ def test_persistent_download_failure_is_classified_and_bounded(tmp_path, fake_hu
         attempts.append(True)
         raise TimeoutError('read timed out')
     fake_hub.hub.hf_hub_download = fetch
-    monkeypatch.setattr(setup.time, 'sleep', lambda _: None)
+    monkeypatch.setattr(setup, 'time', SimpleNamespace(sleep=lambda _: None, monotonic=setup.time.monotonic))
     with pytest.raises(setup.InstallationError) as caught:
         setup.download_model(tmp_path)
     assert caught.value.code == 'download_timeout' and len(attempts) == 3
@@ -431,7 +515,8 @@ def test_denied_download_is_not_retried(tmp_path, fake_hub, monkeypatch, status)
         error.response = SimpleNamespace(status_code=status)
         raise error
     fake_hub.hub.hf_hub_download = fetch
-    monkeypatch.setattr(setup.time, 'sleep', lambda _: pytest.fail('Access failures must not loop'))
+    monkeypatch.setattr(setup, 'time', SimpleNamespace(
+        sleep=lambda _: pytest.fail('Access failures must not loop'), monotonic=setup.time.monotonic))
     with pytest.raises(setup.InstallationError) as caught:
         setup.download_model(tmp_path)
     assert caught.value.code == 'download_access'
@@ -468,7 +553,7 @@ def test_failed_repair_restores_previous_file_and_keeps_download_partial(tmp_pat
         (model/'sdk.incomplete').write_bytes(b'reusable partial')
         raise ConnectionResetError('connection aborted')
     fake_hub.hub.hf_hub_download = broken
-    monkeypatch.setattr(setup.time, 'sleep', lambda _: None)
+    monkeypatch.setattr(setup, 'time', SimpleNamespace(sleep=lambda _: None, monotonic=setup.time.monotonic))
     with pytest.raises(setup.InstallationError):
         setup.download_model(tmp_path)
     assert target.read_bytes() == b'previous invalid file'

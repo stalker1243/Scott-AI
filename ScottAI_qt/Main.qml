@@ -24,7 +24,9 @@ ApplicationWindow {
     font.family: visual.fontFamily
     font.pixelSize: 14
     property bool navigationExpanded: preferences.initial.navigationExpanded
-    property bool alwaysOnTop: preferences.initial.alwaysOnTop
+    // Pinning is an explicit choice for this session. An old saved pin must
+    // never make the next launch cover every other application.
+    property bool alwaysOnTop: false
     property bool trayNotifications: preferences.initial.trayNotifications
     property real navigationWidth: navigationExpanded ? 196 : 60
     property real moveEmphasis: windowEffects.interacting ? 1 : 0
@@ -37,6 +39,8 @@ ApplicationWindow {
         return supported
     }
     property real revealProgress: animationsEnabled ? 0 : 1
+    property bool presentingWindow: false
+    readonly property bool presentationAnimating: revealAnimation.running || dismissAnimation.running
     property string dismissAction: ""
     readonly property bool pendingHide: dismissAction === "hide"
     readonly property bool pendingMinimize: dismissAction === "minimize"
@@ -58,7 +62,8 @@ ApplicationWindow {
     property bool hideToTray: preferences.initial.hideToTray
     property bool animationsEnabled: preferences.initial.animations
     property string styleId: Styles.resolve(preferences.initial.styleId).id
-    property int glassFrost: preferences.initial.glassFrost
+    property int glassFrost: Math.max(1, preferences.initial.glassFrost)
+    onGlassFrostChanged: if (glassFrost < 1) glassFrost = 1
     readonly property bool glassActive: styleDefinition.decoration === "glass"
     // Windows supplies the backdrop blur. This veil controls the material's density.
     readonly property real glassOpacity: glassActive ? 0.16 + 0.64 * glassFrost / 100 : 1
@@ -125,7 +130,6 @@ ApplicationWindow {
         pageTitle: root.tabs[root.displayedTab]; navigationExpanded: root.navigationExpanded
         statusText: backend.status; online: backend.online
         onToggleNavigation: { root.navigationExpanded = !root.navigationExpanded; root.persistWorkspace() }
-        logoSource: root.lightIcon ? "qrc:/brand/scott-logo-light.png" : "qrc:/brand/scott-logo.png"
     }
     WindowResizeHandles { parent: Overlay.overlay; anchors.fill: parent; z: 100; windowHost: root }
     Behavior on bg { enabled: root.animationsEnabled; ColorAnimation { duration: 180 } }
@@ -137,18 +141,19 @@ ApplicationWindow {
     Behavior on line { enabled: root.animationsEnabled; ColorAnimation { duration: 180 } }
     function persist() { preferences.save(darkMode, accentOverride, lightIcon, hideToTray, animationsEnabled, styleDefinition.id, transparencyByStyle, glassFrost) }
     function persistWorkspace() { preferences.saveWorkspace(navigationExpanded, alwaysOnTop, trayNotifications) }
+    function finishReveal() { revealAnimation.stop(); revealProgress = 1 }
     function restoreFromTray() {
         if (setupActive) { raiseSetup(); return }
         if (pendingQuit) return
-        dismissAction = ""; hideAnimation.stop(); revealAnimation.stop()
-        if (!visible || visibility === Window.Minimized) revealProgress = animationsEnabled ? 0 : 1
+        const reveal = !visible || pendingHide
+        dismissAnimation.stop(); revealAnimation.stop()
+        dismissAction = ""
+        if (!visible) revealProgress = animationsEnabled ? 0 : 1
+        presentingWindow = true
         show(); raise(); requestActivate()
-        // The tray controller restores the previous maximized state first.
-        Qt.callLater(function() {
-            if (root.dismissAction.length || !root.visible) return
-            if (visual.motion) revealAnimation.start()
-            else root.revealProgress = 1
-        })
+        if (animationsEnabled && reveal) revealAnimation.start()
+        else revealProgress = 1
+        Qt.callLater(function() { root.presentingWindow = false })
         if (selectedTab === 1) Qt.callLater(function() { composer.forceActiveFocus() })
     }
     function hideToBackground() {
@@ -165,6 +170,7 @@ ApplicationWindow {
     function prepareWindowMotion() {
         if (pendingQuit) return false
         if (dismissAction.length) restoreFromTray()
+        finishReveal()
         dockAnimation.stop()
         return true
     }
@@ -187,11 +193,12 @@ ApplicationWindow {
     }
     function dismissWindow(action) {
         if (dismissAction === "quit" || (pendingQuit && action !== "quit")) return
-        windowMotion.finish()
-        dismissAction = action
-        revealAnimation.stop(); dockAnimation.stop()
-        if (!visual.motion) finishDismiss()
-        else if (!hideAnimation.running) hideAnimation.start()
+        windowMotion.finish(); revealAnimation.stop(); dismissAnimation.stop()
+        dismissAction = action; dockAnimation.stop()
+        // Minimize/maximize belong to the OS; only open/close/tray use a fade.
+        if (action === "minimize" || !animationsEnabled || !visible || visibility === Window.Minimized) {
+            revealProgress = 1; finishDismiss()
+        } else dismissAnimation.start()
     }
     function finishDismiss() {
         const action = dismissAction
@@ -234,16 +241,19 @@ ApplicationWindow {
         NumberAnimation { id: dockX; target: root; property: "x"; duration: 150; easing.type: Easing.OutCubic }
         NumberAnimation { id: dockY; target: root; property: "y"; duration: 150; easing.type: Easing.OutCubic }
     }
-    NumberAnimation { id: revealAnimation; target: root; property: "revealProgress"; to: 1; duration: 360; easing.type: Easing.OutCubic }
     NumberAnimation {
-        id: hideAnimation
-        target: root; property: "revealProgress"; to: 0; duration: 260; easing.type: Easing.InOutCubic
+        id: revealAnimation; target: root; property: "revealProgress"
+        to: 1; duration: 320; easing.type: Easing.OutCubic
+    }
+    NumberAnimation {
+        id: dismissAnimation; target: root; property: "revealProgress"
+        to: 0; duration: 220; easing.type: Easing.InOutCubic
         onFinished: root.finishDismiss()
     }
     Connections {
         target: windowEffects
         function onInteractingChanged() { if (windowEffects.interacting) dockAnimation.stop() }
-        function onMoveFinished() { root.snapToScreenEdge() }
+        // Native dragging/snapping is left to the desktop window manager.
     }
     function metric(key) { return backend.online && backend.metrics[key] !== undefined ? Math.round(backend.metrics[key]) + "%" : "—" }
     function settlePage() {
@@ -252,6 +262,7 @@ ApplicationWindow {
         pages.opacity = 1; pages.pageOffset = 0
     }
     function changePage() {
+        if (selectedTab === 7 || selectedTab === 8) { selectedTab = 0; return }
         if (!sceneReady) return
         if (!animationsEnabled || !visible) { settlePage(); return }
         if (pageOut.running) return // The outgoing transition uses the latest requested tab.
@@ -264,14 +275,15 @@ ApplicationWindow {
     property bool chatRequested: false
     function syncMessages() {
         const items = backend.messages
-        const follow = chatList.atYEnd || chatModel.count === 0 ||
+        const follow = chatList.followTail || chatModel.count === 0 ||
                        (items.length > 0 && items[items.length - 1].role === "user")
+        chatList.followTail = follow
         if (items.length < chatModel.count) chatModel.clear()
         // Streaming changes only the last answer. Avoid rebuilding every row's
         // attachment JSON and code delegates for each batch of arriving tokens.
         if (backend.busy && items.length === chatModel.count && items.length > 0 && items[items.length - 1].role === "assistant") {
             chatModel.setProperty(items.length - 1, "body", items[items.length - 1].text)
-            if (follow) Qt.callLater(function() { chatList.positionViewAtEnd() })
+            if (follow) Qt.callLater(chatList.followLatest)
             return
         }
         for (let i = 0; i < items.length; ++i) {
@@ -279,7 +291,7 @@ ApplicationWindow {
             if (i >= chatModel.count) chatModel.append(row)
             else chatModel.set(i, row)
         }
-        if (follow) Qt.callLater(function() { chatList.positionViewAtEnd() })
+        if (follow) Qt.callLater(chatList.followLatest)
     }
     Drawer {
         id: historyPopup; objectName: "chatHistoryPopup"
@@ -392,13 +404,13 @@ ApplicationWindow {
     }
     onAnimationsEnabledChanged: {
         if (sceneReady && !animationsEnabled) {
-            settlePage(); dockAnimation.stop(); revealAnimation.stop(); hideAnimation.stop()
+            settlePage(); dockAnimation.stop(); revealAnimation.stop(); dismissAnimation.stop()
             if (dismissAction.length) finishDismiss()
             else revealProgress = 1
         }
     }
     onVisibleChanged: if (sceneReady && !visible) {
-        settlePage(); dockAnimation.stop(); revealAnimation.stop(); hideAnimation.stop()
+        settlePage(); dockAnimation.stop(); revealAnimation.stop(); dismissAnimation.stop()
         if (dismissAction.length) finishDismiss()
         else revealProgress = 1
     }
@@ -406,17 +418,16 @@ ApplicationWindow {
         const previous = previousVisibility
         previousVisibility = visibility
         if (visibility !== Window.Windowed) dockAnimation.stop()
-        if (sceneReady && visibility === Window.Minimized) {
-            revealAnimation.stop(); hideAnimation.stop()
+        if (!sceneReady) return
+        if (visibility === Window.Minimized) {
+            revealAnimation.stop(); dismissAnimation.stop()
             if (dismissAction.length) finishDismiss()
             else revealProgress = 1
-        } else if (sceneReady && previous === Window.Minimized && !pendingQuit) {
-            revealProgress = animationsEnabled ? 0 : 1
-            Qt.callLater(function() {
-                if (!root.dismissAction.length && root.visible && visual.motion) revealAnimation.start()
-            })
+        } else if (!presentingWindow && (previous === Window.Minimized || visibility === Window.Maximized || visibility === Window.FullScreen)) {
+            finishReveal()
         }
     }
+
     Connections {
         target: backend
         function onStateChanged() {
@@ -437,19 +448,24 @@ ApplicationWindow {
         }
         function onMemoryAdded() { memoryPage.clearDraft() }
         function onMessagesChanged() { root.syncMessages() }
-        function onChatSent() { composer.clear() }
+        function onChatSubmitted(text) { if (composer.text.trim() === text.trim()) composer.clear() }
+        function onRestoreChatDraft(text) { if (!composer.text.trim().length) composer.text = text }
+        function onChatRecovered(text) { if (composer.text.trim() === text) composer.clear() }
         function onChatsChanged() { root.chatWarningFeature = "" }
     }
     onClosing: function(close) {
         if (closeApproved) return
+        if (pendingQuit) { close.accepted = false; return }
         if (hideToTray && trayAvailable) {
+            close.accepted = false; root.hideToBackground()
+        } else if (animationsEnabled) {
             close.accepted = false
-            root.hideToBackground()
-        } else if (visual.motion) {
-            close.accepted = false
-            root.dismissWindow("close")
+            // A completed fade may close the window only after this native
+            // close event has returned; never recurse into QWindow::close().
+            Qt.callLater(function() { root.dismissWindow("close") })
         }
     }
+
 
     component CopyLabel: TextEdit { font.family: visual.fontFamily;
         color: root.ink; font.pixelSize: 14; readOnly: true; selectByMouse: true
@@ -609,19 +625,19 @@ ApplicationWindow {
                 ActionButton { text: updateController.busy ? qsTranslate("Launcher", "Подождите…") : updateController.canInstall ? qsTranslate("Launcher", "Обновить") : qsTranslate("Launcher", "Открыть выпуск"); enabled: !updateController.busy; onClicked: updateController.canInstall ? updateController.install() : updateController.openRelease() }
                 ActionButton { text: qsTranslate("Launcher", "Позже"); enabled: !updateController.busy; onClicked: root.updateDismissed = true }
             }
+            Item {
+                Layout.fillWidth: true; Layout.fillHeight: true
+                Layout.minimumWidth: 0; Layout.minimumHeight: 0
+                Layout.maximumWidth: Number.POSITIVE_INFINITY
             StackLayout {
                 id: pages
                 objectName: "pages"
                 property real pageOffset: 0
                 transform: Translate { y: pages.pageOffset }
                 enabled: !pageOut.running
-                Layout.fillWidth: true; Layout.fillHeight: true
-                Layout.minimumHeight: 0; Layout.minimumWidth: 0
-                Layout.maximumWidth: root.displayedTab === 1 ? 964 : 1084
-                Layout.alignment: Qt.AlignHCenter
-                Layout.leftMargin: 24
-                Layout.rightMargin: 20
-                Layout.topMargin: 12; Layout.bottomMargin: 12
+                width: Math.max(0, Math.min(parent.width - 32, root.displayedTab === 1 ? 1040 : 1084))
+                height: Math.max(0, parent.height - 24)
+                anchors.centerIn: parent
                 currentIndex: root.displayedTab
 
                 ParallelAnimation {
@@ -643,6 +659,7 @@ ApplicationWindow {
                 // Home
                 OverviewPage {
                     objectName: "overviewPage"; theme: visual; client: backend
+                    monitorEnabled: root.visible && root.visibility !== Window.Minimized && root.displayedTab === 0
                     onChatRequested: { root.selectedTab = 1; composer.forceActiveFocus() }
                     onPetsRequested: { appearancePopup.section = 1; appearancePopup.open() }
                 }
@@ -651,7 +668,7 @@ ApplicationWindow {
                 Item {
                 ColumnLayout {
                     objectName: "chatWorkspace"
-                    width: Math.min(parent.width, 920); height: parent.height
+                    width: parent.width; height: parent.height
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 12
                     RowLayout {
@@ -670,7 +687,7 @@ ApplicationWindow {
                         Layout.fillWidth: true; Layout.fillHeight: true
                         Column {
                             anchors.centerIn: parent; spacing: 12; visible: backend.messages.length === 0
-                            Image { anchors.horizontalCenter: parent.horizontalCenter; width: 72; height: 72; source: root.lightIcon ? "qrc:/brand/scott-logo-light.png" : "qrc:/brand/scott-logo.png" }
+                            ScottMark { anchors.horizontalCenter: parent.horizontalCenter; width: 56; height: 62; color: visual.ink }
                             Text { font.family: visual.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: qsTranslate("Launcher", "Чем помочь?"); color: root.ink; font.pixelSize: 24; font.weight: Font.DemiBold }
                             Text { font.family: visual.fontFamily; anchors.horizontalCenter: parent.horizontalCenter; text: backend.online ? "" : qsTranslate("Launcher", "Запустите Scott на вкладке «Система»."); color: root.muted; font.pixelSize: 13 }
                         }
@@ -678,8 +695,27 @@ ApplicationWindow {
                             id: chatList
                             objectName: "chatList"
                             anchors.fill: parent; anchors.margins: 2; anchors.rightMargin: 12
-                            spacing: 22; clip: true; model: chatModel
-                            ScrollBar.vertical: UiScrollBar { theme: visual }
+                            spacing: 24; clip: true; model: chatModel
+                            boundsBehavior: Flickable.StopAtBounds
+                            reuseItems: false
+                            property bool followTail: true
+                            property bool following: false
+                            function followLatest() {
+                                if (!followTail || following) return
+                                following = true
+                                forceLayout(); positionViewAtEnd()
+                                following = false
+                            }
+                            onMovementEnded: followTail = atYEnd
+                            onDraggingChanged: if (dragging) followTail = false
+                            onContentYChanged: if (moving || dragging) followTail = atYEnd
+                            onContentHeightChanged: Qt.callLater(followLatest)
+                            onHeightChanged: Qt.callLater(followLatest)
+                            onWidthChanged: Qt.callLater(followLatest)
+                            ScrollBar.vertical: UiScrollBar {
+                                theme: visual
+                                onPressedChanged: { if (pressed) chatList.followTail = false; else chatList.followTail = chatList.atYEnd }
+                            }
                             delegate: Item {
                                 id: message
                                 required property int index
@@ -694,7 +730,7 @@ ApplicationWindow {
                                 onHeightChanged: Qt.callLater(chatList.forceLayout)
                                 property real arrivalProgress: 1
                                 opacity: arrivalProgress
-                                scale: 0.96 + arrivalProgress * 0.04
+                                transform: Translate { y: (1 - message.arrivalProgress) * 8 }
                                 Component.onCompleted: Qt.callLater(chatList.forceLayout)
                                 ListView.onAdd: if (root.animationsEnabled && root.visible && root.displayedTab === 1 && root.revealProgress === 1) arrivalAnimation.start()
                                 NumberAnimation {
@@ -710,16 +746,17 @@ ApplicationWindow {
                                 transformOrigin: speaker === "user" ? Item.BottomRight : Item.BottomLeft
                                 Rectangle {
                                     id: bubble
-                                    width: message.speaker === "user" ? Math.min(parent.width * 0.88, 700) : parent.width
-                                    height: messageContent.implicitHeight + 24
-                                    anchors.right: message.speaker === "user" ? parent.right : undefined
+                                    objectName: "chatMessageCard" + message.index
+                                    width: parent.width
+                                    height: messageContent.implicitHeight + 32
+                                    anchors.left: parent.left
                                     radius: visual.controlRadius + 2
                                     Behavior on radius { enabled: visual.motion; NumberAnimation { duration: 220 } }
-                                    color: message.speaker === "user" ? root.elevated : "transparent"
-                                    border.color: message.speaker === "error" ? "#ae6653" : "transparent"
+                                    color: message.speaker === "user" ? Qt.alpha(root.accentColor, root.darkMode ? 0.08 : 0.05) : Qt.alpha(root.elevated, 0.35)
+                                    border.color: message.speaker === "error" ? "#ae6653" : message.speaker === "user" ? Qt.alpha(root.accentColor, 0.25) : Qt.alpha(root.line, 0.6)
                                     ColumnLayout {
                                         id: messageContent
-                                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 12; spacing: 6
+                                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 16; spacing: 10
                                         Text { font.family: visual.fontFamily; text: message.speaker === "user" ? qsTranslate("Launcher", "Вы") : message.speaker === "error" ? qsTranslate("Launcher", "Не удалось отправить") : "Scott"; color: root.muted; font.pixelSize: 11; font.weight: Font.DemiBold }
                                         ChatMessageBody { Layout.fillWidth: true; theme: visual; text: message.body; formatCode: message.speaker === "assistant"; messageIndex: message.index }
                                         Repeater {
@@ -739,6 +776,13 @@ ApplicationWindow {
                                 }
                             }
                         }
+                    }
+                    ChatToolButton {
+                        objectName: "chatJumpLatest"; theme: visual
+                        Layout.alignment: Qt.AlignHCenter
+                        visible: chatModel.count > 0 && !chatList.atYEnd
+                        text: qsTranslate("Launcher", "К последнему сообщению")
+                        onClicked: { chatList.followTail = true; chatList.followLatest() }
                     }
                     RowLayout {
                         visible: backend.busy || !backend.online || backend.chatNotice.length > 0 || backend.browserState.state === "running" || backend.browserState.state === "cancelling" || backend.browserState.state === "failed"
@@ -874,7 +918,7 @@ ApplicationWindow {
                                     ThemeTile { dark: true }
                                     ThemeTile { dark: false }
                                     Item { Layout.fillWidth: true }
-                                    Image { source: root.lightIcon ? "qrc:/brand/scott-logo-light.png" : "qrc:/brand/scott-logo.png"; Layout.preferredWidth: 60; Layout.preferredHeight: 60 }
+                                    ScottMark { color: visual.ink; Layout.preferredWidth: 60; Layout.preferredHeight: 60 }
                                 }
                             }
                         }
@@ -936,7 +980,7 @@ ApplicationWindow {
                                 }
                                 UiSlider {
                                     objectName: "glassFrostSlider"
-                                    theme: visual; Layout.fillWidth: true; value: root.glassFrost
+                                    theme: visual; Layout.fillWidth: true; from: 1; value: root.glassFrost
                                     Accessible.name: qsTranslate("Launcher", "Матовость стекла в процентах")
                                     onMoved: { root.glassFrost = Math.round(value); glassFrostSave.restart() }
                                 }
@@ -1014,18 +1058,15 @@ ApplicationWindow {
                 ProfilePage {
                     objectName: "profilePage"; client: backend; avatar: profileAvatar; theme: visual
                 }
-                ActionsPage {
-                    objectName: "actionsPage"; client: backend; theme: visual
-                    onPhraseRequested: function(phrase) { root.stageAction(phrase) }
-                }
-                ProtocolsPage {
-                    objectName:"protocolsPage"; client:backend; files:protocolFiles; theme:visual
-                }
+                // Preserve route indices for saved workspace compatibility.
+                Item {}
+                Item {}
                 ModelsPage {
                     objectName: "modelsPage"; client: backend; theme: visual
                 }
                 LogsPage { objectName: "logsPage"; controller: diagnosticsController; theme: visual }
                 AboutPage { objectName: "aboutPage"; theme: visual }
+            }
             }
         }
     }

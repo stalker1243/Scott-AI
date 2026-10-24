@@ -22,11 +22,13 @@ from pydantic import BaseModel, Field
 try:
     from .chat_store import ChatStore
     from . import attachments, model_capabilities
+    from . import request_receipts
     from .storage import atomic_write_text
     from .intelligent_answerer import get_intelligent_answerer, explain_connect_error, raise_with_body
 except ImportError:
     from chat_store import ChatStore
     import attachments, model_capabilities
+    import request_receipts
     from storage import atomic_write_text
     from intelligent_answerer import get_intelligent_answerer, explain_connect_error, raise_with_body
 
@@ -358,17 +360,27 @@ def send(chat_id, question, mode, files, *, reserved=False, cancelled=None):
 
 @router.post('/{chat_id}/messages')
 async def send_message(chat_id: str, request: Request, question: str = Form(''), mode: str = Form('chat'),
-                       files: Optional[List[UploadFile]] = File(None), stream: bool = Form(False)):
+                       files: Optional[List[UploadFile]] = File(None), stream: bool = Form(False), request_id: str = Form('')):
     if stream:
         try:
             from . import text_stream
         except ImportError:
             import text_stream
-        return text_stream.response(lambda: _send_message(chat_id, question, mode, files), request.scope)
-    return await _send_message(chat_id, question, mode, files)
+        return text_stream.response(lambda: _send_message(chat_id, question, mode, files, request_id), request.scope)
+    return await _send_message(chat_id, question, mode, files, request_id)
 
 
-async def _send_message(chat_id, question, mode, files):
+@router.get('/{chat_id}/requests/{request_id}')
+async def request_status(chat_id: str, request_id: str):
+    database = store()
+    info = await asyncio.to_thread(operation, request_receipts.status, database, chat_id, request_id)
+    result = dict(success=True, request=info)
+    if info['state'] == 'completed':
+        result['chat'] = await asyncio.to_thread(operation, database.get, chat_id)
+    return result
+
+
+async def _send_message(chat_id, question, mode, files, request_id=''):
     if len(question) > 12000 or mode not in {'chat', 'image', 'command'}:
         raise HTTPException(400, 'Проверьте сообщение и режим отправки')
     files = files or []
@@ -385,6 +397,30 @@ async def _send_message(chat_id, question, mode, files):
     finally:
         for upload in files:
             await upload.close()
+    if request_id:
+        database = store()
+        with _busy_lock:
+            if chat_id in _busy_chats:
+                raise HTTPException(409, 'Дождитесь завершения предыдущего действия')
+        try:
+            claimed = await asyncio.to_thread(request_receipts.claim, database, chat_id, request_id,
+                request_receipts.fingerprint(question, mode, payload), question)
+        except request_receipts.ReceiptConflict as error:
+            raise HTTPException(409, str(error)) from None
+        except (ValueError, KeyError) as error:
+            raise HTTPException(400 if isinstance(error, ValueError) else 404, str(error.args[0])) from None
+        if not claimed:
+            chat = await asyncio.to_thread(operation, database.get, chat_id)
+            return dict(success=True, chat=chat, notes=[])
+        with request_receipts.scope(database, request_id):
+            try:
+                return await _dispatch_message(chat_id, question, mode, files, payload)
+            finally:
+                await asyncio.shield(asyncio.to_thread(request_receipts.interrupted, database, request_id))
+    return await _dispatch_message(chat_id, question, mode, files, payload)
+
+
+async def _dispatch_message(chat_id, question, mode, files, payload):
     if mode == 'chat' and not files and requests_image(question):
         mode = 'image'
     if mode == 'chat' and not files and question.strip():
@@ -442,6 +478,7 @@ async def _send_message(chat_id, question, mode, files):
         with _busy_lock:
             _busy_chats.discard(chat_id)
     async def model_reply():
+        await asyncio.to_thread(request_receipts.phase, store(), 'effect' if mode == 'image' else 'model')
         try:
             return await bounded_work.models.run(work, True, timeout=200 if mode=='image' else 110,
                                                  cancelled=cancelled, completion=release)
@@ -458,6 +495,7 @@ async def _send_message(chat_id, question, mode, files):
         await asyncio.to_thread(operation, reserve)
         handed_off = False
         try:
+            await asyncio.to_thread(request_receipts.phase, store(), 'effect')
             result = await handler(question.strip(), quiet_mode=True)
             if result is None and automatic:
                 handed_off = True

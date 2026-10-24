@@ -20,9 +20,15 @@ from __future__ import annotations
 import queue
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+try:
+    from .performance_trace import current as performance_current
+    from .timing import record as record_timing
+except ImportError:
+    from performance_trace import current as performance_current
+    from timing import record as record_timing
 
 try:
     import numpy as np
@@ -83,6 +89,8 @@ class _Completion(threading.Event):
         self._generation = generation
         self._on_finished = on_finished
         self.released = threading.Event()
+        self.trace = performance_current()
+        self.queued_at = time.perf_counter()
 
     def result(self, timeout=120.0):
         if not self.wait(timeout):
@@ -119,6 +127,13 @@ class _OutputSession:
     next_at: float = 0.
     cancelled: bool = False
     closed: bool = False
+    trace: object = None
+    started_at: float = field(default_factory=time.perf_counter)
+    blocks: int = 0
+    frames: int = 0
+    underflow_blocks: int = 0
+    supply_gap_count: int = 0
+    max_supply_gap: float = 0.
 
 
 @dataclass
@@ -316,6 +331,8 @@ class SpeechPlayer:
                     self._active_generation = generation
                     self._active_done = done
                 if current:
+                    if done is not None and done.trace is not None and done.trace.mark('playback_dequeued'):
+                        done.trace.duration('playback_queue', time.perf_counter()-done.queued_at)
                     if isinstance(path, _StreamBlock):
                         self._play_stream_block(path)
                     else:
@@ -384,6 +401,11 @@ class SpeechPlayer:
                     self._echo_reference().stop()
                 except Exception:
                     pass
+                self._record_output(session.trace, session.started_at, mode='stream', frames=session.frames,
+                    rate=24000, blocks=session.blocks, underflow_blocks=session.underflow_blocks,
+                    supply_gap_count=session.supply_gap_count,
+                    max_supply_gap_ms=round(session.max_supply_gap*1000, 2),
+                    aborted=bool(cancel or session.cancelled))
 
     def _play_stream_block(self, block):
         rate, data = self._read_audio(block.path)
@@ -396,6 +418,7 @@ class SpeechPlayer:
         if session is None:
             stream = sd.OutputStream(samplerate=rate, channels=1, dtype='float32', device=_output_device())
             session = _OutputSession(block.token, stream)
+            session.trace = getattr(self._active_done, 'trace', None)
             with self._lock:
                 if self._active_generation != self._generation:
                     stream.close()
@@ -421,7 +444,11 @@ class SpeechPlayer:
             if self._active_generation != self._generation or session.cancelled:
                 return
         self._playing = True
-        start = max(time.monotonic(), session.next_at)
+        now = time.monotonic()
+        supply_gap = max(0., now-session.next_at) if session.next_at else 0.
+        session.max_supply_gap = max(session.max_supply_gap, supply_gap)
+        session.supply_gap_count += int(supply_gap > .025)
+        start = max(now, session.next_at)
         session.next_at = start + len(data)/rate
         try:
             self._echo_reference().stream_block(data, rate, start)
@@ -430,21 +457,52 @@ class SpeechPlayer:
         pcm = np.ascontiguousarray(data, dtype=np.float32)
         stride = max(1, round(rate*STREAM_WRITE_SECONDS))
         underflowed = False
+        session.blocks += 1
         for offset in range(0, len(pcm), stride):
             with self._lock:
                 if self._active_generation != self._generation or session.cancelled:
                     return
             # Keep one device stream and exact PCM order. Cancellation can now
             # stop between short writes even when abort doesn't wake a driver.
-            underflowed = bool(session.stream.write(pcm[offset:offset+stride])) or underflowed
+            part = pcm[offset:offset+stride]
+            driver_underflow = bool(session.stream.write(part))
+            self._mark_audio_submitted()
+            session.frames += len(part)
+            if driver_underflow and not underflowed:
+                session.underflow_blocks += 1
+            underflowed = driver_underflow or underflowed
         with self._lock:
             self._stream_stats['blocks'] += 1
             self._stream_stats['underflows'] += int(bool(underflowed))
         if block.last:
             self._close_output(session)
 
+    def _mark_audio_submitted(self):
+        done = self._active_done
+        if done is not None and done.trace is not None:
+            done.trace.mark('first_audio_submitted')
+
+    @staticmethod
+    def _record_output(trace, started_at, **values):
+        """One content-free record per output session; diagnostics cannot stop audio."""
+        if trace is None:
+            return
+        try:
+            finished_at = time.perf_counter()
+            origin = getattr(trace, 'started', started_at)
+            meta = dict(request_id=trace.id, metric='audio_output',
+                        started_ms=round(max(0., started_at-origin)*1000, 2),
+                        finished_ms=round(max(0., finished_at-origin)*1000, 2), **values)
+            record_timing('voice.audio_output', max(0., finished_at-started_at),
+                          ok=not values.get('underflow_blocks', 0), meta=meta)
+        except Exception:
+            pass
+
     def _play_file(self, path: str) -> None:
         rate, data = self._read_audio(path)
+        trace = getattr(self._active_done, 'trace', None)
+        started_at = time.perf_counter()
+        submitted = False
 
         # Отдаём тот же звук эхоподавлению: оно вычтет его из того, что
         # услышит микрофон. В этом наше преимущество перед обычным
@@ -466,12 +524,17 @@ class SpeechPlayer:
                 if self._active_generation != self._generation:
                     return
                 sd.play(data, rate, device=device)
+                submitted = True
+            self._mark_audio_submitted()
             sd.wait()
         finally:
             try:
                 self._echo_reference().stop()
             except Exception:
                 pass
+            if submitted:
+                self._record_output(trace, started_at, mode='file', frames=len(data), rate=rate,
+                                    aborted=self._active_generation != self._generation)
 
     @staticmethod
     def _echo_reference():

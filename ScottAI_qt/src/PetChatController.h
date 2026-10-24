@@ -19,15 +19,17 @@ public:
     QString error() const { return m_error; }
     QString status() const;
     Q_INVOKABLE void open();
+    Q_INVOKABLE void toggleVoice();
     Q_INVOKABLE void send(const QString &text);
 signals:
     void changed();
     void sent();
+    void voiceFailed(const QString &message);
 private:
     void advance();
     void ensureBackend();
     QString m_profile,m_pending,m_error;
-    bool m_opened=false,m_submitted=false;
+    bool m_opened=false,m_submitted=false,m_voicePending=false;
     BackendClient m_client;
     QProcess m_imageHelper;
     QByteArray m_helperLog;

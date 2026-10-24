@@ -29,6 +29,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
+try:
+    from .performance_trace import measured, phase, environment as trace_environment
+except ImportError:
+    from performance_trace import measured, phase, environment as trace_environment
 
 # Сборка torch с поддержкой видеокарты живёт на отдельном индексе — на обычном
 # PyPI её просто нет. Версия CUDA 12.6 выбрана как самая широко поддерживаемая
@@ -153,11 +157,11 @@ def _human(size: float) -> str:
 
 class _DownloadWatcher:
     """
-    Наблюдатель за временной папкой pip.
+    Показывает активность pip без выдуманного процента скачивания.
 
-    Считать прогресс по выводу pip нельзя, а вот файл, который он туда кладёт,
-    растёт на глазах. Ожидаемый размер сообщает сам pip строкой Downloading —
-    до тех пор доля неизвестна, и показывается только объём.
+    Во временной папке лежат сразу несколько пакетов и распакованных файлов;
+    её размер нельзя сравнивать с размером одного архива. Распаковка начинается
+    только после явного сообщения pip, а не при превышении такого размера.
     """
 
     def __init__(self, folder: Path, progress: Optional[Progress], message: str,
@@ -167,7 +171,7 @@ class _DownloadWatcher:
         self.message = message
         self.start = start
         self.span = span
-        self.expected: Optional[float] = None
+        self.installing = False
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
@@ -181,27 +185,13 @@ class _DownloadWatcher:
 
     def _loop(self) -> None:
         while not self._stop.wait(0.7):
-            size = _folder_size(self.folder)
-            if size <= 0:
-                continue
-
-            if not self.expected:
-                _report(self.progress, f"{self.message} {_human(size)}", self.start)
-                continue
-
-            if size >= self.expected:
-                # Скачивание кончилось: дальше pip распаковывает архив в ту же
-                # папку, и её размер обгоняет размер файла. Показывать «541 МБ
-                # из 111 МБ» бессмысленно — говорим, что происходит на самом
-                # деле, и держим полосу на месте.
-                _report(self.progress, "Распаковываю и устанавливаю…", self.start + self.span)
-                continue
-
-            share = size / self.expected
-            _report(self.progress, f"{self.message} {_human(size)} из {_human(self.expected)}",
-                    self.start + self.span * share)
+            if self.installing:
+                _report(self.progress, "Распаковываю и устанавливаю…", self.start + self.span*.95)
+            else:
+                _report(self.progress, self.message, self.start)
 
 
+@measured('setup.pip_install', success=lambda result: result[0])
 def _run_pip(
     executable: str,
     args: List[str],
@@ -210,15 +200,27 @@ def _run_pip(
     start: float,
     span: float,
     timeout: int = 3600,
+    cache_directory: Optional[Path] = None,
 ) -> tuple[bool, str]:
     """
-    Запустить pip, показывая, сколько уже скачано.
+    Запустить pip, показывая текущий этап без оценки неизвестного объёма.
 
     Возвращает (успех, последние строки вывода) — хвост нужен для сообщения об
     ошибке: без него человек видит «не удалось поставить torch» и ничего
     больше.
     """
-    command = [executable, "-m", "pip", "install", "--no-warn-script-location", "--no-cache-dir",
+    try:
+        from . import setup_cache
+    except ImportError:
+        import setup_cache
+    cache = None
+    if cache_directory is not None:
+        try:
+            cache = setup_cache.prepare(cache_directory)
+        except (OSError, ValueError, setup_cache.DownloadError):
+            _report(progress, 'Кеш недоступен. Продолжаю установку без кеша; его файлы сохранены.', start)
+    cache_flags = ['--cache-dir', str(cache)] if cache is not None else ['--no-cache-dir']
+    command = [executable, "-m", "pip", "install", "--no-warn-script-location", *cache_flags,
                "--disable-pip-version-check", "--no-input", "--prefer-binary",
                "--timeout", "30", "--retries", "3", *args]
     try:
@@ -231,10 +233,11 @@ def _run_pip(
 
     with tempfile.TemporaryDirectory(prefix="scott_pip_") as tmp:
         folder = Path(tmp)
-        # Своя временная папка нужна не для чистоты, а чтобы было за чем
-        # наблюдать: в общем %TEMP% лежит чужое, и размер там ничего не значит.
+        # Временные файлы этого запуска изолированы от остальных установщиков.
         env = provisioning_environment()
         env.update(PYTHONUNBUFFERED="1", TMP=tmp, TEMP=tmp, TMPDIR=tmp)
+        if cache is not None:
+            env['PIP_CACHE_DIR'] = str(cache)
 
         tail: List[str] = []
         _report(progress, message, start)
@@ -254,13 +257,14 @@ def _run_pip(
                         from .support_logs import append_log
                         append_log('setup.log', line)
 
-                    size = _parse_download_size(line)
-                    if size:
-                        watcher.expected = size
+                    if line.lstrip().startswith('Installing collected packages:'):
+                        watcher.installing = True
 
                 code = _stream_process(command, consume, timeout, env=env)
             except subprocess.TimeoutExpired:
                 return False, "превышен срок установки пакетов; последняя операция сохранена в setup.log. Повторите подготовку"
+            finally:
+                setup_cache.maintain(cache)
 
         return code == 0, "\n".join(tail[-12:])
 
@@ -272,6 +276,7 @@ def provisioning_environment():
             and name.upper() not in ('AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY')}
 
 
+@measured('setup.torch', success=lambda result: result[0])
 def _install_torch(executable, arguments, progress, managed):
     """Use durable downloads only for the pinned, application-owned runtime."""
     try:
@@ -291,9 +296,12 @@ def _install_torch(executable, arguments, progress, managed):
             last[0]=now
             _report(progress,f'Скачиваю PyTorch: {done/1024**2:.1f} / {total/1024**2:.1f} МиБ. При обрыве можно продолжить.',
                     .10+.38*done/total)
-    path=torch_download.fetch(wheel,directory,progress=transfer)
+    with phase('setup.torch_download_verify'):
+        path=torch_download.fetch(wheel,directory,progress=transfer)
     local=[str(path) if item in (TORCH_CPU_PIN,TORCH_CUDA) else item for item in arguments]
-    ok,tail=_run_pip(executable,local,progress,'Проверка пройдена. Устанавливаю PyTorch…',start=.48,span=.07)
+    with phase('setup.torch_install') as outcome:
+        ok,tail=_run_pip(executable,local,progress,'Проверка пройдена. Устанавливаю PyTorch…',start=.48,span=.07)
+        outcome.ok = ok
     if ok:
         torch_download.discard(wheel,directory)
     return ok,tail
@@ -382,7 +390,7 @@ def torch_requirement() -> tuple[List[str], str]:
         legacy = all(entry.get('rocm_candidate') is False or re.search(r'\bRX\s*[45]\d\d\b', entry['name'], re.I) for entry in adapters)
         if legacy:
             return (['--index-url', CPU_INDEX, TORCH_CPU_PIN],
-                    'Найдена AMD RX 400/500: профиль ROCm не поддерживает эту карту. Ставлю CPU без больших GPU-пакетов; чат и голос сохраняются.')
+                    'Найдена AMD RX 400/500: профиль ROCm не поддерживает эту карту. Ставлю CPU без больших GPU-пакетов; чат и распознавание сохраняются. Scott Voice требует NVIDIA CUDA.')
         if sys.version_info[:2] < (3, 11) or sys.version_info[:2] > (3, 14):
             return (['--index-url', CPU_INDEX, TORCH_CPU_PIN], 'Найдена AMD, но профиль ROCm требует Python 3.11–3.14. Пока ставлю сборку для процессора; см. docs/amd-support.md.')
         return (rocm_requirement(), f"Найдена {adapters[0]['name']} — ставлю PyTorch для AMD ROCm/HIP. "
@@ -395,15 +403,29 @@ def torch_requirement() -> tuple[List[str], str]:
     )
 
 
+@measured('setup.dependencies_check', success=bool)
 def dependencies_ready(python: Optional[str] = None) -> bool:
     """Check the installed requirements separately from downloadable weights."""
     executable = python or sys.executable
     try:
+        try:
+            from .runtime_profile import compact_mode, compact_requirements
+        except ImportError:
+            from runtime_profile import compact_mode, compact_requirements
+        if compact_mode():
+            lines = compact_requirements()
+            result = subprocess.run([executable, '-c',
+                'import fastapi; from faster_whisper import WhisperModel; '
+                'from importlib.metadata import version; from packaging.requirements import Requirement; '
+                f'lines = {lines!r}; '
+                'reqs = [Requirement(line) for line in lines]; '
+                'assert all(r.specifier.contains(version(r.name), prereleases=True) for r in reqs '
+                'if r.marker is None or r.marker.evaluate()); print("ok")'],
+                capture_output=True, text=True, timeout=120,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            return result.returncode == 0 and result.stdout.strip() == 'ok'
         result = subprocess.run(
-            # omegaconf проверяется наравне с остальными: без него падает не
-            # импорт backend, а загрузка модели Silero — то есть уже после
-            # того, как мастер отчитается об успехе.
-            [executable, "-c", "import torch, whisper, fastapi, omegaconf; "
+            [executable, "-c", "import torch, whisper, fastapi; "
              "from importlib.metadata import version; from packaging.requirements import Requirement; "
              "from pathlib import Path; import os; "
              f"lines = Path({str(Path(__file__).with_name('requirements.txt'))!r}).read_text(encoding='utf-8').splitlines(); "
@@ -421,9 +443,15 @@ def dependencies_ready(python: Optional[str] = None) -> bool:
     return True
 
 
+@measured('setup.ready_check', success=bool)
 def is_ready(python: Optional[str] = None) -> bool:
     if not dependencies_ready(python):
         return False
+    return _models_ready_for(python)
+
+
+@measured('setup.models_gate', success=bool)
+def _models_ready_for(python=None):
     if python is None or Path(python).absolute() == Path(sys.executable).absolute():
         return models_ready()
     try:
@@ -488,6 +516,86 @@ def ensure_pip(executable: str, progress: Optional[Progress] = None) -> Optional
     return None
 
 
+def _install_compact_dependencies(executable, progress):
+    """Opt-in CPU-only dependency closure; no Torch probe, wheel or global install."""
+    try:
+        from .runtime_profile import compact_requirements
+    except ImportError:
+        from runtime_profile import compact_requirements
+    root = Path(__file__).resolve().parent.parent
+    path = Path(executable).absolute()
+    managed = path.is_relative_to(root/'runtime') or (
+        os.name != 'nt' and (path.parent.parent.parent/'.scott-runtime.json').is_file())
+    step = Step(title='Компактная подготовка')
+    if not managed:
+        step.error = 'Компактная подготовка доступна только в изолированной среде приложения. Системный Python не изменён.'
+        return step
+    home = path.parent.parent if path.parent.name.lower() in ('scripts', 'bin') else path.parent
+    try:
+        if os.name != 'nt' and home.is_symlink():
+            # Installed Linux exposes an owned persistent venv through runtime/.
+            # Resolve this alias only after the existing receipt/core/owner
+            # checks; never weaken setup_cache's refusal of linked ancestors.
+            try:
+                try:
+                    from .linux_runtime import selected
+                except ImportError:
+                    from linux_runtime import selected
+                registered = selected(root).parent.parent
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                raise ValueError('Не удалось проверить среду Python приложения. Повторите установку в свою папку.') from error
+            if home.resolve(strict=True) != registered:
+                raise ValueError('Путь Python отличается от зарегистрированной среды приложения. Повторите установку в свою папку.')
+            home = registered
+            executable = str(registered/'bin/python')
+        site = home/('Lib/site-packages' if os.name == 'nt' else f'lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages')
+        requirements = compact_requirements()
+        if not (site/'faster_whisper').exists():
+            try:
+                from .installation_space import require_space
+            except ImportError:
+                from installation_space import require_space
+            # Keep the existing conservative CPU space budget until installer qualification.
+            require_space('cpu', home)
+        _report(progress, 'Компактный режим: распознавание на CPU, без резервного Whisper. Scott Voice готовится отдельно.', .01)
+        with phase('setup.pip_prepare') as outcome:
+            error = ensure_pip(executable, progress)
+            outcome.ok = not error
+        if error:
+            step.error = error
+            return step
+        # This profile has no Torch/Triton. Retain completed downloads on Linux
+        # too; the existing per-runtime cache guard and 256 MiB policy apply.
+        cache = home/'.scott-downloads/pip-cache'
+        # Embedded Python ignores the build environment's PYTHONPATH. Install
+        # the already pinned backend before resolving legacy source packages.
+        backend = next(line for line in requirements if line.startswith('setuptools=='))
+        ok, tail = _run_pip(executable, [backend], progress,
+            'Готовлю служебную библиотеку установки…', start=.05, span=.10,
+            timeout=300, cache_directory=cache)
+        if not ok:
+            step.error = 'Не удалось подготовить библиотеку установки: '+tail[-400:]
+            return step
+        ok, tail = _run_pip(executable, ['--no-build-isolation', *requirements], progress,
+            'Ставлю библиотеки компактного режима…', start=.15, span=.60,
+            timeout=1800, cache_directory=cache)
+        if not ok:
+            step.error = 'Не удалось подготовить компактный режим: '+tail[-400:]
+            return step
+        if cache is not None:
+            try:
+                from . import setup_cache
+            except ImportError:
+                import setup_cache
+            setup_cache.maintain(cache, complete=True)
+        step.done = True
+        _report(progress, 'Библиотеки установлены', .75)
+    except Exception as error:
+        step.error = str(error)
+    return step
+
+
+@measured('setup.dependencies', success=lambda result: result.done)
 def install_dependencies(python: Optional[str] = None, progress: Optional[Progress] = None) -> Step:
     """
     Поставить всё, что нужно backend.
@@ -498,6 +606,15 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
     """
     executable = python or sys.executable
     requirements = Path(__file__).resolve().parent / "requirements.txt"
+    try:
+        try:
+            from .runtime_profile import compact_mode
+        except ImportError:
+            from runtime_profile import compact_mode
+        if compact_mode():
+            return _install_compact_dependencies(executable, progress)
+    except ValueError as error:
+        return Step(title='Настройки подготовки', error=str(error))
 
     torch_args, explanation = torch_requirement()
     _report(progress, explanation, 0.05)
@@ -525,7 +642,9 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
     step = Step(title="Установка зависимостей")
 
     # Без pip дальше делать нечего: во встроенной сборке Python его нет.
-    pip_error = ensure_pip(executable, progress)
+    with phase('setup.pip_prepare') as outcome:
+        pip_error = ensure_pip(executable, progress)
+        outcome.ok = not pip_error
     if pip_error:
         step.error = pip_error
         return step
@@ -570,6 +689,9 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
             executable, ["-r", str(requirements)], progress,
             "Ставлю остальные библиотеки…",
             start=0.55, span=0.20, timeout=1800,
+            # Linux's Triton dependency can exceed the cache budget by itself.
+            # Keep large framework transfers on their existing resumable path.
+            cache_directory=executable_path.parent/'.scott-downloads/pip-cache' if managed_runtime and os.name == 'nt' else None,
         )
         if not ok:
             step.error = f"не удалось поставить зависимости: {tail[-400:]}"
@@ -580,10 +702,17 @@ def install_dependencies(python: Optional[str] = None, progress: Optional[Progre
         return step
 
     step.done = True
+    if managed_runtime and os.name == 'nt':
+        try:
+            from . import setup_cache
+        except ImportError:
+            import setup_cache
+        setup_cache.maintain(executable_path.parent/'.scott-downloads/pip-cache', complete=True)
     _report(progress, "Библиотеки установлены", 0.75)
     return step
 
 
+@measured('setup.models', success=lambda result: result.done)
 def download_models(python: Optional[str] = None, progress: Optional[Progress] = None) -> Step:
     """Relay live byte progress from the selected Python's model worker."""
     executable = python or sys.executable
@@ -603,7 +732,7 @@ def download_models(python: Optional[str] = None, progress: Optional[Progress] =
                 step.error = event['message']
 
         code = _stream_process([executable, '-u', str(Path(__file__).resolve()), '--models', '--json'],
-                               consume, 3600, env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+                               consume, 3600, env=trace_environment(dict(os.environ, PYTHONIOENCODING='utf-8')))
         if code != 0:
             if not step.error:
                 step.error = 'Не удалось подготовить модели. Проверьте интернет и нажмите «Повторить».'
@@ -620,13 +749,14 @@ def download_models(python: Optional[str] = None, progress: Optional[Progress] =
     return step
 
 
+@measured('setup.total', success=lambda result: result.done)
 def prepare(python: Optional[str] = None, progress: Optional[Progress] = None) -> Step:
     """Полная подготовка: зависимости и модели. Возвращает первый неудавшийся шаг."""
-    if is_ready(python):
-        _report(progress, "Всё уже установлено", 1.0)
-        return Step(title="Готово", done=True)
-
-    if dependencies_ready(python):
+    libraries_ready = dependencies_ready(python)
+    if libraries_ready:
+        if _models_ready_for(python):
+            _report(progress, "Всё уже установлено", 1.0)
+            return Step(title="Готово", done=True)
         _report(progress, 'Библиотеки уже установлены. Продолжаю подготовку моделей…', .75)
     else:
         step = install_dependencies(python, progress)
@@ -661,7 +791,31 @@ def main(argv: Optional[List[str]] = None) -> int:
         from .model_setup import load_environment, prepare_models, DownloadError
     except ImportError:
         from model_setup import load_environment, prepare_models, DownloadError
-    load_environment()
+    try:
+        try:
+            from .runtime_profile import compact_mode, save_selection, saved_selection, SETUP_MODES
+        except ImportError:
+            from runtime_profile import compact_mode, save_selection, saved_selection, SETUP_MODES
+        mode = None
+        if '--runtime-mode' in argv:
+            index = argv.index('--runtime-mode')
+            if argv.count('--runtime-mode') != 1 or index+1 >= len(argv) or argv[index+1] not in SETUP_MODES:
+                raise ValueError('Выберите режим подготовки: auto, cpu или compact.')
+            mode = argv[index+1]
+        if mode is None:
+            load_environment()
+        else:
+            load_environment(mode)
+        compact_mode()
+        if mode is not None and not any(flag in argv for flag in ('--check', '--models-check', '--models')):
+            # Persist before pip exists so retries/restarts use the same mode.
+            save_selection(mode)
+    except ValueError as error:
+        if as_json:
+            _emit({'type': 'error', 'code': 'runtime_profile_invalid', 'message': str(error)})
+        else:
+            print(str(error), file=sys.stderr)
+        return 1
 
     if '--models-check' in argv:
         return 0 if models_ready() else 2
@@ -680,6 +834,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             except ImportError:
                 from installation_space import setup_budgets
             _emit({"type": "check", "ready": ready, "gpu": gpu_name(),
+                   "runtime_mode": mode or saved_selection() or ('compact' if compact_mode() else
+                       'cpu' if os.getenv('SCOTT_TORCH_BACKEND', '').strip().lower() == 'cpu' else 'auto'),
                    "space": setup_budgets(Path(__file__).resolve().parent.parent)})
         else:
             print("готово" if ready else "нужна подготовка")

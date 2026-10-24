@@ -127,7 +127,6 @@ def test_faster_readiness_does_not_require_unused_pt_weight(hub, tmp_path, monke
     voice.parent.mkdir(parents=True)
     with zipfile.ZipFile(voice, 'w') as archive:
         archive.writestr('archive/tts_models/model', b'synthetic')
-    monkeypatch.setattr(model_setup, 'silero_repo', lambda: repo)
     assert model_setup.models_ready() is True
     (hub.cache/'tokenizer.json').unlink()
     assert model_setup.models_ready() is False

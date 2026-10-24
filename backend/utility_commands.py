@@ -6,6 +6,10 @@ def parse(text):
     request = text.strip().rstrip('.!?').strip()
     if not request or len(request) > 600 or '\n' in request or '`' in request:
         return None
+    # ASR can put a separator after the explicit arithmetic prefix. Keep
+    # commas inside numbers/functions intact for the bounded calculator.
+    request = re.sub(r'^(посчитай|вычисли|сколько будет)[ \t]*[,:][ \t]*',
+                     r'\1 ', request, flags=re.I)
     lower = request.casefold()
     infinitives = {'посчитать': 'посчитай', 'вычислить': 'вычисли', 'перевести': 'переведи',
                    'пересчитать': 'пересчитай', 'конвертировать': 'конвертируй',

@@ -8,7 +8,7 @@ Item {
     readonly property url repository: "https://github.com/stalker1243/Scott-AI"
     ColumnLayout {
         anchors.centerIn: parent; width: Math.min(parent.width - 24, 540); spacing: 20
-        Image { Layout.alignment: Qt.AlignHCenter; source: "qrc:/brand/scott-logo.png"; Layout.preferredWidth: 72; Layout.preferredHeight: 72 }
+        ScottMark { Layout.alignment: Qt.AlignHCenter; color: theme.ink; Layout.preferredWidth: 72; Layout.preferredHeight: 72 }
         Text { Layout.alignment: Qt.AlignHCenter; text: "Scott AI"; color: page.theme.ink; font.pixelSize: 30; font.weight: Font.DemiBold }
         Text { objectName: "aboutVersion"; Layout.alignment: Qt.AlignHCenter; text: "Demo · " + appVersion + qsTranslate("Launcher", " · сборка ") + appBuild; color: page.theme.muted; font.pixelSize: 13 }
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: page.theme.line }

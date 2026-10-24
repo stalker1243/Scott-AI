@@ -54,7 +54,7 @@ def _ensure_data_dir(base: str) -> str:
     return path
 
 
-from storage_paths import backend_path, environment_path
+from storage_paths import backend_path
 from platform_paths import private_directory
 private_directory(backend_path())
 
@@ -79,8 +79,8 @@ sys.stdout = _force_utf8(sys.stdout)
 sys.stderr = _force_utf8(sys.stderr)
 
 # 🔑 Загрузить переменные из .env файла
-from dotenv import load_dotenv
-load_dotenv(environment_path(), override=False)
+from model_setup import load_environment
+load_environment()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, Form, Request, Depends
 from security import require_scott_token, check_rate_limit
@@ -133,7 +133,7 @@ except Exception as e:
         # Заглушки, чтобы приложение могло запускаться без TTS
         class ScottVoice:
             def __init__(self):
-                print("⚠️ ScottVoice заглушка инициализирована — pyttsx3 недоступен")
+                print("⚠️ Scott Voice недоступен — ответ остаётся в чате")
                 self.engine = None
             async def speak(self, text, save_file=None):
                 return None
@@ -307,47 +307,8 @@ except Exception:
 WARMUP_MODELS = os.getenv("WARMUP_MODELS", "1").strip().lower() not in ("0", "false", "no")
 
 
-def _warmup_silero_in_thread(barrier: threading.Barrier) -> None:
-    """
-    Прогнать через Silero несколько холостых фраз внутри потока tts_executor.
-
-    Прогонов именно три, и это не запас на всякий случай: замеры показывают,
-    что первые ДВА вызова save_wav стоят около двух секунд каждый, а начиная
-    с третьего укладываются в 10-15 мс. Причём вход при этом один и тот же —
-    дело не в длине фразы, а в том, что CUDA дотягивает ядра под реальную
-    работу. Один холостой прогон, как было сначала, снимал только половину
-    платы, и первая фраза пользователя всё равно ждала две секунды.
-
-    Прогревается тот же путь, которым идут запросы (save_wav, а не apply_tts):
-    прогрев соседнего пути ничего не даёт.
-
-    Барьер разводит задачи по РАЗНЫМ потокам пула: без него пул выполнил бы
-    обе последовательно в первом освободившемся потоке, а второй остался бы
-    холодным.
-    """
-    tmp_path = None
-    try:
-        import silero_tts
-        barrier.wait(timeout=60)
-        fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="scott_warmup_")
-        os.close(fd)
-        silero_tts.get_model()
-        for _ in range(3):
-            silero_tts.synthesize("разогрев", tmp_path, silero_tts.DEFAULT_SILERO_VOICE)
-    except Exception as e:
-        print(f"⚠️ Прогрев Silero в потоке не удался: {e}")
-    finally:
-        # Файл временный и одноразовый: в audio_cache он не нужен, там лежат
-        # настоящие ответы Scott, которые переиспользуются между запусками.
-        if tmp_path:
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
-
-
 def _warmup_whisper_sync() -> None:
-    """Загрузить распознаватель и прогнать через него секунду тишины."""
+    """Подготовить VAD и декодер распознавателя без записи микрофона."""
     _get_whisper_model().warmup()
 
 
@@ -400,65 +361,26 @@ def _start_parent_watch() -> None:
 
 async def _warmup_models() -> None:
     """
-    Разогреть тяжёлые модели в фоне, чтобы первая команда шла по горячему пути.
+    Подготовить распознавание без запуска необязательного синтеза речи.
 
-    Порядок не случаен: сначала синтез (полторы секунды), потом распознавание
-    (шесть) — если пользователь заговорит с Scott сразу после запуска, к этому
-    моменту голос уже будет готов ответить.
+    Scott Voice готовится по явному запросу из лаунчера. Автосинтез служебных
+    фраз занимал тот же worker, задерживая эту подготовку и настоящий ответ.
+    Уже готовые записи сохраняются; новые ответы кешируются при использовании.
     """
-    loop = asyncio.get_running_loop()
-
-    # --- Синтез речи ---
-    try:
-        import scott_voice
-        current = scott_voice.get_current_voice()
-        if scott_voice._is_silero_voice(current):
-            t = time.perf_counter()
-            import silero_tts
-            # Веса тянем один раз в отдельном потоке: если бы обе задачи пула
-            # вызвали get_model() разом, они бы грузили модель параллельно.
-            await asyncio.to_thread(silero_tts.get_model)
-            barrier = threading.Barrier(TTS_WORKERS)
-            await asyncio.gather(*[
-                loop.run_in_executor(tts_executor, _warmup_silero_in_thread, barrier)
-                for _ in range(TTS_WORKERS)
-            ])
-            print(f"🔥 Silero прогрет за {(time.perf_counter() - t) * 1000:.0f} мс "
-                  f"({TTS_WORKERS} потока)")
-        else:
-            print(f"ℹ️ Прогрев синтеза пропущен: активен облачный голос «{current}»")
-    except Exception as e:
-        print(f"⚠️ Прогрев синтеза не удался: {e}")
-
-    # --- Заранее озвученные реплики ---
-    #
-    # Синтез короткой фразы даже после прогрева моделей стоит около четырёхсот
-    # миллисекунд, а из кэша та же фраза достаётся за треть миллисекунды. Эти
-    # реплики звучат после каждой команды — «Готово, сэр», «Выполнено
-    # успешно», — так что плата набегает.
-    #
-    # Кэш на диске переживает перезапуск: платится это один раз за всю жизнь
-    # установки, а при смене голоса набор озвучивается заново.
-    try:
-        import speech_cache
-        if scott_voice.get_current_voice() == 'scott-voice':
-            summary = await asyncio.to_thread(speech_cache.warm,
-                phrases=['Готово.', 'Слушаю.', 'Соединение восстановлено.'])
-        else:
-            summary = await asyncio.to_thread(speech_cache.warm)
-        if summary["total"]:
-            print(f"🔥 Готовые реплики озвучены: {summary['prepared']} из "
-                  f"{summary['total']} за {summary['seconds']} с")
-    except Exception as e:
-        print(f"⚠️ Прогрев готовых реплик не удался: {e}")
-
-    # --- Распознавание речи ---
     try:
         t = time.perf_counter()
         await asyncio.to_thread(_warmup_whisper_sync)
         print(f"🔥 Whisper прогрет за {(time.perf_counter() - t) * 1000:.0f} мс")
     except Exception as e:
         print(f"⚠️ Прогрев Whisper не удался: {e}")
+
+async def _warmup_app_catalog() -> None:
+    """Prime speech discovery independently of recognition and optional TTS."""
+    try:
+        import speech_hints
+        await asyncio.to_thread(speech_hints.warm_catalog)
+    except Exception:
+        print("⚠️ Каталог программ не подготовлен заранее; проверим его при обращении.")
 
 
 @asynccontextmanager
@@ -480,12 +402,15 @@ async def lifespan(app: FastAPI):
     _set_main_loop(asyncio.get_running_loop())
 
     warmup_task = asyncio.create_task(_warmup_models()) if WARMUP_MODELS else None
+    catalog_task = asyncio.create_task(_warmup_app_catalog()) if WARMUP_MODELS else None
     _start_parent_watch()
 
     yield  # Приложение работает здесь
 
     if warmup_task and not warmup_task.done():
         warmup_task.cancel()
+    if catalog_task and not catalog_task.done():
+        catalog_task.cancel()
     from scott_voice_engine import cancel as cancel_optional_voice
     await asyncio.to_thread(cancel_optional_voice)
     from voice_install_jobs import jobs as voice_install_jobs
@@ -870,7 +795,8 @@ class ScottAI:
         if (flow is not None and not flow.emitted and result.get('response')
                 and result.get('type') != 'introduction'
                 and 'error' not in result.get('type', '')):
-            await asyncio.to_thread(flow.emit, result['response'])
+            if not await asyncio.to_thread(flow.ready_response, result):
+                await asyncio.to_thread(flow.emit, result['response'])
         if not isinstance(captured, list) or any(not isinstance(fact, dict) or not fact.get('success') for fact in captured):
             result['memory_warning'] = 'Не удалось сохранить новые сведения в память.'
         record_turn = getattr(memory, 'record_external_turn', None)
@@ -1614,6 +1540,50 @@ async def _play_voice_response(text: str, generation=None) -> bool:
                 listening.stop_expecting()
 
 
+async def _play_voice_turn(parts, generation=None) -> bool:
+    """Keep one bounded synthesis/playback queue and echo session for this turn."""
+    global _voice_output_lock, _voice_output_loop
+    from audio_settings import is_quiet
+    from voice_config import get_scott_streaming
+    loop = asyncio.get_running_loop()
+    if _voice_output_loop is not loop:
+        _voice_output_lock, _voice_output_loop = asyncio.Lock(), loop
+    async with _voice_output_lock:
+        voice = scott_runtime.scott_voice
+        if voice is None or is_quiet() or not _voice_response_current(generation):
+            parts.cancel()
+            return False
+        listening = scott_runtime.listener
+        expecting = False
+        abandoned = threading.Event()
+        def current():
+            return not abandoned.is_set() and _voice_response_current(generation)
+        def spoken(text):
+            nonlocal expecting
+            if listening is not None and current():
+                if expecting:
+                    listening.extend_interruption(text)
+                else:
+                    listening.expect_interruption(text)
+                    expecting = True
+        try:
+            parts.observe(spoken)
+            path = await asyncio.to_thread(voice.speak_turn,parts,
+                streaming=get_scott_streaming(),cancelled=lambda:not current())
+            return bool(path) and not is_quiet() and current()
+        except Exception:
+            if listening is not None:
+                listening.stats.last_error = 'Не удалось озвучить ответ. Текст доступен в чате.'
+            logging.exception('Voice turn failed')
+            return False
+        finally:
+            abandoned.set()
+            parts.cancel()
+            if expecting:
+                await asyncio.sleep(0.4)
+                listening.stop_expecting()
+
+
 def _set_main_loop(loop) -> None:
     """Запомнить главный event loop: из него слушатель будет выполнять команды."""
     global _main_loop
@@ -1724,6 +1694,12 @@ async def _say_thinking(generation=None) -> None:
     if scott_runtime.scott_voice is None or not _voice_response_current(generation):
         return
 
+    from scott_voice import get_current_voice
+    if get_current_voice() == 'scott-voice':
+        # Optional inference can take longer than the answer itself. Reserve
+        # this worker for the actual response, rather than synthesizing filler.
+        return
+
     cue = THINKING_CUES[_thinking_cue_index % len(THINKING_CUES)]
     _thinking_cue_index += 1
 
@@ -1774,7 +1750,9 @@ def _listener_handle(text: str) -> None:
         from audio_endpoints import _stop_current_speech
         _stop_current_speech(preserve_prepared=True)
     generation = _next_voice_response()
-    started = time.monotonic()
+    from performance_trace import current as performance_current
+    trace = performance_current()
+    started = trace.started if trace is not None and trace.kind == 'voice' else time.perf_counter()
 
     async def run() -> None:
         from voice_flow import respond
@@ -1787,11 +1765,13 @@ def _listener_handle(text: str) -> None:
                 shorten=shorten_for_speech,
                 cue=lambda: _say_thinking(generation),
                 cue_after=THINKING_CUE_AFTER_SECONDS,
+                play_parts=(lambda parts: _play_voice_turn(parts,generation))
+                    if callable(getattr(scott_runtime.scott_voice,'speak_turn',None)) else None,
             )
         finally:
             if listening is not None and _voice_response_current(generation):
                 listening._answered_at = time.time()
-                listening.stats.last_answer_seconds = round(time.monotonic() - started, 2)
+                listening.stats.last_answer_seconds = round(time.perf_counter() - started, 2)
 
     future = asyncio.run_coroutine_threadsafe(run(), _main_loop)
 
@@ -2071,12 +2051,14 @@ except Exception as e:
 
 # ============= REST ENDPOINTS =============
 
+
 @app.get("/health")
 async def health():
     """Проверка здоровья сервера"""
     return {
         "status": "online",
         "scott": "ready",
+        "features": {"request_receipts": 1},
         "message": "Scott AI Assistant is online",
         "workers": {name:getattr(bounded_work,name).snapshot() for name in ('actions','models','memory')},
         "version": scott_profile.get('version'),
@@ -2576,6 +2558,9 @@ def _transcribe_audio_file(file_path: str) -> str:
             print(f"✅ Whisper распознал: {text}")
         return text
     except Exception as whisper_error:
+        from runtime_profile import compact_mode, RecognitionUnavailable, REPAIR_MESSAGE
+        if compact_mode():
+            raise RecognitionUnavailable(REPAIR_MESSAGE) from whisper_error
         import traceback
         print(f"⚠️ Whisper ошибка: {whisper_error}")
         traceback.print_exc()
@@ -2714,21 +2699,17 @@ async def speak_text(text: str = Form(""), force: bool = Form(False)):
             with timing_stage("02.синтез_речи.speak"):
                 audio_file = await asyncio.to_thread(scott_voice.speak, text, None, force)
             if not audio_file:
-                return {"success": False, "message": "Озвучка выключена, прервана или звук недоступен"}
-            print(f"🔊 Озвучено: {text[:50]}...")
-            from scott_voice import get_current_voice
-            if get_current_voice() == 'scott-voice':
                 from scott_voice_engine import get_engine
                 info = await asyncio.to_thread(get_engine().describe)
-                if info['state'] in ('fallback', 'unavailable'):
-                    return {"success": True, "fallback": True, "message": info['reason'] or "Воспроизведён резервный голос."}
+                return {"success": False, "message": info.get('reason') or "Озвучка выключена, прервана или звук недоступен"}
+            print(f"🔊 Озвучено: {text[:50]}...")
             return {"success": True, "message": "✅ Текст озвучен"}
         else:
             print(f"⚠️ Scott Voice недоступен")
             return {"success": False, "message": "⚠️ Озвучивание недоступно"}
-    except Exception as e:
-        print(f"❌ Ошибка озвучивания: {e}")
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logging.exception('Ошибка озвучивания')
+        return {"success": False, "message": "Scott Voice не смог воспроизвести ответ. Проверьте голос и устройство вывода в настройках."}
 
 
 # ===== УПРАВЛЕНИЕ ФАЙЛАМИ И ПРОГРАММАМИ =====
@@ -2925,13 +2906,11 @@ async def chat(message: Dict):
 @app.get("/voice/available")
 async def list_available_voices(gender: str = ""):
     """
-    Список доступных голосов для выбора в Настройках — и локальных (Silero),
-    и облачных (Edge TTS).
-
-    Каталог содержит мужские голоса. Параметр gender сохранён для совместимости.
+    Scott Voice и состояние его установки. gender сохранён для совместимости.
     """
     from scott_voice import describe_voices
-    return await asyncio.to_thread(describe_voices, gender.strip().lower())
+    result = await asyncio.to_thread(describe_voices, gender.strip().lower())
+    return result
 
 
 @app.post("/voice/select")
@@ -3004,13 +2983,19 @@ async def text_to_speech(request: Dict):
         voice_name = voice_name.strip() if isinstance(voice_name,str) else ''
         if voice_name not in AVAILABLE_VOICES:
             return JSONResponse(status_code=400,content={'error':'Неизвестный голос'})
-    synthesis_timeout = 90 if (voice_name or get_current_voice()) == 'scott-voice' else 45
 
     if not text:
         return JSONResponse(
             status_code=400,
             content={"error": "Текст не предоставлен"}
         )
+
+    from scott_voice_engine import get_engine
+    info = await asyncio.to_thread(get_engine().describe)
+    if not info['available']:
+        return JSONResponse(status_code=503, content={
+            'error': info['reason'], 'code': info.get('error') or 'voice_unavailable'})
+    synthesis_timeout = 90
 
     try:
         voice = getattr(scott_ai, "scott_voice", None)
@@ -3032,9 +3017,7 @@ async def text_to_speech(request: Dict):
             with open(audio_file, 'rb') as f:
                 audio_data = f.read()
 
-            # Локальный Silero отдаёт WAV, облачный edge-tts — MP3. Тип содержимого
-            # определяем по фактическому файлу: иначе WAV уезжал бы клиенту с
-            # заголовком audio/mpeg, и плеер на нём спотыкался.
+            # Тип содержимого соответствует фактическому файлу.
             is_wav = audio_file.lower().endswith(".wav")
             return Response(
                 content=audio_data,
@@ -3045,10 +3028,10 @@ async def text_to_speech(request: Dict):
             )
 
         logging.error(f"/text_to_speech failed: audio_file={audio_file}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Не удалось сгенерировать аудио", "audio_file": audio_file}
-        )
+        info = await asyncio.to_thread(get_engine().describe)
+        return JSONResponse(status_code=503, content={
+            'error': info.get('reason') or 'Scott Voice не смог подготовить звук. Проверьте голос в настройках.',
+            'code': info.get('error') or 'synthesis_failed'})
     except asyncio.TimeoutError:
         logging.warning("/text_to_speech timed out while generating audio")
         from scott_voice_engine import cancel as cancel_optional_voice

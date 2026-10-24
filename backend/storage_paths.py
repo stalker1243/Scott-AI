@@ -24,7 +24,8 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_FILES = frozenset(('ai_config.json', 'personality.json', 'device_config.json',
-                          'audio_config.json', 'voice_config.json', 'remote_access.json'))
+                          'audio_config.json', 'voice_config.json', 'remote_access.json',
+                          'runtime_profile.json'))
 RECEIPT = '.storage-v1.json'
 
 

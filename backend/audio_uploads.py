@@ -5,8 +5,10 @@ from pathlib import Path
 
 try:
     from .timing import stage
+    from .runtime_profile import RecognitionUnavailable
 except ImportError:
     from timing import stage
+    from runtime_profile import RecognitionUnavailable
 
 
 def transcribe_upload(contents: bytes, filename: str, transcribe):
@@ -44,5 +46,7 @@ def transcribe_upload(contents: bytes, filename: str, transcribe):
                 text = transcribe(str(path))
             return (200 if text else 400), {'success': bool(text), 'text': text,
                 'filename': filename, 'message': f'✅ Распознано: {text}' if text else '❌ Не удалось распознать речь'}
+    except RecognitionUnavailable as error:
+        return 503, {**empty, 'error': 'recognition_unavailable', 'message': str(error)}
     except Exception as error:
         return 500, {**empty, 'error': str(error), 'message': f'❌ Ошибка: {error}'}

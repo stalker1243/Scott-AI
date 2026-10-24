@@ -49,6 +49,9 @@ inline void startChatPageChecks(QApplication &app, QQuickWindow *window, QObject
                 }
                 fail("message bubbles overlap"); return;
             }
+            auto *userCard=chatVisual(window->contentItem(),"chatMessageCard0");
+            auto *scottCard=chatVisual(window->contentItem(),"chatMessageCard1");
+            if(!userCard||!scottCard||qAbs(userCard->width()-scottCard->width())>1||qAbs(userCard->x()-scottCard->x())>1){fail("user and Scott cards must share the reading column");return;}
             if (!shot("classic")) { fail("screenshot"); return; }
             if (layoutOnly) { timer->stop(); qInfo("Chat layout: initial message geometry passed"); app.exit(0); return; }
             QMetaObject::invokeMethod(history, "open");
@@ -145,10 +148,10 @@ inline void startChatPageChecks(QApplication &app, QQuickWindow *window, QObject
             auto *editor = chatVisual(window->contentItem(), "chatCode0_0Text");
             auto *copy = chatVisual(window->contentItem(), "chatCode0_0Copy");
             auto *scroll = chatVisual(window->contentItem(), "chatCode0_0Flick");
-            if (!first || !last || !editor || !copy || first->height() > 224 || editor->property("contentWidth").toReal() < 1000) { fail("long code should scroll without widening chat"); return; }
-            if (!scroll || scroll->property("contentHeight").toReal() <= scroll->height() || scroll->property("contentWidth").toReal() <= scroll->width()) { fail("long code needs both scroll directions"); return; }
-            scroll->setProperty("contentX", 100); scroll->setProperty("contentY", 100);
-            if (scroll->property("contentX").toInt() != 100 || scroll->property("contentY").toInt() != 100) { fail("code scrolling"); return; }
+            if (!first || !last || !editor || !copy || first->height() < 600 || editor->property("contentWidth").toReal() < 1000) { fail("long code should scroll without widening chat"); return; }
+            if (!scroll || scroll->property("contentHeight").toReal() > scroll->height() + 1 || scroll->property("contentWidth").toReal() <= scroll->width()) { fail("long code must have only horizontal inner scrolling"); return; }
+            scroll->setProperty("contentX", 100);
+            if (scroll->property("contentX").toInt() != 100) { fail("code scrolling"); return; }
             QMetaObject::invokeMethod(copy, "clicked");
             if (QApplication::clipboard()->text() != editor->property("text").toString()) { fail("long code copy is truncated"); return; }
             window->setProperty("darkMode", false);
@@ -167,7 +170,9 @@ inline void startChatPageChecks(QApplication &app, QQuickWindow *window, QObject
             QMetaObject::invokeMethod(button, "clicked");
         } else if (*phase == 23) {
             auto *panel = window->findChild<QObject *>("appearancePopup");
-            if (!panel || !panel->property("visible").toBool() || panel->property("width").toInt() > 360 || panel->property("height").toInt() > 496 || !shot("appearance-classic")) { fail("appearance popup compact layout"); return; }
+            if (!panel || !panel->property("visible").toBool() ||
+                qAbs(panel->property("width").toDouble() - qMin(460, window->width()-32)) > 1 ||
+                panel->property("height").toInt() > 496 || !shot("appearance-classic")) { fail("appearance popup compact layout"); return; }
             QMetaObject::invokeMethod(chatVisual(window->contentItem(), "appearanceStyle1"), "clicked");
         } else if (*phase == 24) {
             if (window->property("styleId").toString() != "glass" || !shot("appearance-glass")) { fail("style preview action"); return; }
@@ -201,7 +206,7 @@ inline void startChatPageChecks(QApplication &app, QQuickWindow *window, QObject
             window->resize(1560, 900);
         } else if (*phase == 30) {
             auto *workspace = chatVisual(window->contentItem(), "chatWorkspace");
-            if (!workspace || workspace->width() > 921 || qAbs(workspace->x() - (workspace->parentItem()->width() - workspace->width()) / 2) > 1 || !shot("workspace-wide")) { fail("wide workspace must stay centered and readable"); return; }
+            if (!workspace || qAbs(workspace->width() - qMin(1040.0, workspace->parentItem()->width())) > 1 || qAbs(workspace->x() - (workspace->parentItem()->width() - workspace->width()) / 2) > 1 || !shot("workspace-wide")) { fail("wide workspace must stay centered and readable"); return; }
             timer->stop(); qInfo("Chat UI: history, media, code, automatic requests and live appearance passed"); app.exit(0); return;
         }
         ++*phase;

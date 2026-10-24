@@ -13,6 +13,7 @@
 #include <QScreen>
 #include <memory>
 #include <cmath>
+#include <limits>
 
 namespace {
 bool wayland() { return QGuiApplication::platformName().startsWith("wayland"); }
@@ -213,13 +214,31 @@ void DesktopPetService::pointerMoved(QPointF local) {
 void DesktopPetService::menuOpen(bool open) { m_menuOpen=open;updateMask(); }
 QPointF DesktopPetService::chatPosition(qreal width,qreal height) const {
     if(!m_window)return {};
-    if(wayland())return {(m_window->width()-width)/2, -height+12};
+    constexpr int gap=12;
+    if(wayland())return {(m_window->width()-width)/2, -height-gap};
     auto *screen=m_window->screen();if(!screen)screen=QGuiApplication::primaryScreen();
     if(!screen)return {};
-    const auto area=screen->availableGeometry();
-    QPoint desired(m_window->x()+(m_window->width()-qRound(width))/2,m_window->y()-qRound(height)+12);
-    if(desired.y()<area.top()+8)desired.setY(m_window->y()+m_window->height()-12);
-    return fit(desired,QSize(qRound(width),qRound(height)),area)-m_window->position();
+    const auto area=screen->availableGeometry().adjusted(8,8,-8,-8);
+    const auto anchor=m_window->geometry();
+    const QSize size(qMax(1,qRound(width)),qMax(1,qRound(height)));
+    const int centerX=anchor.x()+(anchor.width()-size.width())/2;
+    const int centerY=anchor.y()+(anchor.height()-size.height())/2;
+    const QPoint candidates[]{
+        {centerX,anchor.top()-size.height()-gap},
+        {centerX,anchor.bottom()+1+gap},
+        {anchor.right()+1+gap,centerY},
+        {anchor.left()-size.width()-gap,centerY}
+    };
+    QPoint best;
+    qint64 leastOverlap=std::numeric_limits<qint64>::max();
+    for(const auto &candidate:candidates) {
+        const auto point=fit(candidate,size,area);
+        const auto overlap=QRect(point,size).intersected(anchor.adjusted(-gap,-gap,gap,gap));
+        const qint64 pixels=qint64(overlap.width())*overlap.height();
+        if(pixels<leastOverlap) { best=point;leastOverlap=pixels; }
+        if(!pixels)break;
+    }
+    return best-m_window->position();
 }
 void DesktopPetService::setSizePercent(int value) {
     value=qBound(50,value,200);

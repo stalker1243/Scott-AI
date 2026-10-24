@@ -64,7 +64,11 @@ def setup_budgets(root):
     auto['hint'] = (f'Чат и голос: около {cpu_size} ГиБ на CPU или 5–7 ГиБ на GPU. '
         f'На время подготовки оставьте {gib(cpu["required_free_bytes"])} ГиБ для CPU или 9 ГиБ для GPU. '
         'Дополнительные модели и Scott Voice устанавливаются отдельно.')
-    return dict(cpu=cpu, auto=auto)
+    compact = dict(cpu, profile='compact')
+    compact['hint'] = ('Компактный backend с моделью small: около 1 ГиБ на Windows, без Qt и Scott Voice. '
+        f'Для подготовки оставьте {gib(cpu["required_free_bytes"])} ГиБ свободно. '
+        'На других системах размер может отличаться. Уже установленные пакеты не удаляются.')
+    return dict(cpu=cpu, auto=auto, compact=compact)
 
 
 def runtime_destination(root):

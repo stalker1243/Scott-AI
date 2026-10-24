@@ -26,6 +26,29 @@ except (ImportError, OSError):
 
 router = APIRouter(prefix="/listen", tags=["listen"])
 
+_control_lock = None
+_control_loop = None
+
+
+def _control():
+    global _control_lock, _control_loop
+    loop = asyncio.get_running_loop()
+    if _control_loop is not loop:
+        _control_loop, _control_lock = loop, asyncio.Lock()
+    return _control_lock
+
+
+
+
+
+
+def _voice_preparation():
+    try:
+        from .voice_prepare import preparation
+    except ImportError:
+        from voice_prepare import preparation
+    return preparation
+
 
 def _unavailable() -> JSONResponse:
     return JSONResponse(
@@ -75,6 +98,13 @@ async def clear_heard() -> Dict:
     return {"success": True, "message": "Журнал услышанного очищен"}
 
 
+@router.get("/level")
+async def input_level() -> Dict:
+    listener = scott_runtime.listener
+    return {"listening": bool(listener and listener.is_running),
+            "level": listener.input_level() if listener else 0.0}
+
+
 @router.get("/status")
 async def status() -> Dict:
     """
@@ -94,23 +124,49 @@ async def status() -> Dict:
 
 @router.post("/start")
 async def start() -> Dict:
-    """Начать слушать микрофон. Команды выполняются только после обращения по имени."""
+    """Включить локальное распознавание с обращением по имени."""
+    async with _control():
+        return await _start_whisper()
+
+
+async def _start_whisper() -> Dict:
     if scott_runtime.listener is None:
         return _unavailable()
 
+    preparation = _voice_preparation()
+    epoch = preparation.listening_requested()
     result = await asyncio.to_thread(scott_runtime.listener.start)
     if not result.get("success"):
+        ident = preparation.listening_failed(epoch)
+        await asyncio.to_thread(preparation.cancel_listening,ident)
         return JSONResponse(status_code=503, content=result)
-    return {**result, **scott_runtime.listener.status()}
+    state = scott_runtime.listener.status()
+    if state.get('listening'):
+        preparation.start_listening(epoch)
+    else:
+        ident = preparation.listening_failed(epoch)
+        await asyncio.to_thread(preparation.cancel_listening,ident)
+    return {**result, **state, 'voice_preparation':preparation.snapshot()}
 
 
 @router.post("/stop")
 async def stop() -> Dict:
     """Перестать слушать."""
+    async with _control():
+        return await _stop_whisper()
+
+
+async def _stop_whisper() -> Dict:
+    preparation = _voice_preparation()
+    ident = preparation.listening_stopped()
     if scott_runtime.listener is None:
+        await asyncio.to_thread(preparation.cancel_listening,ident)
         return _unavailable()
-    result = await asyncio.to_thread(scott_runtime.listener.stop)
-    return {**result, **scott_runtime.listener.status()}
+    def stop_listener():
+        preparation.cancel_listening(ident)
+        return scott_runtime.listener.stop()
+    result = await asyncio.to_thread(stop_listener)
+    return {**result, **scott_runtime.listener.status(), 'voice_preparation':preparation.snapshot()}
 
 
 @router.get("/devices")

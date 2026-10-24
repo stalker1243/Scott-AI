@@ -12,18 +12,6 @@ class VoiceCommand:
 
 ALIASES = {
     "скотт войс": "scott-voice", "скоттвойс": "scott-voice", "scott voice": "scott-voice",
-    "айдар": "aidar", "айдара": "aidar", "aidar": "aidar",
-    "айдера": "aidar", "эйдара": "aidar",
-    "пайдара": "aidar",
-    "евгений": "eugene", "евгения": "eugene", "eugene": "eugene",
-    "дмитрий": "ru-RU-DmitryNeural", "дмитрия": "ru-RU-DmitryNeural",
-    "эндрю": "en-US-AndrewMultilingualNeural", "брайан": "en-US-BrianMultilingualNeural",
-    "брайана": "en-US-BrianMultilingualNeural",
-    "уильям": "en-AU-WilliamMultilingualNeural", "уильяма": "en-AU-WilliamMultilingualNeural",
-    "вильям": "en-AU-WilliamMultilingualNeural", "вильяма": "en-AU-WilliamMultilingualNeural",
-    "у ильяма": "en-AU-WilliamMultilingualNeural", "у илима": "en-AU-WilliamMultilingualNeural",
-    "флориан": "de-DE-FlorianMultilingualNeural", "флориана": "de-DE-FlorianMultilingualNeural",
-    "флорианы": "de-DE-FlorianMultilingualNeural",
 }
 
 
@@ -95,10 +83,8 @@ def parse(text: str):
 def execute(action, value=None) -> str:
     try:
         from . import audio_settings, audio_endpoints, scott_voice
-        from .voice_character import CHARACTERS
     except ImportError:
         import audio_settings, audio_endpoints, scott_voice
-        from voice_character import CHARACTERS
     try:
         if action == "select":
             voice = resolve_voice(value, scott_voice.AVAILABLE_VOICES)
@@ -123,25 +109,20 @@ def execute(action, value=None) -> str:
         if action == 'invalid_volume':
             return '❌ Назовите громкость голоса числом от 0 до 100, например: «громкость голоса пятьдесят процентов».'
         if action == "character":
-            if scott_voice.get_current_voice() == 'scott-voice':
-                profiles = scott_voice.scott_voice_engine.PROFILES
-                if value not in profiles:
-                    return "❌ Для Scott Voice выберите исходный, сдержанный, Scott или цифровой характер."
-                if not scott_voice.set_current_voice('scott-voice', value):
-                    return '❌ ' + scott_voice.scott_voice_engine.get_engine().describe()['reason']
-                audio_endpoints._stop_current_speech()
-                return f"Характер Scott Voice: {profiles[value]}."
-            if value not in CHARACTERS:
-                return "❌ Не знаю такого характера голоса. Выберите его в настройках."
-            audio_settings.update(character=value)
-            return f"Характер голоса: {CHARACTERS[value]}."
+            profiles = scott_voice.scott_voice_engine.PROFILES
+            if value not in profiles:
+                return "❌ Для Scott Voice выберите исходный, сдержанный, Scott или цифровой характер."
+            if not scott_voice.set_current_voice('scott-voice', value):
+                return '❌ ' + scott_voice.scott_voice_engine.get_engine().describe()['reason']
+            audio_endpoints._stop_current_speech()
+            return f"Характер Scott Voice: {profiles[value]}."
         if action == "status":
             voice = scott_voice.get_current_voice()
             settings = audio_settings.get_settings()
             return f"Голос: {scott_voice.AVAILABLE_VOICES[voice]}. Громкость: {settings['volume']} процентов. Озвучка {'выключена' if settings['quiet'] else 'включена'}."
         if action == 'catalog':
             names = ', '.join(label.split('(')[0].strip() for label in scott_voice.AVAILABLE_VOICES.values())
-            return f'Доступные голоса: {names}. Скажите, например: «выбери голос Айдара».'
+            return f'Голос Scott: {names}. Другие голоса больше не используются.'
     except OSError:
         return "❌ Не удалось сохранить настройки голоса. Проверьте доступ к папке данных."
     return "❌ Неизвестная настройка голоса."

@@ -36,13 +36,15 @@ except ImportError:
 _MAX_SAMPLES = 500
 
 _lock = threading.Lock()
+_log_lock = threading.Lock()
+LOG_LIMIT = 2 * 1024 * 1024
 _samples: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=_MAX_SAMPLES))
 _counts: Dict[str, int] = defaultdict(int)
 _errors: Dict[str, int] = defaultdict(int)
 _started_at = time.time()
 
 LOG_ENABLED = os.getenv("TIMING_LOG", "1") not in ("0", "false", "False", "no")
-LOG_DIR = Path(os.getenv("TIMING_LOG_DIR") or backend_log_directory())
+LOG_DIR = Path(os.getenv("TIMING_LOG_DIR") or os.getenv('SCOTT_LOG_DIR') or backend_log_directory())
 _LOG_PATH = LOG_DIR / "timings.jsonl"
 
 
@@ -68,8 +70,19 @@ def record(stage_name: str, seconds: float, ok: bool = True, meta: Optional[dict
             }
             if meta:
                 entry["meta"] = meta
-            with open(_LOG_PATH, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            with _log_lock:
+                if _LOG_PATH.is_symlink():
+                    return
+                if _LOG_PATH.exists() and _LOG_PATH.stat().st_size >= LOG_LIMIT:
+                    for index in (2, 1):
+                        source = _LOG_PATH if index == 1 else Path(str(_LOG_PATH)+'.1')
+                        target = Path(str(_LOG_PATH)+f'.{index}')
+                        if source.is_symlink() or target.is_symlink():
+                            continue
+                        if source.exists():
+                            source.replace(target)
+                with open(_LOG_PATH, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:
         pass
 
@@ -84,7 +97,7 @@ def stage(name: str, meta: Optional[dict] = None):
     ok = True
     try:
         yield
-    except Exception:
+    except BaseException:
         ok = False
         raise
     finally:

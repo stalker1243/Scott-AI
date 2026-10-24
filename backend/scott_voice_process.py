@@ -24,6 +24,20 @@ PROTOCOL = 1
 MAX_TEXT = 1200
 MAX_STREAM_CHUNKS = 128
 PROFILES = ('natural', 'restrained', 'scott', 'digital')
+PYTHON_OPTIONS = ('-E', '-s', '-B', '-X', 'utf8')
+
+
+def runtime_environment():
+    """Keep the selected SDK independent of Python startup settings and secrets."""
+    env = dict(os.environ)
+    for name in tuple(env):
+        upper = name.upper()
+        if upper.startswith('PYTHON') or upper == 'VIRTUAL_ENV' or upper.endswith(('_API_KEY', '_TOKEN')) \
+                or upper in ('AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'):
+            env.pop(name, None)
+    env.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_IMPLICIT_TOKEN='1',
+               PYTHONUTF8='1', PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1')
+    return env
 
 
 def watch_owner():
@@ -233,6 +247,7 @@ class ScottVoiceProcess:
         self._generation = 0
         self._closed = False
         self._idle_timer = None
+        self._idle_token = None
         self._active = False
         self._features = set()
         self._prepared = False
@@ -322,16 +337,11 @@ class ScottVoiceProcess:
                 self._dispose(self._worker)
                 self._worker = None
             self.config.cache_dir.mkdir(parents=True,exist_ok=True)
-            env = dict(os.environ)
-            for name in list(env):
-                if name.endswith('_API_KEY') or name.endswith('_TOKEN') or name in ('HF_TOKEN','HUGGING_FACE_HUB_TOKEN'):
-                    env.pop(name,None)
-            env.update(HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',HF_HUB_DISABLE_IMPLICIT_TOKEN='1',
-                       PYTHONUTF8='1',PYTHONDONTWRITEBYTECODE='1',
-                       SCOTT_VOICE_OWNER_PID=str(os.getpid()),
+            env = runtime_environment()
+            env.update(SCOTT_VOICE_OWNER_PID=str(os.getpid()),
                        SCOTT_VOICE_OWNER_CREATED=str(psutil.Process().create_time()))
             try:
-                process = subprocess.Popen([str(self.config.python),'-u',str(self.config.worker),
+                process = subprocess.Popen([str(self.config.python),*PYTHON_OPTIONS,'-u',str(self.config.worker),
                     '--configuration',json.dumps(self.config.wire(),ensure_ascii=False)],
                     stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                     text=True,encoding='utf-8',errors='replace',bufsize=1,env=env,
@@ -372,9 +382,7 @@ class ScottVoiceProcess:
         with self._state_lock:
             self._generation += 1
             worker,self._worker = self._worker,None
-            if self._idle_timer:
-                self._idle_timer.cancel()
-                self._idle_timer = None
+            self._cancel_idle()
         self._dispose(worker)
 
     def close(self):
@@ -382,13 +390,30 @@ class ScottVoiceProcess:
             self._closed = True
         self.cancel()
 
-    def _expire_idle(self, worker):
+    def _cancel_idle(self):
+        # Call under _state_lock. Timer.cancel() cannot recall a callback that
+        # has already started, so invalidate its identity before cancelling.
+        self._idle_token = None
+        if self._idle_timer:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def _arm_idle(self):
+        self._cancel_idle()
+        if self._worker and self.idle_timeout and not self._closed:
+            token = self._idle_token = object()
+            self._idle_timer = threading.Timer(self.idle_timeout,self._expire_idle,args=(self._worker,token))
+            self._idle_timer.daemon = True
+            self._idle_timer.start()
+
+    def _expire_idle(self, worker, token):
         if not self._request_lock.acquire(blocking=False):
             return
         try:
             with self._state_lock:
-                if self._worker is not worker or self._active:
+                if self._worker is not worker or self._active or self._idle_token is not token:
                     return
+                self._idle_token = self._idle_timer = None
                 self._worker = None
             self._dispose(worker)
             prune_cache(self.config.cache_dir, self.config.cache_max_bytes, self.config.cache_max_entries)
@@ -432,9 +457,7 @@ class ScottVoiceProcess:
             with self._state_lock:
                 self._check_generation(generation)
                 self._active = True
-                if self._idle_timer:
-                    self._idle_timer.cancel()
-                    self._idle_timer = None
+                self._cancel_idle()
             try:
                 worker = self._start(generation)
                 self._prepare_worker(worker,generation)
@@ -450,10 +473,7 @@ class ScottVoiceProcess:
             finally:
                 with self._state_lock:
                     self._active = False
-                    if self._worker and self.idle_timeout and not self._closed:
-                        self._idle_timer = threading.Timer(self.idle_timeout,self._expire_idle,args=(self._worker,))
-                        self._idle_timer.daemon = True
-                        self._idle_timer.start()
+                    self._arm_idle()
             return self.status()
 
     def synthesize(self, text, profile='scott', *, on_audio=None, on_abort=None):
@@ -478,9 +498,7 @@ class ScottVoiceProcess:
             with self._state_lock:
                 self._check_generation(generation)
                 self._active = True
-                if self._idle_timer:
-                    self._idle_timer.cancel()
-                    self._idle_timer = None
+                self._cancel_idle()
             try:
                 cached = cached_audio(self.config.cache_dir,key)
                 if cached:
@@ -565,10 +583,7 @@ class ScottVoiceProcess:
                         pass
                 with self._state_lock:
                     self._active = False
-                    if self._worker and self.idle_timeout and not self._closed:
-                        self._idle_timer = threading.Timer(self.idle_timeout,self._expire_idle,args=(self._worker,))
-                        self._idle_timer.daemon = True
-                        self._idle_timer.start()
+                    self._arm_idle()
 
     def __enter__(self):
         return self

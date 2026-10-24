@@ -239,6 +239,20 @@ class Recognizer:
     def _load(self) -> str:
         """Поднять модель. Возвращает название выбранной реализации."""
         try:
+            from .runtime_profile import compact_mode, RecognitionUnavailable, REPAIR_MESSAGE
+        except ImportError:
+            from runtime_profile import compact_mode, RecognitionUnavailable, REPAIR_MESSAGE
+        if compact_mode():
+            if self.device != 'cpu':
+                raise RecognitionUnavailable(REPAIR_MESSAGE)
+            try:
+                loaded = self._try_fast()
+            except Exception as error:
+                raise RecognitionUnavailable(REPAIR_MESSAGE) from error
+            if not loaded:
+                raise RecognitionUnavailable(REPAIR_MESSAGE)
+            return self.engine
+        try:
             from . import device_settings
         except ImportError:
             import device_settings
@@ -273,6 +287,12 @@ class Recognizer:
             except ImportError:
                 from recognition_models import prepared_faster_path
             prepared = prepared_faster_path(self.model_name)
+            try:
+                from .runtime_profile import compact_mode, RecognitionUnavailable, REPAIR_MESSAGE
+            except ImportError:
+                from runtime_profile import compact_mode, RecognitionUnavailable, REPAIR_MESSAGE
+            if compact_mode() and prepared is None:
+                raise RecognitionUnavailable(REPAIR_MESSAGE)
             self._model = WhisperModel(str(prepared) if prepared else self.model_name, device=self.device,
                                        compute_type=compute)
             self.engine = "faster-whisper"
@@ -334,11 +354,14 @@ class Recognizer:
     # ---- распознавание ----
 
     def transcribe(self, audio: Any, language: str = "ru") -> str:
+        return self._with_recovery(lambda: self._transcribe(audio, language))
+
+    def _with_recovery(self, operation):
         # Whisper's decoder and its hooks belong to this shared model. File
         # uploads, microphone phrases and warmup must use it one at a time.
         with self._model_lock:
             try:
-                return self._transcribe(audio, language)
+                return operation()
             except RuntimeError as error:
                 message = str(error).casefold()
                 if self.device != 'cuda' or not any(word in message for word in (
@@ -352,9 +375,9 @@ class Recognizer:
                 self.device = 'cpu'
                 self.engine = ''
                 self._load()
-                return self._transcribe(audio, language)
+                return operation()
 
-    def _transcribe(self, audio: Any, language: str = "ru") -> str:
+    def _transcribe(self, audio: Any, language: str = "ru", *, _warmup=False) -> str:
         """
         Превратить звук в текст.
 
@@ -369,15 +392,16 @@ class Recognizer:
         if self._model is None:
             self.load()
 
-        if not self._есть_речь(audio):
+        if not _warmup and not self._есть_речь(audio):
             return ''
 
         audio = normalize_quiet_audio(audio)
         options = dict(beam_size=BEAM_SIZE, best_of=5, condition_on_previous_text=False)
+        temperatures = [0.0] if _warmup else TEMPERATURES
 
         if self.engine == "faster-whisper":
             куски, _ = self._model.transcribe(audio, language=language,
-                                              temperature=TEMPERATURES,
+                                              temperature=temperatures,
                                               initial_prompt=_подсказка(), **options)
             текст = "".join(кусок.text for кусок in куски).strip()
 
@@ -391,10 +415,10 @@ class Recognizer:
         # поддерживается, и whisper иначе предупреждает об этом на каждую фразу.
         итог = self._model.transcribe(audio, language=language,
                                       fp16=(self.device == "cuda"),
-                                      initial_prompt=_подсказка(), temperature=TEMPERATURES,
+                                      initial_prompt=_подсказка(), temperature=temperatures,
                                       **options)
         text = (итог.get("text") or "").strip()
-        if repeated_word(text):
+        if not _warmup and repeated_word(text):
             padded = pad_short_audio(audio, self.model_name)
             first_score = _decode_score(итог)
             if padded is not audio and first_score is not None:
@@ -449,7 +473,7 @@ class Recognizer:
 
     def warmup(self, seconds: float = 15.0) -> None:
         """
-        Прогнать через модель шум той длины, какая приходит с микрофона.
+        Подготовить VAD и декодер на искусственном шуме без отправки команды.
 
         Первая настоящая фраза иначе ждёт, пока видеокарта дотянет ядра под
         реальную работу, — и человек видит задержку ровно там, где ждёт
@@ -460,12 +484,10 @@ class Recognizer:
         сразу, не считая. Прогрев выглядел сделанным, а первая фраза всё равно
         шла по холодному пути.
 
-        ПОЧЕМУ ПЯТНАДЦАТЬ СЕКУНД. Столько длится запись с микрофона в
-        большинстве случаев: из 715 записей в живом журнале 429 оказались ровно
-        пятнадцатисекундными — это предел длины фразы у слушателя. Прогрев на
-        секунде не покрывает такой вход: видеокарта дотягивает ядра под
-        КАЖДЫЙ новый размер, и на Silero это уже проверено — там прогрев
-        коротким входом снимал лишь половину платы.
+        Для проверенного PyTorch/CUDA пути результат VAD здесь не
+        останавливает декодер. CPU, CTranslate2 и ROCm сохраняют прежний путь:
+        принудительный разбор шума на них отдельно не квалифицирован.
+        Обычные записи по-прежнему проходят прежние проверки.
         """
         import numpy as np
 
@@ -475,7 +497,20 @@ class Recognizer:
         генератор = np.random.default_rng(seed=1)
         шум = (генератор.standard_normal(int(16000 * seconds)) * 0.01).astype(np.float32)
 
-        self.transcribe(шум)
+        if not шум.size:
+            return
+        with self._model_lock:
+            self.load()
+            try:
+                from . import device_settings
+            except ImportError:
+                import device_settings
+            if self.device == 'cuda' and self.engine == 'openai-whisper' and not device_settings.rocm_build():
+                self._есть_речь(шум)
+                # Recovery may switch to CPU; keep its ordinary VAD path then.
+                self._with_recovery(lambda: self._transcribe(шум, "ru", _warmup=self.device == 'cuda'))
+            else:
+                self.transcribe(шум)
 
 
 def available_engines() -> dict:

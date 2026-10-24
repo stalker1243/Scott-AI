@@ -30,12 +30,14 @@ Item {
     // mirrored IK branch folded the upper arm under the helmet as it rose.
     readonly property point leftStretch: armArc(Qt.point(-20 - character.breath * 0.4, 19), Qt.point(-20, -24), character.stretch)
     readonly property point leftWork: armArc(leftStretch, Qt.point(24, 23 + Math.sin(character.actionProgress * 70)), character.work)
-    readonly property point leftPose: armArc(leftWork, Qt.point(22, 14), hug)
+    readonly property point leftHeart: armArc(leftWork, Qt.point(22, 14), hug)
+    readonly property point leftPose: armArc(leftHeart, Qt.point(23, 11), character.atom)
     readonly property point rightWave: armArc(Qt.point(20 + character.breath * 0.4, 19), Qt.point(23 + Math.sin(character.greetingProgress * 18) * 2.5, -22), character.wave)
     readonly property point rightStretch: armArc(rightWave, Qt.point(20, -24), character.stretch)
     readonly property point rightWork: armArc(rightStretch, Qt.point(-24, 23 + Math.cos(character.actionProgress * 70)), character.work)
     readonly property point rightHeart: armArc(rightWork, Qt.point(-22, 14), hug)
-    readonly property point rightPose: armArc(rightHeart, Qt.point(-14, -21), pondering)
+    readonly property point rightThought: armArc(rightHeart, Qt.point(-14, -21), pondering)
+    readonly property point rightPose: armArc(rightThought, Qt.point(-23, 11), character.atom)
 
     // Short knees and oversized seated boots give the silhouette a softer weight.
     PetLimb { x: 111; y: 203 - robot.lift; targetX: -11; targetY: 15 + robot.lift; upperLength: 15; lowerLength: 15; thickness: 23; bend: 1; color: robot.shell; trim: robot.edge; handWidth: 34; handHeight: 24; handColor: robot.shell; polished: true }
@@ -82,6 +84,28 @@ Item {
                     PathSvg { path: "M0 -10 C-19 -31 -34 -8 -20 7 L0 26 L20 7 C34 -8 19 -31 0 -10 Z" }
                 }
                 ShapePath { strokeColor: "#e6ffff"; strokeWidth: 3; capStyle: ShapePath.RoundCap; fillColor: "transparent"; startX: -19; startY: -11; PathQuad { x: -9; y: -17; controlX: -17; controlY: -19 } }
+            }
+        }
+        Item {
+            id: atom; objectName: "scottAtom"
+            x: 140; y: 190; opacity: character.atom; visible: opacity > 0.001
+            scale: 0.6 + 0.4 * character.atom
+            property real phase: 0
+            NumberAnimation on phase { from: 0; to: Math.PI * 2; duration: 2400; loops: Animation.Infinite; running: atom.visible && character.motion && robot.visible }
+            Rectangle { anchors.centerIn: parent; width: 22; height: 22; radius: 11; color: Qt.alpha(robot.glow, 0.1) }
+            Rectangle { anchors.centerIn: parent; width: 7; height: 7; radius: 4; color: Qt.lighter(robot.glow, 1.5) }
+            Repeater {
+                model: 3
+                Item {
+                    required property int index
+                    rotation: index * 60
+                    Rectangle { x: -24; y: -9; width: 48; height: 18; radius: 9; color: "transparent"; border.width: 1.1; border.color: Qt.alpha(robot.glow, 0.8) }
+                    Rectangle {
+                        x: Math.cos(atom.phase + index * 2.1) * 24 - 2.5
+                        y: Math.sin(atom.phase + index * 2.1) * 9 - 2.5
+                        width: 5; height: 5; radius: 3; color: "#e8fcff"
+                    }
+                }
             }
         }
         PetLimb {

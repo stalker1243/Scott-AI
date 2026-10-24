@@ -587,6 +587,25 @@ def _get_shortcut_index() -> Dict[str, str]:
     return _cached_index('shortcut', _build_shortcut_index)
 
 
+def warm_speech_indexes() -> None:
+    """Read Windows speech-hint inventories early, without caching a failed scan."""
+    if not IS_WINDOWS:
+        return
+    for name, getter in (('startapps',_get_startapps_index),('shortcut',_get_shortcut_index)):
+        variable = '_' + name + '_index_cache'
+        with _index_lock:
+            previous = globals()[variable]
+            try:
+                snapshot = getter()
+            except Exception:
+                continue
+            if previous is None and not snapshot:
+                # Discovery returns {} for both an empty list and a failed scan.
+                # A speculative miss must leave the first real request a retry.
+                globals()[variable] = None
+                _index_metadata.pop(name,None)
+
+
 def refresh_index() -> Dict[str, int]:
     """
     Пересобрать каталог приложений — например, после установки новых программ.

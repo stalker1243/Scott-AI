@@ -1,8 +1,10 @@
-"""Optional local Scott Voice engine; models and Torch stay in the child process."""
+"""Local Scott Voice engine; models and Torch stay in the child process."""
 from __future__ import annotations
 
 import atexit
 from dataclasses import replace
+from contextlib import contextmanager
+from concurrent.futures import Future
 from functools import lru_cache, wraps
 import json
 import os
@@ -13,6 +15,10 @@ import threading
 import time
 import textwrap
 import psutil
+try:
+    from .performance_trace import measured, phase
+except ImportError:
+    from performance_trace import measured, phase
 
 try:
     from .scott_voice_sdk import VERSIONS as SDK_VERSIONS
@@ -20,9 +26,9 @@ except ImportError:
     from scott_voice_sdk import VERSIONS as SDK_VERSIONS
 
 try:
-    from .scott_voice_process import ScottVoiceProcess, VoiceProcessConfig, VoiceProcessError, recipe_id, stop_process_tree
+    from .scott_voice_process import ScottVoiceProcess, VoiceProcessConfig, VoiceProcessError, recipe_id, stop_process_tree, PYTHON_OPTIONS, runtime_environment
 except ImportError:
-    from scott_voice_process import ScottVoiceProcess, VoiceProcessConfig, VoiceProcessError, recipe_id, stop_process_tree
+    from scott_voice_process import ScottVoiceProcess, VoiceProcessConfig, VoiceProcessError, recipe_id, stop_process_tree, PYTHON_OPTIONS, runtime_environment
 
 VOICE_ID = 'scott-voice'
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,12 +39,12 @@ PROFILES = {
     'digital': 'Цифровой — выраженный машинный тембр',
 }
 MESSAGES = {
-    'not_installed': 'Scott Voice не установлен. Доступен прежний голос.',
+    'not_installed': 'Scott Voice не установлен. Установите компонент в настройках голоса; чат доступен.',
     'invalid_assets': 'Файлы Scott Voice неполные или повреждены.',
     'runtime_unavailable': 'Окружение Scott Voice недоступно.',
     'cuda_unavailable': 'Для Scott Voice не найден доступный CUDA GPU. CPU пока экспериментален.',
-    'timeout': 'Scott Voice не успел подготовить звук. Используется резервный голос.',
-    'synthesis_failed': 'Scott Voice не смог подготовить звук. Используется резервный голос.',
+    'timeout': 'Scott Voice не успел подготовить звук. Повторите попытку или проверьте голос в настройках; ответ доступен в чате.',
+    'synthesis_failed': 'Scott Voice не смог подготовить звук. Проверьте голос в настройках; ответ доступен в чате.',
     'runtime_update_required': 'Файлы Scott Voice нужно обновить в настройках голоса.',
     'stream_unavailable': 'Потоковый режим недоступен. Используется обычная озвучка Scott Voice.',
     'prepare_unavailable': 'Для подготовки модели нужно обновить установленный Scott Voice.',
@@ -68,15 +74,29 @@ def speech_chunks(text, *, short_first=True):
     return [first[:cut].strip(), first[cut:].strip(), *chunks[1:]]
 
 
+def _worker_cpu_threads(device, accelerated=False):
+    """Keep CUDA's host work small; allow an explicit hardware-specific choice."""
+    default = 2 if device=='cuda' and not accelerated else 4
+    value = os.getenv('SCOTT_VOICE_CPU_THREADS','auto').strip().lower()
+    try:
+        threads = int(value)
+    except ValueError:
+        return default
+    return threads if 1<=threads<=16 else default
+
+
 def config_at(root, cache_root=None):
-    experiment = Path(root)/'experiments/voice_design'
+    experiment = Path(root)/'experiments/voice_design'  # Existing SDK/model layout.
+    runtime = Path(root)/'voice/runtime'
+    resources = runtime if runtime.is_dir() else experiment
     python = experiment/('.venv/Scripts/python.exe' if os.name == 'nt' else '.venv/bin/python')
-    return VoiceProcessConfig(python=python, worker=experiment/'voice_worker.py',
+    device = os.getenv('SCOTT_VOICE_DEVICE', 'cuda').strip().lower()
+    return VoiceProcessConfig(python=python, worker=resources/'voice_worker.py',
         model_dir=experiment/'models/base',
         reference_json=Path(root)/'reports/voice-design/reference/reference.json',
-        profiles_json=experiment/'robotic_profiles.json',
+        profiles_json=resources/'robotic_profiles.json',
         cache_dir=Path(cache_root or root)/'audio_cache/scott-voice',
-        device=os.getenv('SCOTT_VOICE_DEVICE', 'cuda').strip().lower())
+        device=device, cpu_threads=_worker_cpu_threads(device))
 
 
 def default_config(root=ROOT):
@@ -114,11 +134,18 @@ def preferred_config():
     except ImportError:
         from voice_config import get_scott_acceleration
     config=default_config()
-    return replace(config,rms_norm=get_scott_acceleration() and config.device=='cuda')
+    accelerated = get_scott_acceleration() and config.device=='cuda'
+    return replace(config,rms_norm=accelerated,
+        cpu_threads=_worker_cpu_threads(config.device,accelerated))
+
+
+_probe_lock = threading.Lock()
+_probe_pending = {}
+_probe_epoch = 0
 
 
 @lru_cache(maxsize=4)
-def _probe_runtime(python, device, fingerprint=None):
+def _runtime_probe_result(python, device, fingerprint=None, epoch=0):
     # Probe only in the optional interpreter; never load Qwen in the API process.
     script = ("import importlib.util,importlib.metadata as m,json; "
               "ready=all(importlib.util.find_spec(n) is not None for n in "
@@ -131,14 +158,9 @@ def _probe_runtime(python, device, fingerprint=None):
               "cuda=False\n"
               "if compatible:\n import torch\n cuda=torch.cuda.is_available()\n"
               "print(json.dumps({'ready':ready,'compatible':compatible,'cuda':cuda}))")
-    env = dict(os.environ)
-    for key in tuple(env):
-        if key.upper().endswith(('_API_KEY', '_TOKEN')):
-            env.pop(key, None)
-    env.update(HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', HF_HUB_DISABLE_IMPLICIT_TOKEN='1',
-               PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1')
+    env = runtime_environment()
     try:
-        process = subprocess.Popen([python, '-c', script], stdin=subprocess.DEVNULL,
+        process = subprocess.Popen([python, *PYTHON_OPTIONS, '-c', script], stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
             encoding='utf-8', env=env,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -164,8 +186,45 @@ def _probe_runtime(python, device, fingerprint=None):
         return 'runtime_unavailable'
 
 
+def _probe_runtime(python, device, fingerprint=None):
+    """Share concurrent native checks; unrelated installations remain independent."""
+    with _probe_lock:
+        key = (python,device,fingerprint,_probe_epoch)
+        pending = _probe_pending.get(key)
+        leader = pending is None
+        if leader:
+            pending = _probe_pending[key] = Future()
+    if not leader:
+        return pending.result()
+    try:
+        result = _runtime_probe_result(*key)
+    except BaseException as error:
+        pending.set_exception(error)
+        raise
+    else:
+        pending.set_result(result)
+        return result
+    finally:
+        with _probe_lock:
+            _probe_pending.pop(key,None)
+
+
+def _clear_runtime_probe():
+    global _probe_epoch
+    with _probe_lock:
+        # An already running check may finish, but a new caller must not join it.
+        _probe_epoch += 1
+        _runtime_probe_result.cache_clear()
+
+
+_probe_runtime.cache_clear = _clear_runtime_probe
+_probe_runtime.cache_info = _runtime_probe_result.cache_info
+
+
 def inspect_installation(config):
     # A base update must invalidate readiness even while the expensive probe is cached.
+    with _probe_lock:
+        epoch = _probe_epoch
     try:
         from .voice_shared_runtime import config_fingerprint, SharedRuntimeError
     except ImportError:
@@ -174,11 +233,11 @@ def inspect_installation(config):
         fingerprint = config_fingerprint(config)
     except SharedRuntimeError:
         return 'runtime_update_required'
-    return _inspect_installation(config, fingerprint)
+    return _inspect_installation(config, fingerprint, epoch)
 
 
 @lru_cache(maxsize=4)
-def _inspect_installation(config, fingerprint=None):
+def _inspect_installation(config, fingerprint=None, epoch=0):
     if not config.python.is_file() or not config.worker.is_file():
         return 'not_installed'
     try:
@@ -214,21 +273,27 @@ inspect_installation.cache_clear = _inspect_installation.cache_clear
 inspect_installation.cache_info = _inspect_installation.cache_info
 
 
-def _track_request(method):
-    @wraps(method)
-    def tracked(self,*args,**kwargs):
-        with self._lock:
-            self._requests += 1
-        try:
-            return method(self,*args,**kwargs)
-        finally:
+def _track_request(method=None, *, preparation=False):
+    def decorate(method):
+        @wraps(method)
+        def tracked(self,*args,**kwargs):
+            listening = preparation and kwargs.get('for_listening') is True
             with self._lock:
-                self._requests -= 1
-    return tracked
+                self._requests += 1
+                self._listening_prepares += int(listening)
+            try:
+                return method(self,*args,**kwargs)
+            finally:
+                with self._lock:
+                    self._requests -= 1
+                    self._listening_prepares -= int(listening)
+        return tracked
+    return decorate(method) if method is not None else decorate
 
 
 class ScottVoiceEngine:
     def __init__(self, config=None, factory=ScottVoiceProcess):
+        self._application_defaults = config is None
         self.config = config or preferred_config()
         self.factory = factory
         self._lock = threading.RLock()
@@ -238,6 +303,8 @@ class ScottVoiceEngine:
         self._error = ''
         self._retry_at = 0
         self._requests = 0
+        self._listening_prepares = 0
+        self._listening_warmups = {}
 
     def describe(self):
         error = inspect_installation(self.config)
@@ -255,6 +322,18 @@ class ScottVoiceEngine:
         with self._lock:
             return self._generation
 
+    @contextmanager
+    def listening_preparation(self):
+        token = object()
+        with self._lock:
+            generation = self._generation
+            self._listening_warmups[token] = generation
+        try:
+            yield generation
+        finally:
+            with self._lock:
+                self._listening_warmups.pop(token,None)
+
     def stream(self, text, profile, on_audio, on_abort=None, generation=None):
         return self.synthesize(text,profile,generation,on_audio=on_audio,on_abort=on_abort)
 
@@ -263,8 +342,9 @@ class ScottVoiceEngine:
             client = self._client
         return client.status() if client is not None and hasattr(client,'status') else dict(model_loaded=False,active=False)
 
-    @_track_request
-    def prepare(self, generation=None):
+    @_track_request(preparation=True)
+    @measured('tts.prepare')
+    def prepare(self, generation=None, *, for_listening=False):
         with self._lock:
             if generation is None:
                 generation = self._generation
@@ -279,7 +359,8 @@ class ScottVoiceEngine:
             client = self._client
             self._state, self._error = 'preparing', ''
         try:
-            result = client.prepare()
+            with phase('tts.worker_prepare'):
+                result = client.prepare()
         except Exception as error:
             failure = error if isinstance(error,VoiceProcessError) else VoiceProcessError('synthesis_failed')
             with self._lock:
@@ -294,6 +375,7 @@ class ScottVoiceEngine:
         return result
 
     @_track_request
+    @measured('tts.synthesize')
     def synthesize(self, text, profile='natural', generation=None, *, on_audio=None, on_abort=None):
         with self._lock:
             if generation is None:
@@ -310,7 +392,7 @@ class ScottVoiceEngine:
                 try:
                     self._client = self.factory(self.config, timeout=60)
                 except (OSError, ValueError, TypeError):
-                    self._state, self._error = 'fallback', 'synthesis_failed'
+                    self._state, self._error = 'error', 'synthesis_failed'
                     self._retry_at = time.monotonic()+30
                     raise VoiceProcessError('synthesis_failed') from None
             client = self._client
@@ -320,9 +402,11 @@ class ScottVoiceEngine:
                 stream=getattr(client,'stream',None)
                 if stream is None:
                     raise VoiceProcessError('stream_unavailable')
-                audio=stream(text,profile,on_audio,on_abort)
+                with phase('tts.worker_stream'):
+                    audio=stream(text,profile,on_audio,on_abort)
             else:
-                audio = client.synthesize(text, profile)
+                with phase('tts.worker_synthesize'):
+                    audio = client.synthesize(text, profile)
         except Exception as error:
             failure = error if isinstance(error, VoiceProcessError) else VoiceProcessError('synthesis_failed')
             with self._lock:
@@ -331,7 +415,7 @@ class ScottVoiceEngine:
                 if failure.code in ('cancelled', 'closed', 'stream_unavailable'):
                     self._state = 'idle'
                 else:
-                    self._state = 'fallback'
+                    self._state = 'error'
                     self._error = failure.code if failure.code in MESSAGES else 'synthesis_failed'
                     self._retry_at = time.monotonic()+30
             raise failure from None
@@ -346,6 +430,9 @@ class ScottVoiceEngine:
         with self._lock:
             if generation is not None and generation!=self._generation:
                 return
+            listening = self._listening_prepares or self._generation in self._listening_warmups.values()
+            if preserve_idle and listening and self._requests==self._listening_prepares:
+                return  # A new command can use this same in-flight preparation.
             if preserve_idle and not self._requests and self._client is not None and \
                     self.model_status().get('model_loaded') and not self.model_status().get('active'):
                 return
@@ -364,7 +451,10 @@ class ScottVoiceEngine:
         with self._lock:
             self._generation+=1
             client,self._client=self._client,None
-            self.config=replace(self.config,rms_norm=enabled and self.config.device=='cuda')
+            accelerated=enabled and self.config.device=='cuda'
+            threads=(_worker_cpu_threads(self.config.device,accelerated) if self._application_defaults
+                     else self.config.cpu_threads)
+            self.config=replace(self.config,rms_norm=accelerated,cpu_threads=threads)
             self._state,self._error,self._retry_at='idle','',0
         if client is not None:
             client.close()

@@ -24,7 +24,7 @@ Column {
                     textFormat: TextEdit.PlainText
                     readOnly: true; selectByMouse: true; persistentSelection: true
                     wrapMode: TextEdit.Wrap
-                    font.family: body.theme.fontFamily; font.pixelSize: 14
+                    font.family: body.theme.fontFamily; font.pixelSize: 15
                     color: body.theme.ink
                     selectionColor: body.theme.accent; selectedTextColor: body.theme.accentText
                 }

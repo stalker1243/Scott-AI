@@ -12,12 +12,17 @@ import time
 from typing import Callable
 import urllib.error
 import urllib.request
+try:
+    from .performance_trace import measured
+except ImportError:
+    from performance_trace import measured
 
 
 class DownloadError(RuntimeError):
     pass
 
 
+@measured('download.sha256')
 def checksum(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open('rb') as stream:
@@ -53,6 +58,7 @@ def _lock(path: Path):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
+@measured('download.file_total')
 def download_file(url: str, target: Path, *, expected_sha256: str | None = None,
                   validate: Callable[[Path], bool] | None = None,
                   progress: Callable[[int, int | None], None] | None = None,
@@ -103,6 +109,7 @@ def download_file(url: str, target: Path, *, expected_sha256: str | None = None,
 
         save_metadata()
         last_error = 'network'
+        last_exception = None
         attempt = 0
         while attempt < attempts:
             try:
@@ -183,15 +190,20 @@ def download_file(url: str, target: Path, *, expected_sha256: str | None = None,
                 metadata.unlink(missing_ok=True)
                 return target
             except urllib.error.HTTPError as error:
+                last_exception = error
                 last_error = 'network'
+                if error.code in (401, 403, 404):
+                    break  # Retrying cannot grant access to the pinned public file.
                 # A cached partial may refer to an older remote object.
                 if error.code == 416:
                     part.unlink(missing_ok=True)
                     saved.pop('total', None)
             except (urllib.error.URLError, TimeoutError, http.client.HTTPException, DownloadError) as error:
+                last_exception = error
                 last_error = 'checksum' if str(error) == 'checksum' else 'network'
             except OSError as error:
                 if isinstance(error, ConnectionError):
+                    last_exception = error
                     last_error = 'network'
                 else:
                     raise DownloadError('Не удалось записать модель. Проверьте свободное место и права на папку кеша.') from error
@@ -201,5 +213,5 @@ def download_file(url: str, target: Path, *, expected_sha256: str | None = None,
             attempt += 1
         if last_error == 'checksum':
             check = 'SHA256' if expected_sha256 else 'архива'
-            raise DownloadError(f'Модель не прошла проверку целостности {check}. Нажмите «Повторить»; повреждённый файл не будет использован.')
-        raise DownloadError('Не удалось закончить загрузку модели. Проверьте интернет и нажмите «Повторить»: скачанная часть сохранена.')
+            raise DownloadError(f'Модель не прошла проверку целостности {check}. Нажмите «Повторить»; повреждённый файл не будет использован.') from last_exception
+        raise DownloadError('Не удалось закончить загрузку модели. Проверьте интернет и нажмите «Повторить»: скачанная часть сохранена.') from last_exception

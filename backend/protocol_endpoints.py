@@ -70,7 +70,7 @@ async def list_protocols() -> Dict:
     """Все протоколы, новые сверху."""
     store = _store()
     if store is None:
-        return {"success": False, "message": "Протоколы не загружены", "protocols": []}
+        return {"success": False, "message": "Функция протоколов временно отключена.", "protocols": []}
 
     items = sorted(store.all(), key=lambda p: p.created, reverse=True)
     return {"success": True, "protocols": [item.to_dict() for item in items]}
@@ -96,7 +96,7 @@ async def cancel_job(job_id: str) -> Dict:
 async def update_by_id(protocol_id: str, body: ProtocolPatch) -> Dict:
     store = _store()
     if store is None:
-        return {"success": False, "error": "Протоколы не загружены"}
+        return {"success": False, "error": "Функция протоколов временно отключена."}
     return store.update_by_id(protocol_id, **body.model_dump(exclude_none=True))
 
 
@@ -104,13 +104,15 @@ async def update_by_id(protocol_id: str, body: ProtocolPatch) -> Dict:
 async def delete_by_id(protocol_id: str) -> Dict:
     store = _store()
     if store is None:
-        return {"success": False, "error": "Протоколы не загружены"}
+        return {"success": False, "error": "Функция протоколов временно отключена."}
     return store.delete_by_id(protocol_id)
 
 
 @router.post("/id/{protocol_id}/start")
 async def start_by_id(protocol_id: str) -> Dict:
     store = _store()
+    if store is None:
+        return {"success": False, "error": "Функция протоколов временно отключена."}
     protocol = store.get_by_id(protocol_id) if store else None
     if protocol is None:
         return {"success": False, "error": "Протокол не найден"}
@@ -123,7 +125,7 @@ async def start_by_id(protocol_id: str) -> Dict:
 async def get_protocol(name: str) -> Dict:
     store = _store()
     if store is None:
-        return {"success": False, "error": "Протоколы не загружены"}
+        return {"success": False, "error": "Функция протоколов временно отключена."}
 
     protocol = store.get(name)
     if not protocol:
@@ -136,7 +138,7 @@ async def get_protocol(name: str) -> Dict:
 async def add_protocol(body: ProtocolIn) -> Dict:
     store = _store()
     if store is None:
-        return {"success": False, "error": "Протоколы не загружены"}
+        return {"success": False, "error": "Функция протоколов временно отключена."}
 
     return store.add(
         name=body.name,
@@ -154,7 +156,7 @@ async def add_protocol(body: ProtocolIn) -> Dict:
 async def update_protocol(name: str, body: ProtocolPatch) -> Dict:
     store = _store()
     if store is None:
-        return {"success": False, "error": "Протоколы не загружены"}
+        return {"success": False, "error": "Функция протоколов временно отключена."}
 
     # Передаём только то, что человек действительно менял: иначе пустое поле
     # формы затирает описание, которое никто не трогал.
@@ -166,7 +168,7 @@ async def update_protocol(name: str, body: ProtocolPatch) -> Dict:
 async def delete_protocol(name: str) -> Dict:
     store = _store()
     if store is None:
-        return {"success": False, "error": "Протоколы не загружены"}
+        return {"success": False, "error": "Функция протоколов временно отключена."}
 
     return store.delete(name)
 
@@ -181,7 +183,7 @@ async def run_protocol(name: str) -> Dict:
     """
     store = _store()
     if store is None:
-        return {"success": False, "error": "Протоколы не загружены"}
+        return {"success": False, "error": "Функция протоколов временно отключена."}
 
     protocol = store.get(name)
     if not protocol:

@@ -42,8 +42,8 @@ def _read() -> dict:
 
 def get_scott_profile() -> str:
     with _lock:
-        value = _read().get('scott_profile', 'natural')
-    return value if value in ('natural', 'restrained', 'scott', 'digital') else 'natural'
+        value = _read().get('scott_profile', 'scott')
+    return value if value in ('natural', 'restrained', 'scott', 'digital') else 'scott'
 
 
 def get_scott_streaming() -> bool:
@@ -62,13 +62,9 @@ def get_scott_buffer() -> str:
     return value if isinstance(value, str) and value in BUFFER_MODES else 'immediate'
 
 
-def get_fallback_voice(default: str, allowed) -> str:
-    with _lock:
-        value = _read().get('fallback_voice')
-    return value if isinstance(value, str) and value in allowed and value != 'scott-voice' else default
-
-
 def save_voice(voice: str, profile=None, streaming=None, acceleration=None, buffer_mode=None) -> None:
+    if voice != 'scott-voice':
+        raise ValueError('Only Scott Voice is supported')
     if streaming is not None and (voice!='scott-voice' or not isinstance(streaming,bool)):
         raise ValueError('Invalid Scott Voice streaming choice')
     if acceleration is not None and (voice!='scott-voice' or not isinstance(acceleration,bool)):
@@ -77,8 +73,7 @@ def save_voice(voice: str, profile=None, streaming=None, acceleration=None, buff
         raise ValueError('Invalid Scott Voice buffer choice')
     with _lock:
         settings = _read()
-        if voice == 'scott-voice' and settings.get('voice') not in (None, 'scott-voice'):
-            settings['fallback_voice'] = settings['voice']
+        settings.pop('fallback_voice', None)
         settings['voice'] = voice
         if profile is not None:
             if profile not in ('natural', 'restrained', 'scott', 'digital'):

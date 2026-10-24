@@ -41,21 +41,25 @@ def test_concurrent_synthesis_shares_one_complete_cache_file(voice, monkeypatch)
     release = threading.Event()
     calls = []
 
-    def synthesize(text, path, selected_voice):
-        calls.append(path)
-        Path(path).write_bytes(b"partial")
-        started.set()
-        release.wait(2)
-        return write_wav(path)
-
-    monkeypatch.setattr(tts, "HAS_SILERO", True)
-    monkeypatch.setattr(tts.silero_tts, "synthesize", synthesize)
+    destination = voice.audio_dir / 'scott_fixture.wav'
+    def synthesize(text, profile, generation):
+        if destination.exists():
+            return str(destination)
+        calls.append(text)
+        def generate(path):
+            Path(path).write_bytes(b'partial')
+            started.set()
+            assert release.wait(2)
+            return write_wav(path)
+        return voice._cache_synthesis(destination, generate)
+    monkeypatch.setattr(tts.scott_voice_engine, 'get_engine', lambda: SimpleNamespace(
+        generation=0, synthesize=synthesize))
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(voice.speak_to_file, "Привет", "aidar")
+        first = pool.submit(voice.speak_to_file, "Привет", "scott-voice")
         try:
             assert started.wait(1)
             assert not list(voice.audio_dir.glob("scott_*.wav")), "Partial file exposed as cache"
-            second = pool.submit(voice.speak_to_file, "Привет", "aidar")
+            second = pool.submit(voice.speak_to_file, "Привет", "scott-voice")
         finally:
             release.set()
         first_path, second_path = first.result(), second.result()
@@ -75,43 +79,24 @@ def test_failed_synthesis_discards_partial_file(voice):
     assert list(voice.audio_dir.iterdir()) == []
 
 
-def test_edge_timeout_is_bounded_and_cleans_partial_audio(voice, monkeypatch):
-    cancelled = []
-
-    class Communicate:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def save(self, path):
-            Path(path).write_bytes(b"partial mp3")
-            try:
-                await asyncio.Event().wait()
-            finally:
-                cancelled.append(True)
-
-    monkeypatch.setattr(tts, "HAS_EDGE_TTS", True)
-    monkeypatch.setattr(tts, "EDGE_TIMEOUT_SECONDS", 0.02)
-    monkeypatch.setattr(tts.edge_tts, "Communicate", Communicate)
-    result = voice._cache_synthesis(voice.audio_dir / "failed.mp3",
-                                    lambda path: voice._save_edge_tts("Тест", path))
-    assert result is None
-    assert cancelled == [True]
+def test_conversion_exception_cleans_partial_audio(voice):
+    def fail(path):
+        Path(path).write_bytes(b'partial')
+        raise TimeoutError('conversion timed out')
+    with pytest.raises(TimeoutError):
+        voice._cache_synthesis(voice.audio_dir / 'failed.wav', fail)
     assert list(voice.audio_dir.iterdir()) == []
 
 
-def test_failed_edge_uses_system_voice_with_wav_extension(voice, monkeypatch):
+def test_scott_voice_returns_actual_wav_without_conversion(voice, monkeypatch):
     calls = []
-    monkeypatch.setattr(tts, "HAS_SILERO", False)
-    monkeypatch.setattr(tts, "HAS_EDGE_TTS", True)
-    voice.engine = object()
-    voice._save_edge_tts = lambda *args: None
-
-    def system_voice(text, path):
+    path = voice.audio_dir / 'scott.wav'
+    def synthesize(text, profile, generation):
         calls.append(path)
         return write_wav(path)
-
-    voice._speak_sync = system_voice
-    path = voice.speak_to_file("Тест", "ru-RU-DmitryNeural")
+    monkeypatch.setattr(tts.scott_voice_engine, 'get_engine', lambda: SimpleNamespace(
+        generation=0, synthesize=synthesize))
+    path = voice.speak_to_file("Тест", "scott-voice")
     assert path.endswith(".wav")
     assert Path(calls[0]).suffix == ".wav"
     with wave.open(path) as output:
@@ -190,6 +175,9 @@ def test_concurrent_recognition_does_not_share_decoder_state(monkeypatch):
     recognizer.engine = "openai-whisper"
     recognizer._model = SimpleNamespace(transcribe=transcribe)
     monkeypatch.setattr(recognizer,'_есть_речь',lambda audio:True)
+    # This checks decoder serialization; discovering real installed apps is a
+    # separate boundary and can consume the entire handshake deadline.
+    monkeypatch.setattr(speech_to_text,'_подсказка',lambda:'synthetic decoder fixture')
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(recognizer.transcribe, np.full(16000,.02,dtype=np.float32))
         try:

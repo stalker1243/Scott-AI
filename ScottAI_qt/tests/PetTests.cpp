@@ -32,16 +32,18 @@
 #include <QCursor>
 #include <QSaveFile>
 #include <QStyleHints>
+#include <functional>
 #ifdef Q_OS_WIN
 #include <dwmapi.h>
 #endif
 
-static QJsonObject request(const QString &profile,const QJsonObject &value) {
+static QJsonObject request(const QString &profile,const QJsonObject &value,const std::function<void(QLocalSocket &)> &beforeRead={}) {
     QLocalSocket socket;socket.connectToServer(PetController::serverName(profile));
     if(!socket.waitForConnected(800))return {};
     socket.write(QJsonDocument(value).toJson(QJsonDocument::Compact)+'\n');socket.waitForBytesWritten(800);
+    if(beforeRead)beforeRead(socket);
     QByteArray bytes;
-    while(!bytes.endsWith('\n')){if(!socket.waitForReadyRead(1000))return {};bytes+=socket.readAll();if(bytes.size()>4096)return {};}
+    while(!bytes.endsWith('\n')){if(!socket.bytesAvailable()&&!socket.waitForReadyRead(1000)&&!socket.bytesAvailable())return {};bytes+=socket.readAll();if(bytes.size()>4096)return {};}
     return QJsonDocument::fromJson(bytes).object();
 }
 static QJsonObject command(const QString &profile,const QString &op) {
@@ -141,6 +143,111 @@ static int packagedFixture(const QStringList &args) {
 class PetTests:public QObject {
     Q_OBJECT
 private slots:
+    void bufferedReplyAfterPeerClose() {
+        QTemporaryDir dir;QVERIFY(dir.isValid());
+        DesktopPetService service(dir.path(),false);QVERIFY(service.start());
+        const auto state=request(dir.path(),{{"op","state"}},[](QLocalSocket &socket){
+            // The GUI event loop receives a complete response while the caller
+            // is doing other work, and the one-shot peer closes normally.
+            QTRY_VERIFY(socket.bytesAvailable()>0);
+            QTRY_COMPARE(socket.state(),QLocalSocket::UnconnectedState);
+            QVERIFY(socket.peek(4097).endsWith('\n'));
+        });
+        QVERIFY(state.contains("ready"));QCOMPARE(state["sizePercent"].toInt(),100);
+    }
+
+
+    void voiceButtonUsesSharedListenerOnlyAfterClick() {
+        QTemporaryDir dir;QTcpServer server;QVERIFY(server.listen(QHostAddress::LocalHost,0));
+        int requests=0,starts=0,stops=0;bool listening=false;
+        connect(&server,&QTcpServer::newConnection,this,[&]{
+            auto *socket=server.nextPendingConnection();auto buffer=std::make_shared<QByteArray>();
+            connect(socket,&QTcpSocket::disconnected,socket,&QObject::deleteLater);
+            connect(socket,&QTcpSocket::readyRead,socket,[&,socket,buffer]{
+                *buffer+=socket->readAll();if(!buffer->contains("\r\n\r\n"))return;
+                ++requests;const auto route=buffer->split(' ').value(1);QJsonObject data;
+                if(route=="/health")data={{"status","online"}};
+                if(route=="/listen/start"){++starts;listening=true;}
+                if(route=="/listen/stop"){++stops;listening=false;}
+                if(route.startsWith("/listen/"))data={{"success",true},{"available",true},{"listening",listening},{"level",.6}};
+                const auto body=QJsonDocument(data).toJson(QJsonDocument::Compact);
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: "+QByteArray::number(body.size())+"\r\n\r\n"+body);socket->disconnectFromHost();
+            });
+        });
+        DesktopPetService service(dir.path(),false);
+        PetChatController controller(dir.path(),QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort())));
+        QQmlApplicationEngine engine;QSignalSpy warnings(&engine,&QQmlEngine::warnings);
+        engine.rootContext()->setContextProperty("petService",&service);engine.rootContext()->setContextProperty("petChat",&controller);
+        engine.load(QUrl::fromLocalFile(QStringLiteral(SCOTT_PET_QML_DIR "/DesktopPetWindow.qml")));QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window=qobject_cast<QQuickWindow *>(engine.rootObjects().first());QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTest::qWait(160);QCOMPARE(requests,0);QCOMPARE(starts,0);
+        auto *button=window->findChild<QObject *>("petVoice");QVERIFY(button);
+        auto pressVoice=[&]{
+            auto *menu=window->findChild<QObject *>("petContextMenu");QVERIFY(menu);
+            QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,QPoint(140,120));QTRY_VERIFY(menu->property("opened").toBool());
+            auto *content=menu->property("contentItem").value<QQuickItem *>();QVERIFY(content);QVERIFY(content->window());
+            QDir().mkpath("screenshots/responsive");QVERIFY(content->window()->grabWindow().save("screenshots/responsive/pet-controls.png"));
+            auto *entry=qobject_cast<QQuickItem *>(button);QVERIFY(entry);
+            QTest::mouseClick(content->window(),Qt::LeftButton,Qt::NoModifier,entry->mapToScene(QPointF(entry->width()/2,entry->height()/2)).toPoint());
+            QTRY_VERIFY(!menu->property("visible").toBool());
+        };
+        pressVoice();QTRY_COMPARE(starts,1);QTRY_VERIFY(controller.backend()->listening());
+        QTRY_VERIFY(!controller.backend()->listeningBusy());QTRY_VERIFY(controller.backend()->inputLevel()>.5);
+        QVERIFY(!controller.backend()->ownsBackend());
+        pressVoice();QTRY_COMPARE(stops,1);QTRY_VERIFY(!controller.backend()->listening());
+        QCOMPARE(controller.backend()->inputLevel(),0.0);QCOMPARE(starts,1);QCOMPARE(warnings.count(),0);
+    }
+    void voiceAtomFollowsSpeechAndKeepsHandsConnected() {
+        QQmlEngine engine;QSignalSpy warnings(&engine,&QQmlEngine::warnings);
+        QQmlComponent component(&engine,QUrl::fromLocalFile(QStringLiteral(SCOTT_PET_QML_DIR "/PetCharacter.qml")));
+        std::unique_ptr<QObject> character(component.create());QVERIFY2(character,qPrintable(component.errorString()));
+        auto *item=qobject_cast<QQuickItem *>(character.get());QQuickWindow window;window.resize(560,520);
+        window.setColor(QColor("#162131"));item->setParentItem(window.contentItem());item->setSize(window.size());
+        character->setProperty("interactive",false);window.show();QVERIFY(QTest::qWaitForWindowExposed(&window));
+        auto *atom=character->findChild<QQuickItem *>("scottAtom");QVERIFY(atom);QVERIFY(!atom->isVisible());
+        character->setProperty("voiceInput",true);QTRY_VERIFY(character->property("atom").toReal()>.99);
+        QVERIFY(atom->isVisible());QVERIFY(!character->property("acting").toBool());
+        for(const auto *name:{"scottLeftArm","scottRightArm"}) {
+            auto *arm=character->findChild<QQuickItem *>(name);QVERIFY(arm);
+            QPointF elbow(arm->property("elbowX").toReal(),arm->property("elbowY").toReal());
+            QPointF hand(arm->property("handX").toReal(),arm->property("handY").toReal());
+            QVERIFY(qAbs(QLineF(QPointF(),elbow).length()-arm->property("upperLength").toReal())<.001);
+            QVERIFY(qAbs(QLineF(elbow,hand).length()-arm->property("lowerLength").toReal())<.001);
+            QVERIFY(hand.y()>0); // Wrists remain below the shoulder, beside the atom.
+        }
+        QDir().mkpath("screenshots/responsive");QVERIFY(window.grabWindow().save("screenshots/responsive/pet-atom.png"));
+        character->setProperty("voiceInput",false);QTest::qWait(150);QVERIFY(atom->isVisible());
+        QTRY_VERIFY(!atom->isVisible());
+        character->setProperty("motion",false);character->setProperty("voiceInput",true);QCOMPARE(character->property("atom").toReal(),0.0);
+        QCOMPARE(warnings.count(),0);item->setParentItem(nullptr);
+    }
+    void chatWaitsForMenuClose() {
+        QTemporaryDir dir;QVERIFY(dir.isValid());DesktopPetService service(dir.path(),false);
+        QQmlApplicationEngine engine;QSignalSpy warnings(&engine,&QQmlEngine::warnings);
+        engine.rootContext()->setContextProperty("petService",&service);
+        engine.load(QUrl::fromLocalFile(QStringLiteral(SCOTT_PET_QML_DIR "/DesktopPetWindow.qml")));
+        QVERIFY(!engine.rootObjects().isEmpty());auto *window=qobject_cast<QQuickWindow *>(engine.rootObjects().first());QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *menu=window->findChild<QObject *>("petContextMenu");auto *entry=window->findChild<QQuickItem *>("petOpenChat");
+        auto *chat=window->findChild<QObject *>("petMiniChat");QVERIFY(menu);QVERIFY(entry);QVERIFY(chat);
+        QQmlComponent slowExit(&engine);
+        slowExit.setData("import QtQuick\nTransition { NumberAnimation { property: \"opacity\"; from: 1; to: 0; duration: 400 } }",QUrl());
+        std::unique_ptr<QObject> transition(slowExit.create());QVERIFY2(transition,qPrintable(slowExit.errorString()));
+        QVERIFY(menu->setProperty("exit",QVariant::fromValue(transition.get())));
+        QCOMPARE(menu->property("exit").value<QObject *>(),transition.get());
+        bool premature=false;QSignalSpy closing(menu,SIGNAL(closed())),opening(chat,SIGNAL(aboutToShow()));
+        // Observe the actual order without replacing native pointer delivery.
+        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,QPoint(window->width()/2,window->height()/2));
+        QTRY_VERIFY(menu->property("opened").toBool());
+        auto *content=menu->property("contentItem").value<QQuickItem *>();QVERIFY(content);auto *popup=content->window();QVERIFY(popup);
+        const auto point=entry->mapToScene(QPointF(entry->width()/2,entry->height()/2)).toPoint();
+        QTest::mouseClick(popup,Qt::LeftButton,Qt::NoModifier,point);
+        QTRY_COMPARE(opening.count(),1);premature=menu->property("visible").toBool();
+        QVERIFY2(!premature,"Mini-chat opened before the context menu finished closing");
+        QCOMPARE(closing.count(),1);QTRY_VERIFY(chat->property("opened").toBool());
+        QMetaObject::invokeMethod(chat,"close");QTRY_VERIFY(!chat->property("visible").toBool());
+        QCOMPARE(warnings.count(),0);
+    }
     void previewNeverStartsOrWrites() {
         QTemporaryDir dir;QVERIFY(dir.isValid());
         PetController pet(true,dir.path()+"/profile",dir.path()+"/cache");
@@ -202,7 +309,9 @@ private slots:
         QTRY_VERIFY(menu->property("visible").toBool());
         auto *content=menu->property("contentItem").value<QQuickItem *>();QVERIFY(content);
         QTRY_VERIFY(content->window() && content->window()!=window);
-        QCOMPARE(menu->property("count").toInt(),2);
+        QVERIFY2(!content->window()->geometry().intersects(window->geometry()),
+                 "Pet context buttons must be beside the pet, outside its native window");
+        QCOMPARE(menu->property("count").toInt(),3);
         QMetaObject::invokeMethod(menu,"close");QTRY_VERIFY(!menu->property("visible").toBool());
         QTRY_VERIFY(!content->window() || content->window()==window || !content->window()->isVisible());
         service.setSizePercent(200);QCOMPARE(window->size(),QSize(560,520));
@@ -232,6 +341,46 @@ private slots:
             QRect desktop;for(auto *screen:QGuiApplication::screens())desktop=desktop.united(screen->geometry());
             window->setPosition(desktop.bottomRight()+QPoint(1000,1000));service.resetPosition();
             bool found=false;for(auto *screen:QGuiApplication::screens())found|=screen->geometry().contains(window->geometry());QVERIFY(found);
+        }
+        QCOMPARE(warnings.count(),0);
+    }
+    void popupPlacementAcrossEdges() {
+        QTemporaryDir dir;
+        DesktopPetService service(dir.path(),false);
+        QQmlApplicationEngine engine;
+        QSignalSpy warnings(&engine,&QQmlEngine::warnings);
+        engine.rootContext()->setContextProperty("petService",&service);
+        engine.load(QUrl::fromLocalFile(QStringLiteral(SCOTT_PET_QML_DIR "/DesktopPetWindow.qml")));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window=qobject_cast<QQuickWindow *>(engine.rootObjects().first());QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        if(!service.canReposition())QSKIP("Wayland compositor owns popup placement");
+        auto *menu=window->findChild<QObject *>("petContextMenu");QVERIFY(menu);
+        auto *entry=window->findChild<QQuickItem *>("petOpenChat");QVERIFY(entry);
+        const auto area=window->screen()->availableGeometry();
+        for(int size:{50,100,200}) {
+            service.setSizePercent(size);
+            const QPoint positions[]{area.topLeft(),area.topRight()-QPoint(window->width()-1,0),
+                area.bottomLeft()-QPoint(0,window->height()-1),area.bottomRight()-QPoint(window->width()-1,window->height()-1),
+                area.center()-QPoint(window->width()/2,window->height()/2)};
+            for(const auto &position:positions) {
+                window->setPosition(position);QTest::qWait(30);
+                QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,QPoint(window->width()/2,window->height()/2));
+                QTRY_VERIFY(menu->property("opened").toBool());
+                auto *content=menu->property("contentItem").value<QQuickItem *>();QVERIFY(content);
+                auto *popup=content->window();QVERIFY(popup && popup!=window);
+                QVERIFY2(area.contains(popup->geometry()),"Pet actions left the work area");
+                QVERIFY2(!popup->geometry().intersects(window->geometry()),"Pet occludes its actions at a screen edge");
+                // Exercise the real pointer path, rather than invoking triggered().
+                QSignalSpy clicks(entry,SIGNAL(triggered()));
+                const auto point=entry->mapToScene(QPointF(entry->width()/2,entry->height()/2)).toPoint();
+                QTest::mouseClick(popup,Qt::LeftButton,Qt::NoModifier,point);
+                QTRY_COMPARE(clicks.count(),1);
+                QMetaObject::invokeMethod(menu,"close");
+                auto *chat=window->findChild<QObject *>("petMiniChat");QVERIFY(chat);
+                QTRY_VERIFY(chat->property("opened").toBool());
+                QMetaObject::invokeMethod(chat,"close");QTRY_VERIFY(!chat->property("visible").toBool());
+            }
         }
         QCOMPARE(warnings.count(),0);
     }
@@ -565,7 +714,7 @@ private slots:
                 int length=0;for(const auto &line:bytes->left(split).split('\n'))if(line.toLower().startsWith("content-length:"))length=line.mid(15).trimmed().toInt();
                 if(bytes->size()<split+4+length)return;
                 requests++;int code=200;const auto path=bytes->split(' ').value(1),method=bytes->split(' ').value(0);QJsonObject response;
-                if(path=="/health")response={{"status","online"}};
+                if(path=="/health")response={{"status","online"},{"features",QJsonObject{{"request_receipts",1}}}};
                 else if(path=="/chats"&&method=="POST")response={{"success",true},{"chat",chat()}};
                 else if(path.endsWith("/messages")&&method=="POST") {
                     uploads++;body=bytes->mid(split+4,length);
@@ -586,7 +735,7 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(window));QTest::qWait(100);QCOMPARE(requests,0);
         auto *menu=window->findChild<QObject *>("petContextMenu");auto *entry=window->findChild<QObject *>("petOpenChat");
         auto *popup=window->findChild<QObject *>("petMiniChat");auto *input=window->findChild<QQuickItem *>("petChatInput");QVERIFY(menu);QVERIFY(entry);QVERIFY(popup);QVERIFY(input);
-        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,QPoint(140,120));QTRY_VERIFY(menu->property("visible").toBool());QCOMPARE(menu->property("count").toInt(),2);
+        QTest::mouseClick(window,Qt::RightButton,Qt::NoModifier,QPoint(140,120));QTRY_VERIFY(menu->property("visible").toBool());QCOMPARE(menu->property("count").toInt(),3);
         QVERIFY(QMetaObject::invokeMethod(entry,"triggered"));QMetaObject::invokeMethod(menu,"close");
         QTRY_VERIFY(popup->property("opened").toBool());QTRY_VERIFY(controller.backend()->online());QTRY_VERIFY(!controller.busy());
         QVERIFY(!controller.backend()->ownsBackend());QTRY_VERIFY(input->hasActiveFocus());
@@ -653,7 +802,9 @@ private slots:
         parent.setArguments({"--fixture-parent",dir.path(),source});parent.start();
         QVERIFY(parent.waitForStarted(3000));QVERIFY2(parent.waitForFinished(25000),qPrintable(QString::fromUtf8(parent.readAllStandardError())));
         QCOMPARE(parent.exitCode(),0);QVERIFY(QFileInfo::exists(dir.path()+"/parent-ready"));
-        const auto first=command(profile,"state");QVERIFY(first["ready"].toBool());QVERIFY(!first["pid"].toString().isEmpty());
+        const auto first=command(profile,"state");
+        QVERIFY2(first["ready"].toBool(),qPrintable(QString::fromUtf8(QJsonDocument(first).toJson(QJsonDocument::Compact))));
+        QVERIFY(!first["pid"].toString().isEmpty());
         QVERIFY(QFile::rename(source,dir.path()+"/source/old-launcher"));
         auto folders=QDir(dir.path()+"/cache").entryList(QDir::Dirs|QDir::NoDotAndDotDot);QCOMPARE(folders.size(),1);
         const auto executable=dir.path()+"/cache/"+folders.first()+"/launcher/"+cached;

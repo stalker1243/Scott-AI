@@ -152,7 +152,8 @@ def test_cli_check_with_open_cancel_pipe(tmp_path, monkeypatch,old_sdk):
     home = tmp_path/'home'
     config = engine.config_at(home)
     subprocess.run([sys.executable, '-m', 'venv', '--without-pip', str(config.python.parent.parent)], check=True)
-    modules = tmp_path/'modules'; modules.mkdir()
+    modules = config.python.parent.parent/'Lib/site-packages'
+    modules.mkdir(parents=True, exist_ok=True)
     (modules/'torch.py').write_text('class cuda:\n @staticmethod\n def is_available(): return True\n')
     if old_sdk:
         (modules/'torch.py').write_text('raise RuntimeError("An outdated SDK must not be imported before repair")\n')

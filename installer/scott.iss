@@ -105,6 +105,10 @@ Name: "autostart"; Description: "Запускать Scott при входе в W
 ; и ярлык из прошлой установки вёл бы на старую.
 Type: files; Name: "{app}\launcher\ScottAI.Avalonia.exe"
 Type: files; Name: "{app}\launcher\ScottAI.Avalonia.pdb"
+; Retired development-only cloud voice modules must not survive an overlay update.
+Type: files; Name: "{app}\backend\gpt_live.py"
+Type: files; Name: "{app}\backend\live_audio.py"
+Type: files; Name: "{app}\backend\voice_mode.py"
 
 [Files]
 Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

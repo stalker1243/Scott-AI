@@ -46,11 +46,14 @@ class BackendClient : public QObject {
     Q_PROPERTY(bool voiceInstallReady READ voiceInstallReady NOTIFY voiceInstallChanged)
     Q_PROPERTY(QVariantMap voicePreparation READ voicePreparation NOTIFY voicePreparationChanged)
     Q_PROPERTY(bool voicePreparationReady READ voicePreparationReady NOTIFY voicePreparationChanged)
+    Q_PROPERTY(double inputLevel READ inputLevel NOTIFY inputLevelChanged)
+    Q_PROPERTY(bool inputMonitoring READ inputMonitoring WRITE setInputMonitoring NOTIFY inputLevelChanged)
     Q_PROPERTY(bool listening READ listening NOTIFY listeningChanged)
     Q_PROPERTY(bool listeningAvailable READ listeningAvailable NOTIFY listeningChanged)
     Q_PROPERTY(bool listeningReady READ listeningReady NOTIFY listeningChanged)
     Q_PROPERTY(bool listeningBusy READ listeningBusy NOTIFY listeningChanged)
     Q_PROPERTY(QString listeningError READ listeningError NOTIFY listeningChanged)
+    Q_PROPERTY(QString listeningPhase READ listeningPhase NOTIFY listeningChanged)
     Q_PROPERTY(QVariantMap profile READ profile NOTIFY profileChanged)
     Q_PROPERTY(bool profileReady READ profileReady NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileBusy READ profileBusy NOTIFY profileStateChanged)
@@ -92,7 +95,7 @@ public:
     QString status() const;
     QString error() const { return m_error; }
     QVariantMap metrics() const { return m_metrics; }
-    QVariantList messages() const { return m_messages; }
+    QVariantList messages() const { auto rows = m_messages; if (!m_creatingChatPreview.isEmpty()) rows.append(m_creatingChatPreview); return rows; }
     QVariantList chats() const { return m_chats; }
     QString chatId() const { return m_chatId; }
     QString chatTitle() const { return m_chatTitle; }
@@ -115,11 +118,15 @@ public:
     bool settingsBusy() const { return m_settingsBusy; }
     QString settingsError() const { return m_settingsError; }
     QString settingsNotice() const { return m_settingsNotice; }
+    double inputLevel() const { return m_inputLevel; }
+    bool inputMonitoring() const { return m_inputMonitoring; }
+    void setInputMonitoring(bool enabled);
     bool listening() const { return m_listening; }
     bool listeningAvailable() const { return m_listeningAvailable; }
     bool listeningReady() const { return m_listeningReady; }
     bool listeningBusy() const { return m_listeningBusy; }
     QString listeningError() const { return m_listeningError; }
+    QString listeningPhase() const { return m_listeningPhase; }
     QVariantMap profile() const { return m_profile; }
     bool profileReady() const { return m_profileReady; }
     bool profileBusy() const { return m_profileBusy; }
@@ -207,12 +214,16 @@ signals:
     void chatsChanged();
     void attachmentsChanged();
     void chatSent();
+    void chatSubmitted(const QString &text);
+    void restoreChatDraft(const QString &text);
+    void chatRecovered(const QString &text);
     void memoriesChanged();
     void memoryStateChanged();
     void memoryAdded();
     void settingsChanged();
     void settingsStateChanged();
     void listeningChanged();
+    void inputLevelChanged();
     void listeningFailed(const QString &message);
     void profileChanged();
     void profileStateChanged();
@@ -238,7 +249,11 @@ private:
     void loadMemories();
     bool beginMemoryOperation();
     void append(const QString &role, const QString &text);
+    void launchBackend(bool manual);
+    void scheduleBackendRecovery();
+    void invalidateVoiceState();
     bool acceptChat(const QJsonObject &chat);
+    void reconcileChatRequest();
     QString unsupportedChatFeature(const QString &feature) const;
     void chatMutation(const QString &path, const QJsonObject *body, bool remove = false, bool patch = false);
     bool beginProtocolOperation();
@@ -246,7 +261,10 @@ private:
     void acceptProtocolJob(const QJsonObject &job);
     QUrl m_base;
     QNetworkAccessManager m_network;
-    QTimer m_poll;
+    QTimer m_poll, m_inputPoll;
+    bool m_inputMonitoring = false, m_inputPending = false;
+    double m_inputLevel = 0;
+    void refreshInputLevel();
     QTimer m_browserPoll;
     QVariantMap m_browserState;
     bool m_browserReady = false, m_browserFetching = false, m_browserPending = false;
@@ -261,17 +279,26 @@ private:
     quint64 m_voicePreparationRevision = 0;
     bool acceptVoicePreparation(const QJsonObject &data);
     QProcess m_process;
+    QTimer m_restartTimer, m_startDeadline, m_stableTimer;
+    bool m_shouldRun = false, m_lifecycleError = false;
+    int m_restartCount = 0;
+    quint64 m_launchGeneration = 0;
     QByteArray m_outputLog, m_errorLog;
     QString m_directory, m_python, m_error;
     bool m_online = false, m_busy = false, m_starting = false, m_refreshing = false;
     QVariantMap m_metrics;
     QVariantList m_messages;
+    QVariantMap m_creatingChatPreview;
     QVariantList m_chats, m_attachments;
     QVariantMap m_chatCapabilities;
     QString m_chatId, m_chatTitle, m_chatNotice;
     bool m_chatsBusy = false, m_chatsReady = false;
     quint64 m_chatCapabilitiesGeneration = 0;
     QPointer<QNetworkReply> m_chatReply;
+    QString m_requestId, m_requestChat, m_requestQuestion;
+    QByteArray m_requestBody;
+    bool m_receiptsSupported = false, m_reconciling = false;
+    int m_recoveryChecks = 0;
     QVariantList m_memories, m_memoryKinds;
     bool m_memoryBusy = false;
     bool m_autoMemoryEnabled = true, m_memorySettingsAvailable = false;
@@ -283,6 +310,7 @@ private:
     QString m_settingsError, m_settingsNotice;
     bool m_listening = false, m_listeningAvailable = false, m_listeningReady = false, m_listeningBusy = false;
     QString m_listeningError;
+    QString m_listeningPhase = "idle";
     QVariantMap m_profile;
     bool m_profileReady = false, m_profileBusy = false;
     QString m_profileError, m_profileNotice;

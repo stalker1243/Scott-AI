@@ -48,8 +48,11 @@ def verify(folder, build_directory=None):
     for source in (ROOT/'installer/licenses').rglob('*'):
         if source.is_file():
             assert sha(folder/'licenses'/source.relative_to(ROOT/'installer/licenses'))==sha(source)
-    for name in ('installation.md', 'interface.md', 'security.md', 'performance.md', 'models.md', 'commands.md', 'desktop-control.md', 'browser-control.md', 'chat.md', 'companions.md', 'logs.md', 'voice-check.md', 'voice.md', 'linux.md'):
+    for name in ('guide.md', 'installation.md', 'interface.md', 'security.md', 'performance.md', 'models.md', 'commands.md', 'desktop-control.md', 'browser-control.md', 'chat.md', 'companions.md', 'logs.md', 'voice-check.md', 'voice.md', 'linux.md', 'memory.md', 'protocols.md', 'recognition.md', 'reliability.md', 'release-notes-next.md'):
         assert sha(folder/'docs'/name)==sha(ROOT/'docs'/name)
+    notes = ROOT/'docs'/f"release-notes-{version['version']}.md"
+    assert sha(folder/'RELEASE-NOTES.md') == sha(notes)
+    assert sha(folder/'docs'/notes.name) == sha(notes)
     assert sha(folder/'launcher/ScottAIQt.exe')==sha(build/'ScottAIQt.exe')
     assert sha(folder/'launcher/ScottAIUpdater.exe')==sha(build/'ScottAIUpdater.exe')
     expected_version = [int(value) for value in version['version'].split('.')] + [int(version['build_number'])]

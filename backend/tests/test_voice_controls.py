@@ -25,9 +25,9 @@ def isolated_audio(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('text,action,value', [
-    ('Скотт, пожалуйста, выбери голос Дмитрия', 'select', 'ru-RU-DmitryNeural'),
-    ('смени голос на Айдара', 'select', 'aidar'),
-    ('выбери голос Евгения', 'select', 'eugene'),
+    ('Скотт, пожалуйста, выбери голос Scott Voice', 'select', 'scott-voice'),
+    ('смени голос на Скотт Войс', 'select', 'scott-voice'),
+    ('выбери голос Скоттвойс', 'select', 'scott-voice'),
     ('выключи озвучку!', 'quiet', True),
     ('включи озвучку', 'quiet', False),
     ('громкость голоса 50 процентов', 'volume', 50),
@@ -43,7 +43,7 @@ def isolated_audio(tmp_path, monkeypatch):
     ('измени характеры голоса на четкий', 'character', 'clear'),
     ('выбери стиль голоса спокойный', 'character', 'calm'),
     ('смени характер голоса на мягкий', 'character', 'calm'),
-    ('выбери голос Пайдара', 'select', 'aidar'),
+    ('выбери голос Пайдара', 'select', 'пайдара'),
 ])
 def test_voice_command_routing(text, action, value):
     decision = understanding.understand(text, intent_engine=get_fast_intent_engine(),
@@ -59,12 +59,14 @@ def test_voice_parser_does_not_capture_unrelated_commands(text):
     assert voice_commands.parse(text) is None
 
 
-def test_voice_selection_survives_reload():
-    assert scott_voice.set_current_voice('ru-RU-DmitryNeural')
-    assert voice_config.get_voice('aidar', scott_voice.AVAILABLE_VOICES) == 'ru-RU-DmitryNeural'
-    assert scott_voice.get_current_voice() == 'ru-RU-DmitryNeural'
+def test_voice_selection_survives_reload(monkeypatch):
+    monkeypatch.setattr(scott_voice.scott_voice_engine, 'get_engine', lambda: SimpleNamespace(
+        describe=lambda: {'available':True}, set_acceleration=lambda value: None))
+    assert scott_voice.set_current_voice('scott-voice')
+    assert voice_config.get_voice('scott-voice', scott_voice.AVAILABLE_VOICES) == 'scott-voice'
+    assert scott_voice.get_current_voice() == 'scott-voice'
     assert not scott_voice.set_current_voice('unknown')
-    assert scott_voice.get_current_voice() == 'ru-RU-DmitryNeural'
+    assert scott_voice.get_current_voice() == 'scott-voice'
 
 
 @pytest.mark.parametrize('content', ['{broken', '[]', '{"voice":"unknown"}', '{"voice":null}'])
@@ -77,8 +79,8 @@ def test_voice_actions_save_without_changing_system_volume(monkeypatch):
     import audio_endpoints
     stopped = []
     monkeypatch.setattr(audio_endpoints, '_stop_current_speech', lambda: stopped.append(True))
-    assert 'сохранён' in voice_commands.execute('select', 'eugene')
-    assert scott_voice.get_current_voice() == 'eugene'
+    assert '❌' in voice_commands.execute('select', 'eugene')
+    assert scott_voice.get_current_voice() == 'scott-voice'
     voice_commands.execute('volume', 50)
     voice_commands.execute('volume_delta', -10)
     assert audio_settings.get_settings()['volume'] == 40
@@ -87,8 +89,8 @@ def test_voice_actions_save_without_changing_system_volume(monkeypatch):
     assert audio_settings.is_quiet() and stopped == [True]
     voice_commands.execute('quiet', False)
     assert not audio_settings.is_quiet()
-    voice_commands.execute('character', 'clear')
-    assert audio_settings.get_character() == 'clear'
+    assert '❌' in voice_commands.execute('character', 'clear')
+    assert audio_settings.get_character() == 'natural'
 
 
 def test_repeated_action_ignores_cached_acknowledgement(main_module, monkeypatch):
@@ -112,7 +114,8 @@ def test_main_executes_voice_settings(main_module, monkeypatch):
         search_memory=lambda _: {}, add_conversation=lambda *args: None))
     result = asyncio.run(main.scott_ai.process_command('выбери голос Евгения'))
     assert result['type'] == 'command'
-    assert scott_voice.get_current_voice() == 'eugene'
+    assert scott_voice.get_current_voice() == 'scott-voice'
+    assert '❌' in result['response']
 
 
 @pytest.mark.parametrize('body', [{'quiet': 'false'}, {'volume': 101}, {'volume': True},
@@ -131,23 +134,26 @@ def test_voice_api_catalog_and_saved_selection(main_module):
     async def check():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main_module.app), base_url='http://localhost') as client:
             catalog = (await client.get('/voice/available')).json()
-            assert len([v for v in catalog['voices'] if v['engine'] == 'silero']) == 2
+            assert len(catalog['voices']) == 1
             optional = next(v for v in catalog['voices'] if v['id'] == 'scott-voice')
             assert optional['local'] and optional['engine'] == 'qwen' and not optional['available']
             assert all(v['gender'] == 'male' for v in catalog['voices'])
             assert (await client.post('/voice/select', json={'voice': 123})).status_code == 400
             response = await client.post('/voice/select', json={'voice': 'ru-RU-DmitryNeural'})
-            assert response.json()['success']
-            assert (await client.get('/voice/available')).json()['current'] == 'ru-RU-DmitryNeural'
+            assert response.status_code == 400
+            assert (await client.get('/voice/available')).json()['current'] == 'scott-voice'
     asyncio.run(check())
 
 
 def test_failed_voice_save_preserves_previous_choice(main_module, monkeypatch):
-    scott_voice.set_current_voice('eugene')
+    voice_config.CONFIG_PATH.write_text('{"voice":"aidar","scott_profile":"restrained"}', encoding='utf-8')
+    monkeypatch.setattr(scott_voice.scott_voice_engine, 'get_engine', lambda: SimpleNamespace(
+        describe=lambda: {'available':True}, set_acceleration=lambda value: None))
     monkeypatch.setattr(voice_config, 'atomic_write_text', lambda *args: (_ for _ in ()).throw(OSError('disk')))
-    response = asyncio.run(main_module.select_voice({'voice': 'aidar'}))
+    response = asyncio.run(main_module.select_voice({'voice': 'scott-voice', 'profile':'digital'}))
     assert response.status_code == 503
-    assert scott_voice.get_current_voice() == 'eugene'
+    assert scott_voice.get_current_voice() == 'scott-voice'
+    assert voice_config.get_scott_profile() == 'restrained'
 
 
 def test_playback_error_is_reported_to_waiter(monkeypatch):

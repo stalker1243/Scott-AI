@@ -4,6 +4,10 @@ import copy
 import threading
 import time
 import uuid
+try:
+    from .performance_trace import current as performance_current
+except ImportError:
+    from performance_trace import current as performance_current
 from contextlib import contextmanager
 try:
     from .timing import record
@@ -16,15 +20,18 @@ class RequestCancelled(RuntimeError):
     pass
 
 class Flow:
-    def __init__(self, emit=None, cancelled=None, timeout=110, kind='chat', valid=None):
+    def __init__(self, emit=None, cancelled=None, timeout=110, kind='chat', valid=None, ready=None):
         self.callback = emit
+        self.ready_callback = ready
         self.cancelled = cancelled if cancelled is not None else threading.Event()
-        self.started = time.perf_counter()
+        trace = performance_current()
+        trace = trace if trace is not None and trace.kind == kind else None
+        self.started = trace.started if trace is not None else time.perf_counter()
         self.deadline = time.monotonic() + timeout
         self.kind = kind
         self.valid = valid
         self._first = False
-        self.id = uuid.uuid4().hex[:12]
+        self.id = trace.id if trace is not None else uuid.uuid4().hex[:12]
         self._marks = set()
         self._mark_lock = threading.Lock()
 
@@ -33,7 +40,7 @@ class Flow:
             if name in self._marks:
                 return
             self._marks.add(name)
-        record(self.kind + '.' + name, time.perf_counter() - self.started, meta={'request_id':self.id})
+        record(self.kind + '.' + name, time.perf_counter() - self.started, meta={'request_id':self.id,'metric':'milestone'})
 
     def check(self):
         if self.cancelled.is_set() or time.monotonic() >= self.deadline or (self.valid is not None and not self.valid()):
@@ -53,6 +60,16 @@ class Flow:
     @property
     def emitted(self):
         return self._first
+
+    def ready_response(self, result):
+        """Offer a completed reply before optional archiving; never executes it."""
+        self.check()
+        if self.ready_callback is None:
+            return False
+        self.ready_callback(result)
+        self.mark('first_text')
+        self._first = True
+        return True
 
 def current():
     return _current.get()
